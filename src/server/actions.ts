@@ -51,7 +51,7 @@ const ACTION_ROUTES: ActionRoute[] = [
     operationId: "goal_intake",
     summary: "Start a broad local coding goal",
     description:
-      "Call this immediately for /goal, deep research, vague large implementation, or 'proceed quickly' prompts. This uses the local chatgpt2codex bridge, not OpenAI Codex quota. It returns within seconds with the next tool calls so ChatGPT does not spend ~30 seconds thinking and then stop. If this action is unavailable, stop and say no local coding occurred.",
+      "Start a broad local coding goal and return the next concrete chatgpt2codex actions. Use for implementation, debugging, review, research, or planning. If unavailable, do not claim local work occurred.",
     schema: "GoalIntakeInput",
   },
   {
@@ -60,7 +60,7 @@ const ACTION_ROUTES: ActionRoute[] = [
     operationId: "goal_loop",
     summary: "Run or continue a local coding loop",
     description:
-      "Use this for Codex-style autonomous work through ChatGPT Actions when Codex quota is unavailable. It keeps the loop state local, returns the next concrete action batch quickly, and tells ChatGPT to call it again after each inspect/edit/verify batch until done or blocked.",
+      "Continue a local coding loop. Returns the next inspect, edit, or verify action batch and keeps loop state locally until the task is done or blocked.",
     schema: "GoalLoopInput",
   },
   {
@@ -575,7 +575,7 @@ function openApiSpec(publicOrigin: string): Record<string, unknown> {
         operationId: "call_tool",
         summary: "Call any chatgpt2codex MCP tool",
         description:
-          "Owner-authenticated fallback bridge for Custom GPTs. Use this when a dedicated action route is missing. Remote safety gates still apply: project selection defaults to read-only, arbitrary commands are blocked, and full-write requires local CHATGPT2CODEX_REMOTE_WRITE=1 opt-in. The response toolCall object is the required proof that the local tool was actually callable.",
+          "Owner-authenticated fallback for Custom GPTs when no dedicated route exists. Remote safety gates still apply: read-only by default, arbitrary commands blocked, and full-write requires local opt-in.",
         security: [{ ownerBearer: [] }],
         requestBody: {
           required: true,
