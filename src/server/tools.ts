@@ -47,6 +47,7 @@ import { isSecretPath, redact } from "../policy/secrets.js";
 import { resolveActiveProject } from "../workspace/active.js";
 import { CONTROL_TOOL_NAMES, isControlChatGptExposed, isControlEnabled } from "../control/policy.js";
 import { clearKill } from "../control/queue.js";
+import { assertArbitraryCommandLocalOnly, REMOTE_ARBITRARY_COMMAND_TOOL_NAMES } from "./remote-safety.js";
 import {
   handleComputerActionStatus,
   handleComputerKillSwitch,
@@ -233,7 +234,7 @@ function schemaToJsonSchema(schema: unknown, pipeStrategy: "input" | "output"): 
     : { ...EMPTY_OBJECT_JSON_SCHEMA };
 }
 
-function installChatGptToolListHandler(s: McpServer): void {
+function installChatGptToolListHandler(s: McpServer, ctx: ToolContext): void {
   const registeredTools = (s as unknown as { _registeredTools: Record<string, RegisteredToolLike> })._registeredTools;
   s.server.setRequestHandler(ListToolsRequestSchema, () => {
     // Re-read at request time (not server-construction time) so tests/ops
@@ -245,6 +246,7 @@ function installChatGptToolListHandler(s: McpServer): void {
           ([name, tool]) =>
             tool.enabled !== false &&
             !CHATGPT_SAFETY_HIDDEN_TOOL_NAMES.has(name) &&
+            !(ctx.remote && REMOTE_ARBITRARY_COMMAND_TOOL_NAMES.has(name)) &&
             (exposeControl || !CONTROL_TOOL_NAMES.has(name)),
         )
         .map(([name, tool]) => {
@@ -836,8 +838,12 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
             toolSurfaceMap: {
               discover: ["workspace_list_projects", "workspace_refresh_index", "workspace_get_project", "project_select"],
               inspect: ["project_rules", "project_status", "repo_status", "repo_diff_summary", "code_search", "file_read_slice"],
-              modify: ["file_apply_patch", "file_create", "local_shell_run"],
-              verify: ["command_list", "local_shell_run", "e2e_test_and_show_screenshot", "e2e_start_server", "e2e_run_command", "e2e_screenshot"],
+              modify: ctx.remote
+                ? ["file_apply_patch", "file_create"]
+                : ["file_apply_patch", "file_create", "local_shell_run"],
+              verify: ctx.remote
+                ? ["command_list", "command_run", "e2e_test_and_show_screenshot", "e2e_screenshot"]
+                : ["command_list", "command_run", "local_shell_run", "e2e_test_and_show_screenshot", "e2e_start_server", "e2e_run_command", "e2e_screenshot"],
               release: ["git_diff_summary", "git_commit", "git_push", "checkpoint_list"],
               media: ["gpt_image_2_workflow", "save_chatgpt_image_from_url", "save_image_from_url", "save_image_from_clipboard", "save_image_from_download", "save_image_from_path"],
             },
@@ -866,20 +872,26 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
               "Avoid broad context-pack calls in ChatGPT; OpenAI safety can block them before they reach chatgpt2codex.",
               "file_read_slice before editing existing files",
               "file_apply_patch/file_create for controlled edits",
-              "local_shell_run for Codex-style local commands inside the selected project",
+              ctx.remote
+                ? "Use command_list/command_run for allowlisted project verification; arbitrary shell is disabled for remote sessions."
+                : "local_shell_run for Codex-style local commands inside the selected project",
               "If the user says 'e2e 테스트하고 스크린샷 보여줘' or asks for E2E proof in one sentence, call e2e_test_and_show_screenshot immediately. It uses the active project; ChatGPT renders the captured screenshots inline through the E2E screenshot widget, and the Actions response returns inline image markdown.",
-              "For UI/E2E proof: use e2e_start_server, then e2e_run_command for test commands; it captures a screenshot by default. Use e2e_open_target/e2e_open_url_screenshot/e2e_screenshot for manual visual proof. Return the screenshot path/markdown to the user.",
+              ctx.remote
+                ? "For remote UI/E2E proof: use e2e_test_and_show_screenshot or the guarded screenshot tools. Caller-supplied E2E command/server strings are disabled."
+                : "For UI/E2E proof: use e2e_start_server, then e2e_run_command for test commands; it captures a screenshot by default. Use e2e_open_target/e2e_open_url_screenshot/e2e_screenshot for manual visual proof. Return the screenshot path/markdown to the user.",
               "repo_status/repo_diff_summary, then git_commit and git_push when explicitly requested",
               "For GPT Image 2 requests: generate with ChatGPT's native image surface, then import the finished image with save_chatgpt_image, save_chatgpt_image_from_url, save_image_from_url, clipboard, download, or path.",
               "For device-agnostic/mobile ChatGPT images: use the ChatGPT Share/Copy Link/content URL and call save_chatgpt_image, save_chatgpt_image_from_url, or save_image_from_url.",
-              "For Custom GPTs with native Image Generation enabled: install /actions/openapi.json as a GPT Action. That Actions bridge exposes source editing too: use project_select (preset defaults to full-write), code_search/file_read_slice, file_apply_patch/file_create, local_shell_run, repo/git actions. Do not return copy/paste scripts when these actions are available.",
+              "For Custom GPTs with native Image Generation enabled: install /actions/openapi.json as a GPT Action. That Actions bridge exposes project-confined source editing and allowlisted command execution; arbitrary shell and caller-supplied E2E command strings are disabled remotely.",
               "ChatGPT Actions run in ChatGPT's sandbox and cannot write /Users/... directly. All local file writes must go through chatgpt2codex Actions or the MCP connector.",
               "Automatic visible-image capture is intentionally not part of this build.",
             ],
             capabilities: {
               workspaceRoot: ctx.workspaceRoot,
               fileEdits: "project-confined patch/create with secret-path blocking",
-              shell: "project-confined local shell with redacted output and secret/OS-destructive guards",
+              shell: ctx.remote
+                ? "remote arbitrary shell disabled; use discovered allowlisted command_run"
+                : "project-confined local shell with redacted output and secret/OS-destructive guards",
               e2e:
                 "one-shot E2E test-and-show, start local dev servers, run guarded E2E commands, open URLs/apps, and capture macOS screenshots into .chatgpt2codex/e2e/screenshots for inline/user-visible proof",
               git: "status, diff summary, commit, push",
@@ -903,7 +915,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
                 "Call project_select with preset=full-write, or omit preset because the GPT Actions bridge defaults to full-write.",
                 "Use code_search first, then narrow file_read_slice calls to inspect the repo. Avoid broad context-pack calls in ChatGPT because OpenAI safety may block them before they reach chatgpt2codex.",
                 "Apply changes directly with file_apply_patch or file_create. Never hand the user a script to paste when the action bridge is reachable.",
-                "Use command_run or local_shell_run for verification; network/destructive shell intents remain approval-gated by the tool.",
+                "Use command_run for allowlisted verification. Arbitrary shell and caller-supplied E2E command strings are disabled through remote Actions.",
                 "Use repo status/diff/show changes and then commit/push only when requested.",
               ],
               imageSaveFlow: [
@@ -913,7 +925,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
                 "Never claim the image was saved until the chatgpt2codex action result returns a saved path.",
               ],
               customGptActionScope: [
-                "Actions surface: agent guide, project selection, workspace/project status, code search, narrow file read/apply/create, guarded command/local shell, repo diff/status, checkpoints, git commit/push, image import/list.",
+                "Actions surface: agent guide, project selection, workspace/project status, code search, narrow file read/apply/create, allowlisted command execution, one-shot E2E proof, repo diff/status, checkpoints, git commit/push, image import/list.",
                 "Generic fallback: call_tool can call any registered chatgpt2codex MCP tool by name when a dedicated action route is missing.",
               ],
             },
@@ -1771,6 +1783,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
     },
     async (input) => {
       return withErrorMapping(ctx, "local_shell_run", input, async () => {
+        assertArbitraryCommandLocalOnly(ctx, "local_shell_run");
         await requireProjectLease(ctx, input.projectId, input.intent?.writesWorkspace ? "write" : "verify");
         if (input.intent?.needsNetwork || input.intent?.destructive) {
           throw new DomainError(ErrorCode.APPROVAL_REQUIRED, "This local shell request requires explicit approval");
@@ -1830,6 +1843,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
     },
     async (input) => {
       return withErrorMapping(ctx, "e2e_start_server", { ...input, command: redact(input.command) }, async () => {
+        assertArbitraryCommandLocalOnly(ctx, "e2e_start_server");
         await requireProjectLease(ctx, input.projectId, input.intent?.writesWorkspace ? "write" : "verify");
         if (input.intent?.needsNetwork || input.intent?.destructive) {
           throw new DomainError(ErrorCode.APPROVAL_REQUIRED, "This E2E server request requires explicit approval");
@@ -1944,6 +1958,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
     },
     async (input) => {
       return withErrorMapping(ctx, "e2e_run_command", { ...input, command: redact(input.command) }, async () => {
+        assertArbitraryCommandLocalOnly(ctx, "e2e_run_command");
         await requireProjectLease(ctx, input.projectId, input.intent?.writesWorkspace ? "write" : "verify");
         if (input.intent?.needsNetwork || input.intent?.destructive) {
           throw new DomainError(ErrorCode.APPROVAL_REQUIRED, "This E2E command request requires explicit approval");
@@ -3070,7 +3085,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
     );
   }
 
-  installChatGptToolListHandler(s);
+  installChatGptToolListHandler(s, ctx);
 }
 
 async function pathExists(p: string): Promise<boolean> {

@@ -4,6 +4,7 @@ import { verifyOwnerToken } from "../auth/owner-token.js";
 import type { ToolContext } from "../types.js";
 import { createE2eScreenshotShare, readE2eScreenshotShare } from "../e2e/screenshot-share.js";
 import { CONTROL_TOOL_NAMES, isControlChatGptExposed } from "../control/policy.js";
+import { REMOTE_ARBITRARY_COMMAND_TOOL_NAMES } from "./remote-safety.js";
 import { createServer as createMcpServer } from "./mcp-server.js";
 import { TOOL_AVAILABILITY_GATE, toolCallProof } from "./tool-proof.js";
 import { normalizeObjectSchema, safeParseAsync, getParseErrorMessage } from "@modelcontextprotocol/sdk/server/zod-compat.js";
@@ -326,10 +327,7 @@ const OPENAPI_ACTION_TOOL_NAMES = new Set([
   "file_apply_patch",
   "file_create",
   "command_run",
-  "local_shell_run",
-  "e2e_start_server",
   "e2e_open_target",
-  "e2e_run_command",
   "e2e_test_and_show_screenshot",
   "e2e_screenshot",
   "e2e_open_url_screenshot",
@@ -402,6 +400,20 @@ async function callRegisteredTool(
   toolName: string,
   input: Record<string, unknown>,
 ): Promise<CallToolResultLike> {
+  if (REMOTE_ARBITRARY_COMMAND_TOOL_NAMES.has(toolName)) {
+    const message = `Tool ${toolName} is disabled through the remote chatgpt2codex action bridge.`;
+    await ctx.ledger.append({
+      type: "remote.arbitrary_command.rejected",
+      tool: toolName,
+      remote: true,
+    }).catch(() => undefined);
+    return {
+      isError: true,
+      structuredContent: { code: "ARBITRARY_SHELL_DENIED", error: message },
+      content: [{ type: "text", text: message }],
+    };
+  }
+
   // Desktop-control tools are blocked on the generic action bridge (even for
   // the owner-bearer /actions/call-tool route, even if isControlEnabled() is
   // on) unless the owner has separately opted in to exposing them to ChatGPT
@@ -435,7 +447,7 @@ async function callRegisteredTool(
       content: [{ type: "text", text: message }],
     };
   }
-  const server = await createMcpServer(ctx);
+  const server = await createMcpServer({ ...ctx, remote: true });
   const tools = (server as unknown as { _registeredTools?: Record<string, RegisteredToolLike> })._registeredTools;
   const registered = tools?.[toolName];
   const handler = registered?.handler;
@@ -603,7 +615,7 @@ function openApiSpec(publicOrigin: string): Record<string, unknown> {
       title: "chatgpt2codex Custom GPT Actions",
       version: "0.1.6",
       description:
-        "OpenAPI bridge for Custom GPTs. This does not call OpenAI Codex or spend Codex quota; ChatGPT drives local coding actions through chatgpt2codex. Hard gate: do not claim local project inspection, edits, tests, commits, or image saves unless a current-turn ActionToolResponse includes ok=true and toolCall.namespace=ChatGPT_To_Codex. If the active ChatGPT app was Image Generation/ImageGen, image_gen, python_user_visible, or a text-only answer, no chatgpt2codex local work happened; reselect/reconnect ChatGPT To Codex or refresh this Action schema. For /goal or broad implementation prompts, call goal_intake or goal_loop immediately before long reasoning. This compact schema stays under 30 operations including action_health and call_tool, and exposes exact tool names such as workspace_list_projects, project_select, code_search, file_read_slice, file_apply_patch, file_create, local_shell_run, and e2e_test_and_show_screenshot for source editing and E2E proof. It avoids broad context-pack actions that ChatGPT safety may block; inspect with code_search followed by narrow file_read_slice calls instead. It also exposes E2E server/app launch plus screenshot capture. Hidden tools remain reachable through call_tool. ChatGPT's sandbox cannot write /Users/... directly; use these actions. For generated images, use a Share/Copy Link/content URL, copied image, download, or local path with save_chatgpt_image/save_chatgpt_image_from_url.",
+        "OpenAPI bridge for Custom GPTs. This does not call OpenAI Codex or spend Codex quota; ChatGPT drives local coding actions through chatgpt2codex. Hard gate: do not claim local project inspection, edits, tests, commits, or image saves unless a current-turn ActionToolResponse includes ok=true and toolCall.namespace=ChatGPT_To_Codex. If the active ChatGPT app was Image Generation/ImageGen, image_gen, python_user_visible, or a text-only answer, no chatgpt2codex local work happened; reselect/reconnect ChatGPT To Codex or refresh this Action schema. For /goal or broad implementation prompts, call goal_intake or goal_loop immediately before long reasoning. This compact schema stays under 30 operations including action_health and call_tool, and exposes exact tool names such as workspace_list_projects, project_select, code_search, file_read_slice, file_apply_patch, file_create, command_run, and e2e_test_and_show_screenshot for source editing and E2E proof. It avoids broad context-pack actions that ChatGPT safety may block; inspect with code_search followed by narrow file_read_slice calls instead. It exposes allowlisted command execution and one-shot E2E/screenshot proof. Arbitrary-command tools remain blocked through both dedicated routes and call_tool. ChatGPT's sandbox cannot write /Users/... directly; use these actions. For generated images, use a Share/Copy Link/content URL, copied image, download, or local path with save_chatgpt_image/save_chatgpt_image_from_url.",
       "x-chatgpt2codex-tool-proof": TOOL_AVAILABILITY_GATE,
       "x-chatgpt2codex-openapi-operation-count": Object.keys(paths).length,
       "x-chatgpt2codex-tool-names": openApiActionRoutes().map((route) => route.tool),
@@ -629,7 +641,7 @@ function openApiSpec(publicOrigin: string): Record<string, unknown> {
             toolName: {
               type: "string",
               description:
-                "Registered chatgpt2codex MCP tool name, e.g. file_apply_patch, file_create, local_shell_run, repo_status, git_commit, git_push.",
+                "Registered chatgpt2codex MCP tool name, e.g. file_apply_patch, file_create, command_run, repo_status, git_commit, git_push. Remote arbitrary-command tools are denied.",
             },
             input: {
               type: "object",
