@@ -191,6 +191,8 @@ describe("Custom GPT action bridge", () => {
       stop = undefined;
     }
     delete process.env.CHATGPT2CODEX_REMOTE_WRITE;
+    delete process.env.CHATGPT2CODEX_REMOTE_EXEC;
+    delete process.env.CHATGPT2CODEX_REMOTE_E2E;
     await fs.rm(stateDir, { recursive: true, force: true });
     await fs.rm(projectRoot, { recursive: true, force: true });
   });
@@ -241,7 +243,11 @@ describe("Custom GPT action bridge", () => {
     expect(body.info["x-chatgpt2codex-tool-proof"]?.namespace).toBe("ChatGPT_To_Codex");
     expect(body.info["x-chatgpt2codex-openapi-operation-count"]).toBeLessThanOrEqual(30);
     expect(body.info["x-chatgpt2codex-tool-names"]).toContain("workspace_list_projects");
-    expect(body.info["x-chatgpt2codex-tool-names"]).toContain("e2e_test_and_show_screenshot");
+    expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("command_run");
+    expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("e2e_open_target");
+    expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("e2e_test_and_show_screenshot");
+    expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("e2e_screenshot");
+    expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("e2e_open_url_screenshot");
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("code_context_pack");
     expect(body.info.description).toContain("toolCall.namespace=ChatGPT_To_Codex");
     expect(body.servers[0]?.url).toBe(server.baseUrl);
@@ -255,12 +261,11 @@ describe("Custom GPT action bridge", () => {
     expect(body.paths["/actions/goal-loop"]).toBeDefined();
     expect(body.paths["/actions/e2e-start-server"]).toBeUndefined();
     expect(body.paths["/actions/e2e-run-command"]).toBeUndefined();
-    expect(body.paths["/actions/e2e-test-and-show-screenshot"]).toBeDefined();
-    expect((body.paths["/actions/e2e-test-and-show-screenshot"] as { post: { operationId: string } }).post.operationId).toBe(
-      "e2e_test_and_show_screenshot",
-    );
-    expect(body.paths["/actions/e2e-screenshot"]).toBeDefined();
-    expect(body.paths["/actions/e2e-open-url-screenshot"]).toBeDefined();
+    expect(body.paths["/actions/command-run"]).toBeUndefined();
+    expect(body.paths["/actions/e2e-open-target"]).toBeUndefined();
+    expect(body.paths["/actions/e2e-test-and-show-screenshot"]).toBeUndefined();
+    expect(body.paths["/actions/e2e-screenshot"]).toBeUndefined();
+    expect(body.paths["/actions/e2e-open-url-screenshot"]).toBeUndefined();
     expect(body.paths["/actions/code-context-pack"]).toBeUndefined();
     expect(body.info.description).toContain("goal_intake");
     expect(body.info.description).toContain("goal_loop");
@@ -301,6 +306,23 @@ describe("Custom GPT action bridge", () => {
     );
   });
 
+  it("advertises remote execution and E2E actions only after local operator opt-in", async () => {
+    process.env.CHATGPT2CODEX_REMOTE_EXEC = "1";
+    process.env.CHATGPT2CODEX_REMOTE_E2E = "1";
+
+    const server = await startApp(makeCtx(stateDir, projectRoot));
+    stop = server.stop;
+
+    const res = await fetch(`${server.baseUrl}/actions/openapi.json`);
+    const body = (await res.json()) as { paths: Record<string, unknown> };
+
+    expect(body.paths["/actions/command-run"]).toBeDefined();
+    expect(body.paths["/actions/e2e-open-target"]).toBeDefined();
+    expect(body.paths["/actions/e2e-test-and-show-screenshot"]).toBeDefined();
+    expect(body.paths["/actions/e2e-screenshot"]).toBeDefined();
+    expect(body.paths["/actions/e2e-open-url-screenshot"]).toBeDefined();
+  });
+
   it("exposes the tool-call gate on action health", async () => {
     const server = await startApp(makeCtx(stateDir, projectRoot));
     stop = server.stop;
@@ -324,9 +346,13 @@ describe("Custom GPT action bridge", () => {
     expect(body.openApiToolNames).toContain("project_select");
     expect(body.openApiToolNames).toContain("file_apply_patch");
     expect(body.openApiToolNames).not.toContain("local_shell_run");
+    expect(body.openApiToolNames).not.toContain("command_run");
     expect(body.openApiToolNames).not.toContain("e2e_start_server");
     expect(body.openApiToolNames).not.toContain("e2e_run_command");
-    expect(body.openApiToolNames).toContain("e2e_test_and_show_screenshot");
+    expect(body.openApiToolNames).not.toContain("e2e_open_target");
+    expect(body.openApiToolNames).not.toContain("e2e_test_and_show_screenshot");
+    expect(body.openApiToolNames).not.toContain("e2e_screenshot");
+    expect(body.openApiToolNames).not.toContain("e2e_open_url_screenshot");
     expect(body.openApiToolNames).not.toContain("code_context_pack");
     expect(body.toolAvailabilityGate?.namespace).toBe("ChatGPT_To_Codex");
     expect(body.toolAvailabilityGate?.noResultMeans).toContain("No local project work happened");
@@ -691,11 +717,11 @@ describe("Custom GPT action bridge", () => {
     expect(guide.structuredContent.workflow?.join(" ")).toContain("goal_intake immediately");
     expect(guide.structuredContent.workflow?.join(" ")).toContain("goal_loop");
     expect(guide.structuredContent.workflow?.join(" ")).toContain("Avoid broad context-pack calls");
-    expect(guide.structuredContent.workflow?.join(" ")).toContain("e2e_test_and_show_screenshot");
+    expect(guide.structuredContent.workflow?.join(" ")).toContain("Remote project execution is disabled");
+    expect(guide.structuredContent.workflow?.join(" ")).toContain("Remote one-shot E2E is disabled");
     expect(guide.structuredContent.workflow?.join(" ")).not.toContain("e2e_start_server");
     expect(guide.structuredContent.workflow?.join(" ")).not.toContain("e2e_run_command");
     expect(guide.structuredContent.workflow?.join(" ")).not.toContain("local_shell_run");
-    expect(guide.structuredContent.workflow?.join(" ")).toContain("arbitrary shell is disabled for remote sessions");
     expect(guide.structuredContent.workflow?.join(" ")).toContain("Automatic visible-image capture");
 
     const selectRes = await postAction(server.baseUrl, "/actions/project-select", {

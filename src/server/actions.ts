@@ -4,7 +4,13 @@ import { verifyOwnerToken } from "../auth/owner-token.js";
 import type { ToolContext } from "../types.js";
 import { createE2eScreenshotShare, readE2eScreenshotShare } from "../e2e/screenshot-share.js";
 import { CONTROL_TOOL_NAMES, isControlChatGptExposed } from "../control/policy.js";
-import { REMOTE_ARBITRARY_COMMAND_TOOL_NAMES } from "./remote-safety.js";
+import {
+  isRemoteE2eEnabled,
+  isRemoteExecEnabled,
+  REMOTE_ARBITRARY_COMMAND_TOOL_NAMES,
+  REMOTE_E2E_TOOL_NAMES,
+  REMOTE_EXECUTION_TOOL_NAMES,
+} from "./remote-safety.js";
 import { createServer as createMcpServer } from "./mcp-server.js";
 import { TOOL_AVAILABILITY_GATE, toolCallProof } from "./tool-proof.js";
 import { normalizeObjectSchema, safeParseAsync, getParseErrorMessage } from "@modelcontextprotocol/sdk/server/zod-compat.js";
@@ -342,7 +348,12 @@ const OPENAPI_ACTION_TOOL_NAMES = new Set([
 ]);
 
 function openApiActionRoutes(): ActionRoute[] {
-  return ACTION_ROUTES.filter((route) => OPENAPI_ACTION_TOOL_NAMES.has(route.tool));
+  return ACTION_ROUTES.filter((route) => {
+    if (!OPENAPI_ACTION_TOOL_NAMES.has(route.tool)) return false;
+    if (REMOTE_EXECUTION_TOOL_NAMES.has(route.tool) && !isRemoteExecEnabled()) return false;
+    if (REMOTE_E2E_TOOL_NAMES.has(route.tool) && !isRemoteE2eEnabled()) return false;
+    return true;
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -785,7 +796,6 @@ function openApiSpec(publicOrigin: string): Record<string, unknown> {
           properties: {
             projectId: { type: "string" },
             commandId: { type: "string" },
-            args: { type: "array", items: { type: "string" } },
             intent: {
               type: "object",
               additionalProperties: false,

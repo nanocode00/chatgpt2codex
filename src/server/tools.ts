@@ -50,10 +50,16 @@ import { clearKill } from "../control/queue.js";
 import {
   assertArbitraryCommandLocalOnly,
   assertLocalImageToolLocalOnly,
+  assertRemoteE2eAllowed,
+  assertRemoteExecAllowed,
   assertRemoteImageSourceAllowed,
   assertRemoteWriteAllowed,
+  isRemoteE2eEnabled,
+  isRemoteExecEnabled,
   isRemoteWriteEnabled,
   REMOTE_ARBITRARY_COMMAND_TOOL_NAMES,
+  REMOTE_E2E_TOOL_NAMES,
+  REMOTE_EXECUTION_TOOL_NAMES,
   REMOTE_LOCAL_IMAGE_TOOL_NAMES,
 } from "./remote-safety.js";
 import {
@@ -256,6 +262,8 @@ function installChatGptToolListHandler(s: McpServer, ctx: ToolContext): void {
             !CHATGPT_SAFETY_HIDDEN_TOOL_NAMES.has(name) &&
             !(ctx.remote && REMOTE_ARBITRARY_COMMAND_TOOL_NAMES.has(name)) &&
             !(ctx.remote && REMOTE_LOCAL_IMAGE_TOOL_NAMES.has(name)) &&
+            !(ctx.remote && REMOTE_EXECUTION_TOOL_NAMES.has(name) && !isRemoteExecEnabled()) &&
+            !(ctx.remote && REMOTE_E2E_TOOL_NAMES.has(name) && !isRemoteE2eEnabled()) &&
             (exposeControl || !CONTROL_TOOL_NAMES.has(name)),
         )
         .map(([name, tool]) => {
@@ -851,7 +859,12 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
                 ? ["file_apply_patch", "file_create"]
                 : ["file_apply_patch", "file_create", "local_shell_run"],
               verify: ctx.remote
-                ? ["command_list", "command_run", "e2e_test_and_show_screenshot", "e2e_screenshot"]
+                ? [
+                    "command_list",
+                    ...(isRemoteExecEnabled() ? ["command_run"] : []),
+                    ...(isRemoteE2eEnabled() ? ["e2e_open_target", "e2e_screenshot", "e2e_open_url_screenshot"] : []),
+                    ...(isRemoteExecEnabled() && isRemoteE2eEnabled() ? ["e2e_test_and_show_screenshot"] : []),
+                  ]
                 : ["command_list", "command_run", "local_shell_run", "e2e_test_and_show_screenshot", "e2e_start_server", "e2e_run_command", "e2e_screenshot"],
               release: ["git_diff_summary", "git_commit", "git_push", "checkpoint_list"],
               media: ctx.remote
@@ -886,11 +899,17 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
               "file_read_slice before editing existing files",
               "file_apply_patch/file_create for controlled edits",
               ctx.remote
-                ? "Use command_list/command_run for allowlisted project verification; arbitrary shell is disabled for remote sessions."
+                ? isRemoteExecEnabled()
+                  ? "Use command_list/command_run for exact discovered project commands. Remote caller-supplied command arguments and arbitrary shell are disabled."
+                  : "Remote project execution is disabled. The local operator must set CHATGPT2CODEX_REMOTE_EXEC=1 before command_run becomes available."
                 : "local_shell_run for Codex-style local commands inside the selected project",
-              "If the user says 'e2e 테스트하고 스크린샷 보여줘' or asks for E2E proof in one sentence, call e2e_test_and_show_screenshot immediately. It uses the active project; ChatGPT renders the captured screenshots inline through the E2E screenshot widget, and the Actions response returns inline image markdown.",
+              ctx.remote && !(isRemoteExecEnabled() && isRemoteE2eEnabled())
+                ? "Remote one-shot E2E is disabled until the local operator enables both CHATGPT2CODEX_REMOTE_EXEC=1 and CHATGPT2CODEX_REMOTE_E2E=1."
+                : "If the user says 'e2e 테스트하고 스크린샷 보여줘' or asks for E2E proof in one sentence, call e2e_test_and_show_screenshot immediately. It uses the active project; ChatGPT renders captured screenshots inline.",
               ctx.remote
-                ? "For remote UI/E2E proof: use e2e_test_and_show_screenshot or the guarded screenshot tools. Caller-supplied E2E command/server strings are disabled."
+                ? isRemoteE2eEnabled()
+                  ? "Remote UI/E2E access is locally opted in. Caller-supplied arbitrary E2E command/server strings remain disabled."
+                  : "Remote app opening and screenshot capture are disabled until the local operator sets CHATGPT2CODEX_REMOTE_E2E=1."
                 : "For UI/E2E proof: use e2e_start_server, then e2e_run_command for test commands; it captures a screenshot by default. Use e2e_open_target/e2e_open_url_screenshot/e2e_screenshot for manual visual proof. Return the screenshot path/markdown to the user.",
               "repo_status/repo_diff_summary, then git_commit and git_push when explicitly requested",
               ctx.remote
@@ -905,10 +924,15 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
               workspaceRoot: ctx.workspaceRoot,
               fileEdits: "project-confined patch/create with secret-path blocking",
               shell: ctx.remote
-                ? "remote arbitrary shell disabled; use discovered allowlisted command_run"
+                ? isRemoteExecEnabled()
+                  ? "arbitrary shell disabled; exact discovered command_run execution locally opted in"
+                  : "remote project execution disabled until CHATGPT2CODEX_REMOTE_EXEC=1"
                 : "project-confined local shell with redacted output and secret/OS-destructive guards",
-              e2e:
-                "one-shot E2E test-and-show, start local dev servers, run guarded E2E commands, open URLs/apps, and capture macOS screenshots into .chatgpt2codex/e2e/screenshots for inline/user-visible proof",
+              e2e: ctx.remote
+                ? isRemoteE2eEnabled()
+                  ? "remote E2E/UI access locally opted in; one-shot script execution additionally requires CHATGPT2CODEX_REMOTE_EXEC=1"
+                  : "remote E2E/UI access disabled until CHATGPT2CODEX_REMOTE_E2E=1"
+                : "one-shot E2E test-and-show, start local dev servers, run guarded E2E commands, open URLs/apps, and capture macOS screenshots",
               git: "status, diff summary, commit, push",
               loop:
                 "goal_loop keeps ChatGPT on a Codex-style local inspect/edit/verify loop. It does not call OpenAI Codex or spend Codex quota.",
@@ -935,7 +959,9 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
                 ctx.remote && !isRemoteWriteEnabled()
                   ? "Inspect and plan only while remote write is disabled; file_apply_patch/file_create will remain permission-gated."
                   : "Apply changes directly with file_apply_patch or file_create. Never hand the user a script to paste when the action bridge is reachable.",
-                "Use command_run for allowlisted verification. Arbitrary shell and caller-supplied E2E command strings are disabled through remote Actions.",
+                ctx.remote && !isRemoteExecEnabled()
+                  ? "Remote project command execution is disabled until the local operator sets CHATGPT2CODEX_REMOTE_EXEC=1."
+                  : "Use command_run for exact discovered verification commands. Arbitrary shell and remote caller-supplied command arguments are disabled.",
                 "Use repo status/diff/show changes and then commit/push only when requested.",
               ],
               imageSaveFlow: [
@@ -1772,10 +1798,23 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
     },
     async (input) => {
       return withErrorMapping(ctx, "command_run", input, async () => {
+        assertRemoteExecAllowed(ctx, "command_run");
+
+        if (ctx.remote && input.args && input.args.length > 0) {
+          throw new DomainError(
+            ErrorCode.PERMISSION_DENIED,
+            "Caller-supplied command arguments are disabled for remote command_run. Run only the exact discovered project command.",
+            { commandId: input.commandId, remote: true },
+          );
+        }
+
         const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
         const commandsForPolicy = await listCommands(entry.root);
         const commandForPolicy = commandsForPolicy.find((c) => c.commandId === input.commandId);
-        const capability = commandForPolicy?.riskTier === "verify" ? "verify" : commandForPolicy?.riskTier === "read" ? "read" : "remote";
+        const capability =
+          commandForPolicy?.riskTier === "network" || commandForPolicy?.riskTier === "destructive"
+            ? "remote"
+            : "verify";
         await requireProjectLease(ctx, input.projectId, capability);
         await ctx.ledger.append({
           type: "process.started",
@@ -1944,6 +1983,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
     },
     async (input) => {
       return withErrorMapping(ctx, "e2e_open_target", input, async () => {
+        assertRemoteE2eAllowed(ctx, "e2e_open_target");
         let appPath = input.appPath;
         if (input.url !== undefined) {
           if (!input.projectId) {
@@ -2099,6 +2139,8 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
           instruction: input.instruction ? "[instruction redacted]" : undefined,
         },
         async () => {
+          assertRemoteE2eAllowed(ctx, "e2e_test_and_show_screenshot");
+          assertRemoteExecAllowed(ctx, "e2e_test_and_show_screenshot");
           const project = await resolveProjectForE2e(ctx, input.projectId);
           let server:
             | {
@@ -2244,6 +2286,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
     },
     async (input) => {
       return withErrorMapping(ctx, "e2e_screenshot", input, async () => {
+        assertRemoteE2eAllowed(ctx, "e2e_screenshot");
         await requireProjectLease(ctx, input.projectId, "verify");
         const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
         const result = await captureE2eScreenshot(entry.root, {
@@ -2275,6 +2318,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
     },
     async (input) => {
       return withErrorMapping(ctx, "e2e_open_url_screenshot", input, async () => {
+        assertRemoteE2eAllowed(ctx, "e2e_open_url_screenshot");
         if (!isLocalHttpUrl(input.url)) {
           throw new DomainError(
             ErrorCode.APPROVAL_REQUIRED,

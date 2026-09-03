@@ -57,8 +57,9 @@ describe("remote arbitrary-command safety", () => {
       expect(names, name).not.toContain(name);
     }
 
-    expect(names).toContain("command_run");
-    expect(names).toContain("e2e_test_and_show_screenshot");
+    expect(names).toContain("command_list");
+    expect(names).not.toContain("command_run");
+    expect(names).not.toContain("e2e_test_and_show_screenshot");
   });
 
   it("keeps arbitrary-command tools available to trusted local sessions", async () => {

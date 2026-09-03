@@ -27,7 +27,7 @@ export function assertArbitraryCommandLocalOnly(
 
   throw new DomainError(
     ErrorCode.ARBITRARY_SHELL_DENIED,
-    `Tool ${toolName} is disabled for remote sessions. Use command_run or a discovered/allowlisted verification tool instead.`,
+    `Tool ${toolName} is disabled for remote sessions. Arbitrary command strings remain unavailable remotely; discovered project execution requires explicit local opt-in.`,
   );
 }
 
@@ -69,6 +69,56 @@ export function assertRemoteImageSourceAllowed(
 }
 
 const ENABLED_VALUES = new Set(["1", "true", "yes", "on"]);
+
+export const REMOTE_EXECUTION_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "command_run",
+  "e2e_test_and_show_screenshot",
+]);
+
+export const REMOTE_E2E_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "e2e_open_target",
+  "e2e_test_and_show_screenshot",
+  "e2e_screenshot",
+  "e2e_open_url_screenshot",
+]);
+
+export function isRemoteExecEnabled(): boolean {
+  return ENABLED_VALUES.has(
+    (process.env.CHATGPT2CODEX_REMOTE_EXEC ?? "").trim().toLowerCase(),
+  );
+}
+
+export function isRemoteE2eEnabled(): boolean {
+  return ENABLED_VALUES.has(
+    (process.env.CHATGPT2CODEX_REMOTE_E2E ?? "").trim().toLowerCase(),
+  );
+}
+
+export function assertRemoteExecAllowed(
+  ctx: ToolContext,
+  toolName: string,
+): void {
+  if (!ctx.remote || isRemoteExecEnabled()) return;
+
+  throw new DomainError(
+    ErrorCode.PERMISSION_DENIED,
+    `Remote project execution is disabled. Set CHATGPT2CODEX_REMOTE_EXEC=1 locally before using ${toolName}. Project commands execute repository-controlled code and are not an OS sandbox.`,
+    { toolName, remote: true },
+  );
+}
+
+export function assertRemoteE2eAllowed(
+  ctx: ToolContext,
+  toolName: string,
+): void {
+  if (!ctx.remote || isRemoteE2eEnabled()) return;
+
+  throw new DomainError(
+    ErrorCode.PERMISSION_DENIED,
+    `Remote E2E/UI access is disabled. Set CHATGPT2CODEX_REMOTE_E2E=1 locally before using ${toolName}.`,
+    { toolName, remote: true },
+  );
+}
 
 export function isRemoteWriteEnabled(): boolean {
   return ENABLED_VALUES.has(
