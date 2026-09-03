@@ -12,6 +12,13 @@ export const REMOTE_ARBITRARY_COMMAND_TOOL_NAMES: ReadonlySet<string> = new Set(
   "e2e_run_command",
 ]);
 
+export const REMOTE_LOCAL_IMAGE_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "open_chatgpt_images_app",
+  "save_image_from_clipboard",
+  "save_image_from_download",
+  "save_image_from_path",
+]);
+
 export function assertArbitraryCommandLocalOnly(
   ctx: ToolContext,
   toolName: string,
@@ -22,6 +29,43 @@ export function assertArbitraryCommandLocalOnly(
     ErrorCode.ARBITRARY_SHELL_DENIED,
     `Tool ${toolName} is disabled for remote sessions. Use command_run or a discovered/allowlisted verification tool instead.`,
   );
+}
+
+export function assertLocalImageToolLocalOnly(
+  ctx: ToolContext,
+  toolName: string,
+): void {
+  if (!ctx.remote) return;
+
+  throw new DomainError(
+    ErrorCode.PERMISSION_DENIED,
+    `Tool ${toolName} is disabled for remote sessions. Remote image intake accepts explicit public image URLs or caller-supplied image bytes only.`,
+    { toolName, remote: true },
+  );
+}
+
+export function assertRemoteImageSourceAllowed(
+  ctx: ToolContext,
+  source: "auto" | "url" | "clipboard" | "download" | "path",
+  hasExplicitUrl: boolean,
+): void {
+  if (!ctx.remote) return;
+
+  if (source !== "auto" && source !== "url") {
+    throw new DomainError(
+      ErrorCode.PERMISSION_DENIED,
+      `Image source=${source} is local-only. Remote sessions may use source=url or source=auto with an explicit URL.`,
+      { source, remote: true },
+    );
+  }
+
+  if (!hasExplicitUrl) {
+    throw new DomainError(
+      ErrorCode.PERMISSION_DENIED,
+      "Remote image intake requires an explicit URL. Clipboard URL discovery and other local auto-detection are disabled.",
+      { source, remote: true },
+    );
+  }
 }
 
 const ENABLED_VALUES = new Set(["1", "true", "yes", "on"]);

@@ -222,6 +222,7 @@ describe("Custom GPT action bridge", () => {
           E2eStartServerInput: Record<string, unknown>;
           FileApplyPatchInput: { properties: Record<string, unknown> };
           FileCreateInput: { properties: Record<string, unknown> };
+          SaveChatGptImageInput: { properties: Record<string, { enum?: string[] }> };
           ActionToolResponse: { required?: string[]; properties: Record<string, unknown> };
           ToolCallProof: Record<string, unknown>;
           ToolAvailabilityGate: Record<string, unknown>;
@@ -285,6 +286,9 @@ describe("Custom GPT action bridge", () => {
     expect(body.components.schemas.CallToolInput.properties.toolName).toBeDefined();
     expect(body.components.schemas.FileApplyPatchInput.properties.patch).toBeDefined();
     expect(body.components.schemas.FileCreateInput.properties.content).toBeDefined();
+    expect(body.components.schemas.SaveChatGptImageInput.properties.source?.enum).toEqual(["auto", "url"]);
+    expect(body.components.schemas.SaveChatGptImageInput.properties.sourcePath).toBeUndefined();
+    expect(body.components.schemas.SaveChatGptImageInput.properties.maxAgeSec).toBeUndefined();
     expect(body.components.schemas.ActionToolResponse.required).toContain("toolCall");
     expect(body.components.schemas.ActionToolResponse.properties.toolCall).toBeDefined();
     expect(body.components.schemas.ToolCallProof).toBeDefined();

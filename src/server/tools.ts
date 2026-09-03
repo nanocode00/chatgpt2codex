@@ -49,9 +49,12 @@ import { CONTROL_TOOL_NAMES, isControlChatGptExposed, isControlEnabled } from ".
 import { clearKill } from "../control/queue.js";
 import {
   assertArbitraryCommandLocalOnly,
+  assertLocalImageToolLocalOnly,
+  assertRemoteImageSourceAllowed,
   assertRemoteWriteAllowed,
   isRemoteWriteEnabled,
   REMOTE_ARBITRARY_COMMAND_TOOL_NAMES,
+  REMOTE_LOCAL_IMAGE_TOOL_NAMES,
 } from "./remote-safety.js";
 import {
   handleComputerActionStatus,
@@ -252,6 +255,7 @@ function installChatGptToolListHandler(s: McpServer, ctx: ToolContext): void {
             tool.enabled !== false &&
             !CHATGPT_SAFETY_HIDDEN_TOOL_NAMES.has(name) &&
             !(ctx.remote && REMOTE_ARBITRARY_COMMAND_TOOL_NAMES.has(name)) &&
+            !(ctx.remote && REMOTE_LOCAL_IMAGE_TOOL_NAMES.has(name)) &&
             (exposeControl || !CONTROL_TOOL_NAMES.has(name)),
         )
         .map(([name, tool]) => {
@@ -850,7 +854,9 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
                 ? ["command_list", "command_run", "e2e_test_and_show_screenshot", "e2e_screenshot"]
                 : ["command_list", "command_run", "local_shell_run", "e2e_test_and_show_screenshot", "e2e_start_server", "e2e_run_command", "e2e_screenshot"],
               release: ["git_diff_summary", "git_commit", "git_push", "checkpoint_list"],
-              media: ["gpt_image_2_workflow", "save_chatgpt_image_from_url", "save_image_from_url", "save_image_from_clipboard", "save_image_from_download", "save_image_from_path"],
+              media: ctx.remote
+                ? ["gpt_image_2_workflow", "save_chatgpt_image", "save_chatgpt_image_from_url", "save_image_from_url"]
+                : ["gpt_image_2_workflow", "save_chatgpt_image", "save_chatgpt_image_from_url", "save_image_from_url", "save_image_from_clipboard", "save_image_from_download", "save_image_from_path"],
             },
             securityModel: [
               "Local-first: ChatGPT cannot self-elevate into local writes; a current-turn ChatGPT_To_Codex tool proof and project lease are required.",
@@ -887,7 +893,9 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
                 ? "For remote UI/E2E proof: use e2e_test_and_show_screenshot or the guarded screenshot tools. Caller-supplied E2E command/server strings are disabled."
                 : "For UI/E2E proof: use e2e_start_server, then e2e_run_command for test commands; it captures a screenshot by default. Use e2e_open_target/e2e_open_url_screenshot/e2e_screenshot for manual visual proof. Return the screenshot path/markdown to the user.",
               "repo_status/repo_diff_summary, then git_commit and git_push when explicitly requested",
-              "For GPT Image 2 requests: generate with ChatGPT's native image surface, then import the finished image with save_chatgpt_image, save_chatgpt_image_from_url, save_image_from_url, clipboard, download, or path.",
+              ctx.remote
+                ? "For GPT Image 2 requests: generate with ChatGPT's native image surface, obtain a Share/Copy Link/content URL, then pass that URL explicitly to save_chatgpt_image, save_chatgpt_image_from_url, or save_image_from_url."
+                : "For GPT Image 2 requests: generate with ChatGPT's native image surface, then import the finished image with save_chatgpt_image, save_chatgpt_image_from_url, save_image_from_url, clipboard, download, or path.",
               "For device-agnostic/mobile ChatGPT images: use the ChatGPT Share/Copy Link/content URL and call save_chatgpt_image, save_chatgpt_image_from_url, or save_image_from_url.",
               "For Custom GPTs with native Image Generation enabled: install /actions/openapi.json as a GPT Action. That Actions bridge exposes project-confined source editing and allowlisted command execution; arbitrary shell and caller-supplied E2E command strings are disabled remotely.",
               "ChatGPT Actions run in ChatGPT's sandbox and cannot write /Users/... directly. All local file writes must go through chatgpt2codex Actions or the MCP connector.",
@@ -904,8 +912,9 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
               git: "status, diff summary, commit, push",
               loop:
                 "goal_loop keeps ChatGPT on a Codex-style local inspect/edit/verify loop. It does not call OpenAI Codex or spend Codex quota.",
-              imageGeneration:
-                "chatgpt2codex does not call Codex/OpenAI image generation or spend that quota. It can import images ChatGPT generated natively from a share/content URL from any device, or from local Mac clipboard/download/path/Chrome when the image exists on that Mac.",
+              imageGeneration: ctx.remote
+                ? "chatgpt2codex does not generate images. Remote sessions can import a finished ChatGPT image only from an explicit public share/content URL or supplied image bytes; local clipboard/download/path/browser helpers are disabled."
+                : "chatgpt2codex does not call Codex/OpenAI image generation or spend that quota. It can import images ChatGPT generated natively from a share/content URL from any device, or from local Mac clipboard/download/path/Chrome when the image exists on that Mac.",
               limits: [
                 "No secret-classified path reads or commits",
                 "No sudo/keychain/OS destructive commands",
@@ -932,7 +941,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
               imageSaveFlow: [
                 "Use the GPT's native Image Generation capability to render the image.",
                 "Call project_select with preset=image-only.",
-                "Import by Share/Copy Link/content URL, copied image, latest download, or local file path. Automatic visible-image capture is intentionally unavailable.",
+                "Import by explicit Share/Copy Link/content URL. Remote Actions cannot read the local clipboard, Downloads, or arbitrary local paths.",
                 "Never claim the image was saved until the chatgpt2codex action result returns a saved path.",
               ],
               customGptActionScope: [
@@ -1114,34 +1123,48 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
             doThis: [
               "If the active ChatGPT app is Image Generation/ImageGen, use it only to create the image. Before any repo edit/save claim, reselect ChatGPT To Codex or call the Custom GPT Action bridge and wait for ok=true.",
               "Generate with ChatGPT's native image surface, get the Share/Copy Link/content URL (chatgpt.com/s/m_... image shares are supported), then call save_chatgpt_image, save_chatgpt_image_from_url, or save_image_from_url.",
-              "If the image is on this Mac, use Copy Image, Download, or a local file path and call save_chatgpt_image, save_image_from_clipboard, save_image_from_download, or save_image_from_path.",
+              ctx.remote
+                ? "Remote sessions cannot read this machine's clipboard, Downloads, local image paths, or launch the local ChatGPT Images helper. Use a Share/Copy Link/content URL instead."
+                : "If the image is on this Mac, use Copy Image, Download, or a local file path and call save_chatgpt_image, save_image_from_clipboard, save_image_from_download, or save_image_from_path.",
               "If this is a Custom GPT with native Image Generation enabled, use the /actions/openapi.json GPT Action bridge: project_select first, then save_chatgpt_image or save_chatgpt_image_from_url.",
               "HQ/source work note: the Custom GPT Action bridge exposes full chatgpt2codex coding tools now. Source edits should use project_select plus file_apply_patch/file_create or call_tool; do not ask the user to copy/paste scripts.",
               "Do not look for an MCP image generator; chatgpt2codex imports finished images, it does not automate image generation.",
-              "Manual fallbacks, in order: the ChatGPT UI's share/copy/save/download action + save_chatgpt_image (auto-detects passed URL, clipboard URL, clipboard image, or latest download); save_chatgpt_image_from_url when the user pasted a share page or content URL.",
+              ctx.remote
+                ? "Remote fallback: obtain the ChatGPT Share/Copy Link/content URL and pass it explicitly to save_chatgpt_image, save_chatgpt_image_from_url, or save_image_from_url."
+                : "Manual fallbacks, in order: the ChatGPT UI's share/copy/save/download action + save_chatgpt_image (auto-detects passed URL, clipboard URL, clipboard image, or latest download); save_chatgpt_image_from_url when the user pasted a share page or content URL.",
             ],
             ifNativeImageGenerationUnavailable: [
               "This is a ChatGPT surface boundary, not a chatgpt2codex MCP failure.",
               "Open ChatGPT's Images app manually or with open_chatgpt_images_app, generate there, then use the Share/Copy Link/content URL handoff plus save_chatgpt_image/save_chatgpt_image_from_url/save_image_from_url.",
-              "Do not claim automatic image capture is available. Import only from URL, clipboard, download, or path.",
+              ctx.remote
+                ? "Do not claim automatic/local image capture is available. Remote import is URL-only."
+                : "Do not claim automatic image capture is available. Import only from URL, clipboard, download, or path.",
             ],
             notThis: [
               "Do not continue source coding after an image_gen or python_user_visible result; those are not chatgpt2codex tool-call proof.",
               "Do not call Codex or the OpenAI Images API from chatgpt2codex for generation; that burns the wrong quota path.",
               "Do not refuse because chatgpt2codex has no GPT Image 2 generator; chatgpt2codex's job is to import the finished ChatGPT image.",
               "Do not require or recommend automatic capture helpers.",
-              "Do not claim chatgpt2codex can read private ChatGPT image-library internals. It can only open/prepare the official Images app UI and import from URL, clipboard, download, or path.",
+              ctx.remote
+                ? "Do not claim chatgpt2codex can read private ChatGPT image-library internals or this machine's clipboard/Downloads/local paths. Remote intake is URL-only."
+                : "Do not claim chatgpt2codex can read private ChatGPT image-library internals. It can only open/prepare the official Images app UI and import from URL, clipboard, download, or path.",
               "Do not ask the user to paste base64 image bytes.",
             ],
-            saveTools: [
-              "open_chatgpt_images_app",
-              "save_chatgpt_image",
-              "save_chatgpt_image_from_url",
-              "save_image_from_url",
-              "save_image_from_clipboard",
-              "save_image_from_download",
-              "save_image_from_path",
-            ],
+            saveTools: ctx.remote
+              ? [
+                  "save_chatgpt_image",
+                  "save_chatgpt_image_from_url",
+                  "save_image_from_url",
+                ]
+              : [
+                  "open_chatgpt_images_app",
+                  "save_chatgpt_image",
+                  "save_chatgpt_image_from_url",
+                  "save_image_from_url",
+                  "save_image_from_clipboard",
+                  "save_image_from_download",
+                  "save_image_from_path",
+                ],
             customGptActionOperations: [
               "agent_guide",
               "project_select",
@@ -1180,6 +1203,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
           prompt: input.prompt ? "[prompt redacted]" : undefined,
         },
         async () => {
+          assertLocalImageToolLocalOnly(ctx, "open_chatgpt_images_app");
           const result = await prepareChatGptImagesApp(input);
           await ctx.ledger.append({
             type: "chatgpt.images_app.opened",
@@ -2616,6 +2640,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
     },
     async (input) => {
       return withErrorMapping(ctx, "save_image_from_clipboard", input, async () => {
+        assertLocalImageToolLocalOnly(ctx, "save_image_from_clipboard");
         await requireIntakeLease(ctx, input.projectId, input.destPath);
         const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
         const result = await intakeFromClipboard(entry.root, input.projectId, input.destPath, input.metadata);
@@ -2649,6 +2674,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
     },
     async (input) => {
       return withErrorMapping(ctx, "save_image_from_download", input, async () => {
+        assertLocalImageToolLocalOnly(ctx, "save_image_from_download");
         await requireIntakeLease(ctx, input.projectId, input.destPath);
         const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
         const result = await intakeFromDownload(
@@ -2688,6 +2714,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
     },
     async (input) => {
       return withErrorMapping(ctx, "save_image_from_path", input, async () => {
+        assertLocalImageToolLocalOnly(ctx, "save_image_from_path");
         await requireIntakeLease(ctx, input.projectId, input.destPath);
         const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
         const result = await intakeFromPath(entry.root, input.projectId, input.sourcePath, input.destPath, input.metadata);
@@ -2811,9 +2838,9 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
   registerTool(
     "save_chatgpt_image",
     {
-      title: "Save a ChatGPT image from app UI, clipboard, download, URL, or path",
+      title: "Save a finished ChatGPT image into the project",
       description:
-        "Single app-friendly ChatGPT image import. Use after generating an image in the ChatGPT Images app or an image-capable chat. It does not generate images: pass a share page/content URL if available, or let it auto-detect a copied URL, copied image, latest downloaded image, or explicit local sourcePath.",
+        "Import a finished ChatGPT image. Remote sessions require an explicit public image URL; clipboard, Downloads, local paths, and clipboard-URL auto-detection are local-stdio-only. This tool does not generate images.",
       annotations: LOCAL_WRITE_ANNOTATIONS,
       _meta: chatGptToolMeta("Saving ChatGPT image...", "ChatGPT image saved"),
       inputSchema: {
@@ -2829,6 +2856,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
     async (input) => {
       return withErrorMapping(ctx, "save_chatgpt_image", input, async () => {
         const source: ChatGptImageSource = input.source ?? "auto";
+        assertRemoteImageSourceAllowed(ctx, source, Boolean(input.url));
         const target = await resolveIntakeTarget(input.projectId, input.destPath);
         const attempts: Array<{ source: string; code: string; message: string }> = [];
 
@@ -2858,7 +2886,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
         };
 
         if (source === "url") {
-          const url = input.url ?? firstHttpUrl(await readClipboardText());
+          const url = ctx.remote ? input.url : input.url ?? firstHttpUrl(await readClipboardText());
           const result = await tryUrl(url);
           return makeResult(result, `Saved ChatGPT image from URL to ${result.filePath}.`);
         }
@@ -2873,6 +2901,14 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
         if (source === "path") {
           const result = await tryPath();
           return makeResult(result, `Saved ChatGPT image file to ${result.filePath}.`);
+        }
+
+        if (ctx.remote) {
+          const result = await tryUrl(input.url);
+          return makeResult(
+            { ...result, detectedSource: "url" },
+            `Saved ChatGPT image from URL to ${result.filePath}.`,
+          );
         }
 
         const clipboardUrl = input.url ? undefined : firstHttpUrl(await readClipboardText());

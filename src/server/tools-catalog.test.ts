@@ -90,7 +90,9 @@ describe("tool catalog", () => {
 
     expect(tools?.gpt_image_2_generate).toBeUndefined();
     expect(tools?.open_chatgpt_images_app?.description).toContain("ChatGPT Images app");
-    expect(tools?.save_chatgpt_image?.description).toContain("Single app-friendly");
+    expect(tools?.save_chatgpt_image?.description).toContain("explicit public image URL");
+    expect(tools?.save_chatgpt_image?.description).toContain("clipboard");
+    expect(tools?.save_chatgpt_image?.description).toContain("local-stdio-only");
     expect(tools?.save_chatgpt_image_from_url?.description).toContain("ChatGPT-generated image");
     expect(tools?.save_chatgpt_image_from_url?.description).toContain("chatgpt.com/s/m_...");
     expect(tools?.save_chatgpt_screen_images).toBeUndefined();
