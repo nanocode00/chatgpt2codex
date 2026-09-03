@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { DomainError, ErrorCode } from "../types.js";
 
 /**
@@ -15,6 +15,8 @@ interface DiscoveredCommand {
   source: string;
   riskTier: string;
   argv: string[];
+  /** Fixed child env additions chosen only by trusted discovery logic. */
+  childEnv?: Readonly<Record<string, string>>;
 }
 
 const MAX_TIMEOUT_SEC = 300;
@@ -177,13 +179,86 @@ async function discoverPubspecCommands(root: string): Promise<DiscoveredCommand[
   ];
 }
 
+const PYTEST_MARKER_FILES = ["pytest.ini", "pyproject.toml", "setup.cfg", "tox.ini"] as const;
+const PYTHON_INTERPRETER_CANDIDATES = [
+  ".venv/bin/python",
+  ".venvs/runtime/bin/python",
+  "venv/bin/python",
+] as const;
+
+async function hasPytestMarker(root: string): Promise<boolean> {
+  if (existsSync(join(root, "tests"))) return true;
+  if (existsSync(join(root, "pytest.ini"))) return true;
+
+  for (const filename of PYTEST_MARKER_FILES) {
+    if (filename === "pytest.ini") continue;
+    const path = join(root, filename);
+    if (!existsSync(path)) continue;
+    try {
+      const raw = await readFile(path, "utf8");
+      if (filename === "pyproject.toml" && /\[tool\.pytest(?:\.|\])/i.test(raw)) return true;
+      if (filename === "setup.cfg" && /\[tool:pytest\]/i.test(raw)) return true;
+      if (filename === "tox.ini" && /\bpytest\b/i.test(raw)) return true;
+    } catch {
+      // Ignore unreadable optional markers and keep discovery conservative.
+    }
+  }
+  return false;
+}
+
+function pythonInterpreterArgv(root: string): { executable: string; display: string } {
+  for (const relative of PYTHON_INTERPRETER_CANDIDATES) {
+    const absolute = join(root, relative);
+    if (existsSync(absolute)) return { executable: absolute, display: relative };
+  }
+  const pathEntries = (process.env.PATH ?? "").split(delimiter).filter(Boolean);
+  for (const name of process.platform === "win32" ? ["python.exe", "python"] : ["python3", "python"]) {
+    if (pathEntries.some((entry) => existsSync(join(entry, name)))) {
+      const display = name.replace(/\.exe$/i, "");
+      return { executable: display, display };
+    }
+  }
+  return {
+    executable: process.platform === "win32" ? "python" : "python3",
+    display: process.platform === "win32" ? "python" : "python3",
+  };
+}
+
+async function discoverPythonPytestCommands(root: string): Promise<DiscoveredCommand[]> {
+  if (!(await hasPytestMarker(root))) return [];
+  const interpreter = pythonInterpreterArgv(root);
+  const childEnv = existsSync(join(root, "src")) ? { PYTHONPATH: "src" } : undefined;
+  const commands: DiscoveredCommand[] = [
+    {
+      commandId: "python:pytest",
+      display: `${interpreter.display} -m pytest`,
+      source: "pytest project markers",
+      riskTier: "verify",
+      argv: [interpreter.executable, "-m", "pytest"],
+      ...(childEnv ? { childEnv } : {}),
+    },
+  ];
+  if (existsSync(join(root, "tests", "unit"))) {
+    commands.push({
+      commandId: "python:pytest-unit",
+      display: `${interpreter.display} -m pytest tests/unit -q`,
+      source: "pytest unit tests directory",
+      riskTier: "verify",
+      argv: [interpreter.executable, "-m", "pytest", "tests/unit", "-q"],
+      ...(childEnv ? { childEnv } : {}),
+    });
+  }
+  return commands;
+}
+
 async function discoverAllCommands(root: string): Promise<DiscoveredCommand[]> {
-  const [pkg, make, pubspec] = await Promise.all([
+  const [pkg, make, pubspec, python] = await Promise.all([
     discoverPackageJsonCommands(root),
     discoverMakefileCommands(root),
     discoverPubspecCommands(root),
+    discoverPythonPytestCommands(root),
   ]);
-  return [...pkg, ...make, ...pubspec];
+  return [...pkg, ...make, ...pubspec, ...python];
 }
 
 /**
@@ -202,8 +277,8 @@ export async function listCommands(
   }));
 }
 
-function buildChildEnv(): NodeJS.ProcessEnv {
-  return buildSafeChildEnv();
+function buildChildEnv(discovered?: DiscoveredCommand): NodeJS.ProcessEnv {
+  return { ...buildSafeChildEnv(), ...(discovered?.childEnv ?? {}) };
 }
 
 function quoteCmdArg(value: string): string {
@@ -323,7 +398,7 @@ export async function runCommand(
       invocation.args,
       {
         cwd: root,
-        env: buildChildEnv(),
+        env: buildChildEnv(found),
         maxBuffer: 64 * 1024 * 1024,
         windowsHide: true,
       },

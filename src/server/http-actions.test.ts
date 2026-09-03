@@ -243,6 +243,7 @@ describe("Custom GPT action bridge", () => {
     expect(body.info["x-chatgpt2codex-tool-proof"]?.namespace).toBe("ChatGPT_To_Codex");
     expect(body.info["x-chatgpt2codex-openapi-operation-count"]).toBeLessThanOrEqual(30);
     expect(body.info["x-chatgpt2codex-tool-names"]).toContain("workspace_list_projects");
+    expect(body.info["x-chatgpt2codex-tool-names"]).toContain("command_list");
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("command_run");
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("e2e_open_target");
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("e2e_test_and_show_screenshot");
@@ -256,6 +257,8 @@ describe("Custom GPT action bridge", () => {
     expect(body.paths["/actions/file-apply-patch"]).toBeDefined();
     expect((body.paths["/actions/file-apply-patch"] as { post: { operationId: string } }).post.operationId).toBe("file_apply_patch");
     expect(body.paths["/actions/file-create"]).toBeDefined();
+    expect(body.paths["/actions/command-list"]).toBeDefined();
+    expect((body.paths["/actions/command-list"] as { post: { operationId: string } }).post.operationId).toBe("command_list");
     expect(body.paths["/actions/local-shell-run"]).toBeUndefined();
     expect(body.paths["/actions/goal-intake"]).toBeDefined();
     expect(body.paths["/actions/goal-loop"]).toBeDefined();
@@ -289,6 +292,7 @@ describe("Custom GPT action bridge", () => {
     expect(body.components.schemas.E2eScreenshotInput).toBeDefined();
     expect(body.components.schemas.E2eStartServerInput).toBeDefined();
     expect(body.components.schemas.CallToolInput.properties.toolName).toBeDefined();
+    expect((body.components.schemas.ProjectOnlyInput as { required?: string[] }).required).toContain("projectId");
     expect(body.components.schemas.FileApplyPatchInput.properties.patch).toBeDefined();
     expect(body.components.schemas.FileCreateInput.properties.content).toBeDefined();
     expect(body.components.schemas.SaveChatGptImageInput.properties.source?.enum).toEqual(["auto", "url"]);
@@ -345,6 +349,7 @@ describe("Custom GPT action bridge", () => {
     expect(body.openApiToolNames).toContain("workspace_list_projects");
     expect(body.openApiToolNames).toContain("project_select");
     expect(body.openApiToolNames).toContain("file_apply_patch");
+    expect(body.openApiToolNames).toContain("command_list");
     expect(body.openApiToolNames).not.toContain("local_shell_run");
     expect(body.openApiToolNames).not.toContain("command_run");
     expect(body.openApiToolNames).not.toContain("e2e_start_server");

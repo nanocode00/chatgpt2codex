@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -114,6 +114,39 @@ describe("command-runner", () => {
       const commands = await listCommands(root);
       expect(commands).toEqual([]);
     });
+
+    it("discovers pytest only for explicit pytest markers or a tests directory", async () => {
+      await writeFile(join(root, "README.md"), "Run pytest with: python -m pytest\n");
+      await mkdir(join(root, ".github", "workflows"), { recursive: true });
+      await writeFile(join(root, ".github", "workflows", "ci.yml"), "steps:\n  - run: python -m pytest\n");
+      expect((await listCommands(root)).map((c) => c.commandId)).not.toContain("python:pytest");
+
+      await writeFile(join(root, "pyproject.toml"), "[project]\nname = \"fixture\"\n");
+      expect((await listCommands(root)).map((c) => c.commandId)).not.toContain("python:pytest");
+
+      await mkdir(join(root, "tests"));
+      const commands = await listCommands(root);
+      expect(commands).toContainEqual({
+        commandId: "python:pytest",
+        display: "python3 -m pytest",
+        source: "pytest project markers",
+        riskTier: "verify",
+      });
+    });
+
+    it("discovers pytest from an explicit pyproject pytest section", async () => {
+      await writeFile(join(root, "pyproject.toml"), "[tool.pytest.ini_options]\naddopts = \"-q\"\n");
+      const commands = await listCommands(root);
+      expect(commands.map((c) => c.commandId)).toContain("python:pytest");
+      expect(commands.map((c) => c.commandId)).not.toContain("python:pytest-unit");
+    });
+
+    it("discovers both full pytest and fixed unit pytest when tests/unit exists", async () => {
+      await mkdir(join(root, "tests", "unit"), { recursive: true });
+      const commands = await listCommands(root);
+      expect(commands.map((c) => c.commandId)).toEqual(expect.arrayContaining(["python:pytest", "python:pytest-unit"]));
+      expect(commands.find((c) => c.commandId === "python:pytest-unit")?.display).toBe("python3 -m pytest tests/unit -q");
+    });
   });
 
   describe("runCommand", () => {
@@ -147,6 +180,38 @@ describe("command-runner", () => {
       expect(result.stdoutSummary).toContain("hello-from-test");
       expect(result.outputTruncated).toBe(false);
       expect(typeof result.durationMs).toBe("number");
+    });
+
+    it("prefers a project venv interpreter and injects only fixed PYTHONPATH=src for src layout pytest", async () => {
+      await mkdir(join(root, ".venv", "bin"), { recursive: true });
+      await mkdir(join(root, "tests", "unit"), { recursive: true });
+      await mkdir(join(root, "src"));
+      const fakePython = join(root, ".venv", "bin", "python");
+      await writeFile(
+        fakePython,
+        [
+          "#!/usr/bin/env node",
+          "console.log(JSON.stringify({ argv: process.argv.slice(2), pythonpath: process.env.PYTHONPATH ?? null }));",
+          "",
+        ].join("\n"),
+      );
+      await chmod(fakePython, 0o755);
+
+      const listed = await listCommands(root);
+      expect(listed.find((c) => c.commandId === "python:pytest")?.display).toBe(".venv/bin/python -m pytest");
+      expect(listed.find((c) => c.commandId === "python:pytest-unit")?.display).toBe(
+        ".venv/bin/python -m pytest tests/unit -q",
+      );
+
+      const fullResult = await runCommand(root, "python:pytest", [], 30);
+      expect(fullResult.exitCode).toBe(0);
+      expect(fullResult.stdoutSummary).toContain('"argv":["-m","pytest"]');
+      expect(fullResult.stdoutSummary).toContain('"pythonpath":"src"');
+
+      const unitResult = await runCommand(root, "python:pytest-unit", [], 30);
+      expect(unitResult.exitCode).toBe(0);
+      expect(unitResult.stdoutSummary).toContain('"argv":["-m","pytest","tests/unit","-q"]');
+      expect(unitResult.stdoutSummary).toContain('"pythonpath":"src"');
     });
 
     it("truncates output that exceeds the head+tail budget", async () => {
