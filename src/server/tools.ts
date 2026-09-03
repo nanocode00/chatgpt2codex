@@ -602,7 +602,9 @@ async function getFreeLocalPort(): Promise<number> {
 
 async function resolveProjectForE2e(ctx: ToolContext, projectId?: string): Promise<{ projectId: string; root: string }> {
   if (projectId) {
-    await requireProjectLease(ctx, projectId, "verify");
+    // One-shot E2E can execute discovered build/test/dev scripts. Those
+    // processes are not filesystem-sandboxed, so require write capability.
+    await requireProjectLease(ctx, projectId, "write");
     const entry = await resolveOrThrow(ctx, { projectId });
     return { projectId, root: entry.root };
   }
@@ -610,7 +612,8 @@ async function resolveProjectForE2e(ctx: ToolContext, projectId?: string): Promi
   if (!active) {
     throw new DomainError(ErrorCode.PROJECT_NOT_SELECTED, "Select a project once, then say: e2e 테스트하고 스크린샷 보여줘");
   }
-  await requireProjectLease(ctx, active.projectId, "verify");
+  // Same rule for the active-project shortcut: E2E execution may write.
+  await requireProjectLease(ctx, active.projectId, "write");
   return { projectId: active.projectId, root: active.root };
 }
 
@@ -1789,7 +1792,6 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
         args: z.array(z.string()).optional(),
         intent: z
           .object({
-            writesWorkspace: z.boolean().optional(),
             needsNetwork: z.boolean().optional(),
             expectedDurationSec: z.number().int().optional(),
           })
@@ -1808,14 +1810,11 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
           );
         }
 
+        // Executed project code is not OS-sandboxed and may mutate the
+        // workspace regardless of its manifest name/risk classification.
+        // Never treat "test", "lint", etc. as intrinsically read-only.
+        await requireProjectLease(ctx, input.projectId, "write");
         const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
-        const commandsForPolicy = await listCommands(entry.root);
-        const commandForPolicy = commandsForPolicy.find((c) => c.commandId === input.commandId);
-        const capability =
-          commandForPolicy?.riskTier === "network" || commandForPolicy?.riskTier === "destructive"
-            ? "remote"
-            : "verify";
-        await requireProjectLease(ctx, input.projectId, capability);
         await ctx.ledger.append({
           type: "process.started",
           projectId: input.projectId,
@@ -1863,7 +1862,6 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
         intent: z
           .object({
             reason: z.string().optional(),
-            writesWorkspace: z.boolean().optional(),
             needsNetwork: z.boolean().optional(),
             destructive: z.boolean().optional(),
           })
@@ -1873,7 +1871,9 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
     async (input) => {
       return withErrorMapping(ctx, "local_shell_run", input, async () => {
         assertArbitraryCommandLocalOnly(ctx, "local_shell_run");
-        await requireProjectLease(ctx, input.projectId, input.intent?.writesWorkspace ? "write" : "verify");
+        // Arbitrary command strings can mutate the project regardless of
+        // model-declared intent, so they always require a write lease.
+        await requireProjectLease(ctx, input.projectId, "write");
         if (input.intent?.needsNetwork || input.intent?.destructive) {
           throw new DomainError(ErrorCode.APPROVAL_REQUIRED, "This local shell request requires explicit approval");
         }
@@ -1923,7 +1923,6 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
         waitTimeoutSec: z.number().int().min(1).max(120).optional(),
         intent: z
           .object({
-            writesWorkspace: z.boolean().optional(),
             needsNetwork: z.boolean().optional(),
             destructive: z.boolean().optional(),
           })
@@ -1933,7 +1932,9 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
     async (input) => {
       return withErrorMapping(ctx, "e2e_start_server", { ...input, command: redact(input.command) }, async () => {
         assertArbitraryCommandLocalOnly(ctx, "e2e_start_server");
-        await requireProjectLease(ctx, input.projectId, input.intent?.writesWorkspace ? "write" : "verify");
+        // Arbitrary command strings can mutate the project regardless of
+        // model-declared intent, so they always require a write lease.
+        await requireProjectLease(ctx, input.projectId, "write");
         if (input.intent?.needsNetwork || input.intent?.destructive) {
           throw new DomainError(ErrorCode.APPROVAL_REQUIRED, "This E2E server request requires explicit approval");
         }
@@ -2039,7 +2040,6 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
         openAfterCapture: z.boolean().optional(),
         intent: z
           .object({
-            writesWorkspace: z.boolean().optional(),
             needsNetwork: z.boolean().optional(),
             destructive: z.boolean().optional(),
           })
@@ -2049,7 +2049,9 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
     async (input) => {
       return withErrorMapping(ctx, "e2e_run_command", { ...input, command: redact(input.command) }, async () => {
         assertArbitraryCommandLocalOnly(ctx, "e2e_run_command");
-        await requireProjectLease(ctx, input.projectId, input.intent?.writesWorkspace ? "write" : "verify");
+        // Arbitrary command strings can mutate the project regardless of
+        // model-declared intent, so they always require a write lease.
+        await requireProjectLease(ctx, input.projectId, "write");
         if (input.intent?.needsNetwork || input.intent?.destructive) {
           throw new DomainError(ErrorCode.APPROVAL_REQUIRED, "This E2E command request requires explicit approval");
         }

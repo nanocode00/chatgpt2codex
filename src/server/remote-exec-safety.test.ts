@@ -106,6 +106,7 @@ beforeEach(async () => {
 afterEach(async () => {
   delete process.env.CHATGPT2CODEX_REMOTE_EXEC;
   delete process.env.CHATGPT2CODEX_REMOTE_E2E;
+  delete process.env.CHATGPT2CODEX_REMOTE_WRITE;
   await fs.rm(projectRoot, { recursive: true, force: true });
   await fs.rm(stateDir, { recursive: true, force: true });
 });
@@ -146,15 +147,35 @@ describe("remote execution and E2E safety", () => {
     await expect(fs.stat(path.join(projectRoot, "ran.txt"))).rejects.toThrow();
   });
 
-  it("allows exact discovered command_run only after local exec opt-in", async () => {
+  it("does not let remote exec opt-in bypass remote write policy", async () => {
     process.env.CHATGPT2CODEX_REMOTE_EXEC = "1";
+
+    await fs.writeFile(
+      path.join(projectRoot, "package.json"),
+      JSON.stringify({ scripts: { test: "node -e \"require('fs').writeFileSync('ran.txt','bad')\"" } }),
+    );
+
+    const { tools } = await serverTools(true);
+    const result = await tools?.command_run?.handler?.({
+      projectId: "proj",
+      commandId: "npm:test",
+    });
+
+    expect(result?.isError).toBe(true);
+    expect(result?.structuredContent?.code).toBe("PERMISSION_DENIED");
+    await expect(fs.stat(path.join(projectRoot, "ran.txt"))).rejects.toThrow();
+  });
+
+  it("allows exact discovered command_run only after both exec and write opt-in", async () => {
+    process.env.CHATGPT2CODEX_REMOTE_EXEC = "1";
+    process.env.CHATGPT2CODEX_REMOTE_WRITE = "1";
 
     await fs.writeFile(
       path.join(projectRoot, "package.json"),
       JSON.stringify({ scripts: { test: "node -e \"require('fs').writeFileSync('ran.txt','ok')\"" } }),
     );
 
-    const { tools } = await serverTools(true);
+    const { tools } = await serverTools(true, "full-write");
     const result = await tools?.command_run?.handler?.({
       projectId: "proj",
       commandId: "npm:test",
@@ -183,15 +204,16 @@ describe("remote execution and E2E safety", () => {
     expect(result?.structuredContent?.code).toBe("PERMISSION_DENIED");
   });
 
-  it("requires a verify-capable lease even for read-tier project commands", async () => {
+  it("requires full-write even for apparently read-only project commands", async () => {
     process.env.CHATGPT2CODEX_REMOTE_EXEC = "1";
+    process.env.CHATGPT2CODEX_REMOTE_WRITE = "1";
 
     await fs.writeFile(
       path.join(projectRoot, "package.json"),
       JSON.stringify({ scripts: { hello: "echo hello" } }),
     );
 
-    const { tools } = await serverTools(true, "read-only");
+    const { tools } = await serverTools(true, "tests-only");
     const result = await tools?.command_run?.handler?.({
       projectId: "proj",
       commandId: "npm:hello",

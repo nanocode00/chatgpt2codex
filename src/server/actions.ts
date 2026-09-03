@@ -800,7 +800,6 @@ function openApiSpec(publicOrigin: string): Record<string, unknown> {
               type: "object",
               additionalProperties: false,
               properties: {
-                writesWorkspace: { type: "boolean" },
                 needsNetwork: { type: "boolean" },
                 expectedDurationSec: { type: "integer", minimum: 1 },
               },
