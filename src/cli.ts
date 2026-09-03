@@ -523,11 +523,14 @@ async function checkCommand(cmd: string, args: string[]): Promise<string | undef
   }
 }
 
-async function cmdDoctor(): Promise<void> {
+async function cmdDoctor(flags: Record<string, string | boolean>): Promise<void> {
   const nodeVersion = process.version;
   const rgVersion = await checkCommand("rg", ["--version"]);
   const gitVersion = await checkCommand("git", ["--version"]);
-  const workspacePath = process.cwd();
+  const workspacePath =
+    typeof flags.workspace === "string"
+      ? path.resolve(flags.workspace)
+      : process.cwd();
 
   let toolCount = "unknown";
   try {
@@ -578,7 +581,7 @@ async function main(): Promise<void> {
       await cmdInit(flags);
       break;
     case "doctor":
-      await cmdDoctor();
+      await cmdDoctor(flags);
       break;
     case "owner-token":
       await cmdOwnerToken(flags);

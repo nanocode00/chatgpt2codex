@@ -208,4 +208,52 @@ now send me a screenshot" loop, give it a star. The goal is simple: make
 ChatGPT useful for real local development without turning your project into a
 cloud upload.
 
+
+## Security Hardening In This Fork
+
+This fork keeps the upstream architecture but applies additional fail-closed
+guards for remote sessions.
+
+Remote sessions default to read-only behavior. Higher-impact capabilities must
+be explicitly enabled by the local operator:
+
+- `CHATGPT2CODEX_REMOTE_WRITE=1`: allow remote project file mutations
+- `CHATGPT2CODEX_REMOTE_EXEC=1`: allow discovered project command execution
+- `CHATGPT2CODEX_REMOTE_E2E=1`: allow remote E2E/UI and screenshot access
+
+Important security properties:
+
+- `local_shell_run`, `e2e_start_server`, and `e2e_run_command` are local-session-only.
+- Remote `command_run` accepts only exact discovered project commands.
+- Remote caller-supplied command arguments are rejected.
+- Project execution requires a `full-write` lease because executed project code is not filesystem-sandboxed.
+- Remote writes require `CHATGPT2CODEX_REMOTE_WRITE=1`.
+- Remote project execution additionally requires `CHATGPT2CODEX_REMOTE_EXEC=1`.
+- Remote E2E/UI access requires `CHATGPT2CODEX_REMOTE_E2E=1`.
+- Remote sessions cannot read clipboard images, Downloads, or arbitrary local image paths.
+- Remote image intake is limited to explicit URLs or caller-supplied image bytes.
+- Desktop-control leases remain local-only.
+- Treat the Owner Token as a password and rotate it immediately if exposed.
+
+Project command execution is **not an OS sandbox**. Package scripts, Make
+targets, test runners, and other project commands execute repository-controlled
+code with the permissions of the local user running ChatGPT To Codex.
+
+### Linux developer run
+
+Linux remains a developer path in this fork.
+
+Build and start:
+
+    npm ci
+    npm run build
+    npm run chatgpt:linux -- --workspace ~/path/to/workspace
+
+Check the selected workspace without starting a tunnel:
+
+    npm run chatgpt:linux -- --workspace ~/path/to/workspace --doctor
+
+Keep all remote capability environment variables unset for the safest default
+configuration.
+
 Built by **ezBuilder**.

@@ -12,7 +12,7 @@ resolve_self() {
   cd -P "$(dirname "$src")" && pwd
 }
 
-ROOT="$(resolve_self)"
+ROOT="$(cd "$(resolve_self)/.." && pwd)"
 BIN_DIR="$ROOT/bin"
 PATH="$BIN_DIR:$PATH"
 export PATH
@@ -166,7 +166,7 @@ wait_public_http_ok() {
   local label="$3"
   local i
   for ((i = 0; i < tries; i++)); do
-    if node_fetch_ok "$url"; then
+    if node_public_fetch_ok "$url"; then
       return 0
     fi
     sleep 1
@@ -235,7 +235,7 @@ if [ ! -f "$CLI" ]; then
 fi
 
 if [ "$DOCTOR" -eq 1 ]; then
-  exec "$NODE" "$CLI" doctor
+  exec "$NODE" "$CLI" doctor --workspace "$WORKSPACE"
 fi
 
 doctor_text="$("$NODE" "$CLI" doctor 2>/dev/null || true)"
