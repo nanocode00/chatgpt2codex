@@ -63,7 +63,7 @@ const ACTION_ROUTES: ActionRoute[] = [
     operationId: "project_select",
     summary: "Select the active local project",
     description:
-      "Selects and leases the project. GPT Actions default to preset=full-write when preset is omitted, so source edits can be applied directly through chatgpt2codex instead of returning copy/paste scripts. Use preset=image-only only for image-only saves.",
+      "Selects and leases the project. GPT Actions default to preset=read-only when omitted. preset=full-write is denied remotely unless the local operator explicitly enables CHATGPT2CODEX_REMOTE_WRITE=1. Use preset=image-only for image-only saves.",
     schema: "ProjectSelectInput",
   },
   {
@@ -357,7 +357,7 @@ function actionInput(body: unknown): Record<string, unknown> {
 function actionInputForRoute(route: ActionRoute, body: unknown): Record<string, unknown> {
   const input = { ...actionInput(body) };
   if (route.tool === "project_select" && input.preset === undefined) {
-    input.preset = "full-write";
+    input.preset = "read-only";
   }
   return input;
 }
@@ -372,7 +372,7 @@ function genericToolInput(body: unknown): { toolName: string; input: Record<stri
   const toolName = typeof raw.toolName === "string" ? raw.toolName.trim() : "";
   const input = isRecord(raw.input) ? { ...raw.input } : {};
   if (toolName === "project_select" && input.preset === undefined) {
-    input.preset = "full-write";
+    input.preset = "read-only";
   }
   return { toolName, input };
 }
@@ -564,7 +564,7 @@ function openApiSpec(publicOrigin: string): Record<string, unknown> {
         operationId: "call_tool",
         summary: "Call any chatgpt2codex MCP tool",
         description:
-          "Full-power owner bridge for Custom GPTs. Use this when a dedicated action route is missing. It calls the named chatgpt2codex MCP tool on the local Mac; do not try to write /Users/... directly from ChatGPT's sandbox. For source edits: select project with preset=full-write, then call file_apply_patch or file_create through this route. The response toolCall object is the required proof that the local tool was actually callable.",
+          "Owner-authenticated fallback bridge for Custom GPTs. Use this when a dedicated action route is missing. Remote safety gates still apply: project selection defaults to read-only, arbitrary commands are blocked, and full-write requires local CHATGPT2CODEX_REMOTE_WRITE=1 opt-in. The response toolCall object is the required proof that the local tool was actually callable.",
         security: [{ ownerBearer: [] }],
         requestBody: {
           required: true,
@@ -615,7 +615,7 @@ function openApiSpec(publicOrigin: string): Record<string, unknown> {
       title: "chatgpt2codex Custom GPT Actions",
       version: "0.1.6",
       description:
-        "OpenAPI bridge for Custom GPTs. This does not call OpenAI Codex or spend Codex quota; ChatGPT drives local coding actions through chatgpt2codex. Hard gate: do not claim local project inspection, edits, tests, commits, or image saves unless a current-turn ActionToolResponse includes ok=true and toolCall.namespace=ChatGPT_To_Codex. If the active ChatGPT app was Image Generation/ImageGen, image_gen, python_user_visible, or a text-only answer, no chatgpt2codex local work happened; reselect/reconnect ChatGPT To Codex or refresh this Action schema. For /goal or broad implementation prompts, call goal_intake or goal_loop immediately before long reasoning. This compact schema stays under 30 operations including action_health and call_tool, and exposes exact tool names such as workspace_list_projects, project_select, code_search, file_read_slice, file_apply_patch, file_create, command_run, and e2e_test_and_show_screenshot for source editing and E2E proof. It avoids broad context-pack actions that ChatGPT safety may block; inspect with code_search followed by narrow file_read_slice calls instead. It exposes allowlisted command execution and one-shot E2E/screenshot proof. Arbitrary-command tools remain blocked through both dedicated routes and call_tool. ChatGPT's sandbox cannot write /Users/... directly; use these actions. For generated images, use a Share/Copy Link/content URL, copied image, download, or local path with save_chatgpt_image/save_chatgpt_image_from_url.",
+        "OpenAPI bridge for Custom GPTs. Remote project selection defaults to read-only and full-write requires local CHATGPT2CODEX_REMOTE_WRITE=1 opt-in. This does not call OpenAI Codex or spend Codex quota; ChatGPT drives local coding actions through chatgpt2codex. Hard gate: do not claim local project inspection, edits, tests, commits, or image saves unless a current-turn ActionToolResponse includes ok=true and toolCall.namespace=ChatGPT_To_Codex. If the active ChatGPT app was Image Generation/ImageGen, image_gen, python_user_visible, or a text-only answer, no chatgpt2codex local work happened; reselect/reconnect ChatGPT To Codex or refresh this Action schema. For /goal or broad implementation prompts, call goal_intake or goal_loop immediately before long reasoning. This compact schema stays under 30 operations including action_health and call_tool, and exposes exact tool names such as workspace_list_projects, project_select, code_search, file_read_slice, file_apply_patch, file_create, command_run, and e2e_test_and_show_screenshot for source editing and E2E proof. It avoids broad context-pack actions that ChatGPT safety may block; inspect with code_search followed by narrow file_read_slice calls instead. It exposes allowlisted command execution and one-shot E2E/screenshot proof. Arbitrary-command tools remain blocked through both dedicated routes and call_tool. ChatGPT's sandbox cannot write /Users/... directly; use these actions. For generated images, use a Share/Copy Link/content URL, copied image, download, or local path with save_chatgpt_image/save_chatgpt_image_from_url.",
       "x-chatgpt2codex-tool-proof": TOOL_AVAILABILITY_GATE,
       "x-chatgpt2codex-openapi-operation-count": Object.keys(paths).length,
       "x-chatgpt2codex-tool-names": openApiActionRoutes().map((route) => route.tool),
@@ -729,7 +729,7 @@ function openApiSpec(publicOrigin: string): Record<string, unknown> {
             preset: {
               type: "string",
               enum: ["read-only", "tests-only", "full-write", "image-only"],
-              description: "Defaults to full-write on the GPT Actions bridge when omitted.",
+              description: "Defaults to read-only on the GPT Actions bridge. full-write requires local CHATGPT2CODEX_REMOTE_WRITE=1 opt-in.",
             },
             confirmSwitch: { type: "boolean" },
           },

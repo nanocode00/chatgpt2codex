@@ -1,5 +1,6 @@
 import { DomainError, ErrorCode, type Lease, type LeasePreset, type ToolContext } from "../types.js";
 import { requireLease } from "./project-select.js";
+import { assertRemoteWriteAllowed } from "../server/remote-safety.js";
 
 /**
  * Capability ceiling checked against the active project lease's preset.
@@ -36,5 +37,10 @@ export async function requireProjectLease(
       capability,
     });
   }
+
+  if (capability === "write" || capability === "remote") {
+    assertRemoteWriteAllowed(ctx, capability);
+  }
+
   return lease;
 }

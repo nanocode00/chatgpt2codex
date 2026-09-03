@@ -172,6 +172,7 @@ describe("remote MCP session (/mcp, how ChatGPT connects) marks ctx.remote", () 
 
   afterEach(async () => {
     delete process.env.CHATGPT2CODEX_CONTROL_CHATGPT;
+    delete process.env.CHATGPT2CODEX_REMOTE_WRITE;
     await client?.close().catch(() => undefined);
     client = undefined;
     await stop?.();
@@ -201,7 +202,7 @@ describe("remote MCP session (/mcp, how ChatGPT connects) marks ctx.remote", () 
     expect(session?.lease?.preset ?? null).not.toBe("control");
   }, 20_000);
 
-  it("still allows a normal preset (full-write) over the same /mcp session", async () => {
+  it("denies full-write over /mcp by default", async () => {
     const ctx = makeCtx(stateDir, projectRoot);
     const app = await startApp(ctx);
     stop = app.stop;
@@ -211,7 +212,26 @@ describe("remote MCP session (/mcp, how ChatGPT connects) marks ctx.remote", () 
 
     const result = (await client.callTool({
       name: "project_select",
-      arguments: { projectId: "proj", reason: "remote normal select", preset: "full-write" },
+      arguments: { projectId: "proj", reason: "remote write attempt", preset: "full-write" },
+    })) as { isError?: boolean; structuredContent?: { code?: string } };
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent?.code).toBe("PERMISSION_DENIED");
+  }, 20_000);
+
+  it("allows full-write over /mcp only after local operator opt-in", async () => {
+    process.env.CHATGPT2CODEX_REMOTE_WRITE = "1";
+
+    const ctx = makeCtx(stateDir, projectRoot);
+    const app = await startApp(ctx);
+    stop = app.stop;
+
+    const token = await getMcpAccessToken(app.baseUrl);
+    client = await connectMcpClient(app.baseUrl, token);
+
+    const result = (await client.callTool({
+      name: "project_select",
+      arguments: { projectId: "proj", reason: "remote write opted in", preset: "full-write" },
     })) as { isError?: boolean; structuredContent?: { lease?: { preset?: string } } };
 
     expect(result.isError).toBeFalsy();

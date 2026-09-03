@@ -47,7 +47,12 @@ import { isSecretPath, redact } from "../policy/secrets.js";
 import { resolveActiveProject } from "../workspace/active.js";
 import { CONTROL_TOOL_NAMES, isControlChatGptExposed, isControlEnabled } from "../control/policy.js";
 import { clearKill } from "../control/queue.js";
-import { assertArbitraryCommandLocalOnly, REMOTE_ARBITRARY_COMMAND_TOOL_NAMES } from "./remote-safety.js";
+import {
+  assertArbitraryCommandLocalOnly,
+  assertRemoteWriteAllowed,
+  isRemoteWriteEnabled,
+  REMOTE_ARBITRARY_COMMAND_TOOL_NAMES,
+} from "./remote-safety.js";
 import {
   handleComputerActionStatus,
   handleComputerKillSwitch,
@@ -867,7 +872,9 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
               "For /goal, deep research, or broad implementation prompts: call goal_loop or goal_intake immediately, then continue with project selection and inspection. Do not spend a long thinking turn before the first tool call.",
               "For Codex-style persistence: use goal_loop, perform one small inspect/edit/verify batch, then call goal_loop again with lastResult. Repeat until done or truly blocked.",
               "workspace_list_projects or workspace_refresh_index",
-              "project_select with preset=full-write for edits",
+              ctx.remote && !isRemoteWriteEnabled()
+                ? "Remote sessions start read-only. Full-write requires the local operator to set CHATGPT2CODEX_REMOTE_WRITE=1 before project_select preset=full-write can succeed."
+                : "project_select with preset=full-write for edits",
               "project_rules, project_status, code_search",
               "Avoid broad context-pack calls in ChatGPT; OpenAI safety can block them before they reach chatgpt2codex.",
               "file_read_slice before editing existing files",
@@ -912,9 +919,13 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
               sourceEditFlow: [
                 "Before coding, require a current-turn action response with ok=true and toolCall.namespace=ChatGPT_To_Codex. Otherwise no local project work occurred.",
                 "If the model says no ChatGPT To Codex tools/actions are available, no request reached the local runtime. Reconnect/select the app or refresh the GPT Action schema before continuing.",
-                "Call project_select with preset=full-write, or omit preset because the GPT Actions bridge defaults to full-write.",
+                ctx.remote && !isRemoteWriteEnabled()
+                  ? "Call project_select without preset (read-only). Remote source edits stay disabled until the local operator explicitly enables CHATGPT2CODEX_REMOTE_WRITE=1."
+                  : "Call project_select with preset=full-write for source edits.",
                 "Use code_search first, then narrow file_read_slice calls to inspect the repo. Avoid broad context-pack calls in ChatGPT because OpenAI safety may block them before they reach chatgpt2codex.",
-                "Apply changes directly with file_apply_patch or file_create. Never hand the user a script to paste when the action bridge is reachable.",
+                ctx.remote && !isRemoteWriteEnabled()
+                  ? "Inspect and plan only while remote write is disabled; file_apply_patch/file_create will remain permission-gated."
+                  : "Apply changes directly with file_apply_patch or file_create. Never hand the user a script to paste when the action bridge is reachable.",
                 "Use command_run for allowlisted verification. Arbitrary shell and caller-supplied E2E command strings are disabled through remote Actions.",
                 "Use repo status/diff/show changes and then commit/push only when requested.",
               ],
@@ -962,18 +973,24 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
           urgency: input.urgency ?? "normal",
           createdAt: new Date().toISOString(),
         });
+        const remoteWriteAvailable = !ctx.remote || isRemoteWriteEnabled();
+        const goalPreset = remoteWriteAvailable ? "full-write" : "read-only";
         const nextActions = input.projectId
           ? [
-              `Call project_select with projectId=${input.projectId}, preset=full-write, reason=goal ${goalId}.`,
+              `Call project_select with projectId=${input.projectId}, preset=${goalPreset}, reason=goal ${goalId}.`,
               "Call project_rules and project_status.",
               "Call code_search for the first implementation slice, then file_read_slice on the matching files.",
-              "Apply small patches and verify each slice; keep every tool call under roughly 20 seconds.",
+              remoteWriteAvailable
+                ? "Apply small patches and verify each slice; keep every tool call under roughly 20 seconds."
+                : "Remote write is disabled. Inspect and plan only until the local operator enables CHATGPT2CODEX_REMOTE_WRITE=1.",
             ]
           : [
               "Call workspace_list_projects or workspace_refresh_index now.",
-              "Select the best matching project with project_select preset=full-write.",
+              `Select the best matching project with project_select preset=${goalPreset}.`,
               "Call project_rules and project_status.",
-              "Break the goal into small tool calls; do not wait in a long thinking-only turn.",
+              remoteWriteAvailable
+                ? "Break the goal into small inspect/edit/verify tool calls; do not wait in a long thinking-only turn."
+                : "Remote write is disabled. Continue with read-only inspection until the local operator enables CHATGPT2CODEX_REMOTE_WRITE=1.",
             ];
         return makeResult(
           {
@@ -1023,16 +1040,20 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
         }
         const turn = previousTurns + 1;
         const remainingTurns = Math.max(0, maxTurns - turn);
+        const remoteWriteAvailable = !ctx.remote || isRemoteWriteEnabled();
+        const loopPreset = remoteWriteAvailable ? "full-write" : "read-only";
         const nextActions = input.projectId
           ? [
-              `Call project_select with projectId=${input.projectId}, preset=full-write, reason=loop ${loopId} turn ${turn}.`,
+              `Call project_select with projectId=${input.projectId}, preset=${loopPreset}, reason=loop ${loopId} turn ${turn}.`,
               "Call project_rules and project_status if they are not already fresh in this chat.",
-              "Read the smallest relevant context slice, apply one coherent patch/create batch, then run the closest verification command.",
+              remoteWriteAvailable
+                ? "Read the smallest relevant context slice, apply one coherent patch/create batch, then run the closest verification command."
+                : "Read the smallest relevant context slice and report the proposed change; remote mutation is disabled until CHATGPT2CODEX_REMOTE_WRITE=1 is enabled locally.",
               `Call goal_loop again with loopId=${loopId}, projectId=${input.projectId}, maxTurns=${maxTurns}, and lastResult summarizing the batch.`,
             ]
           : [
               "Call workspace_list_projects or workspace_refresh_index now.",
-              "Select the best matching project with project_select preset=full-write.",
+              `Select the best matching project with project_select preset=${loopPreset}.`,
               "Call project_rules and project_status.",
               `Call goal_loop again with loopId=${loopId}, the selected projectId, maxTurns=${maxTurns}, and lastResult='project selected'.`,
             ];
@@ -1338,6 +1359,11 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
         }
 
         const preset: LeasePreset = input.preset ?? "read-only";
+
+        if (preset === "full-write") {
+          assertRemoteWriteAllowed(ctx, "write");
+        }
+
         if (preset === "control" && ctx.remote) {
           // Arming a control lease (and resuming after a kill switch, which
           // only a fresh control grant can do — see

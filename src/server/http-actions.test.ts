@@ -190,6 +190,7 @@ describe("Custom GPT action bridge", () => {
       await stop();
       stop = undefined;
     }
+    delete process.env.CHATGPT2CODEX_REMOTE_WRITE;
     await fs.rm(stateDir, { recursive: true, force: true });
     await fs.rm(projectRoot, { recursive: true, force: true });
   });
@@ -702,7 +703,65 @@ describe("Custom GPT action bridge", () => {
     expect(selectRes.status).toBe(200);
     expect(selected.ok).toBe(true);
     expect(selected.structuredContent.lease?.projectId).toBe("proj");
-    expect(selected.structuredContent.lease?.preset).toBe("full-write");
+    expect(selected.structuredContent.lease?.preset).toBe("read-only");
+
+    const deniedWriteSelectRes = await postAction(server.baseUrl, "/actions/project-select", {
+      projectId: "proj",
+      reason: "remote self-grant attempt",
+      preset: "full-write",
+    });
+    const deniedWriteSelect = (await deniedWriteSelectRes.json()) as {
+      ok: boolean;
+      structuredContent: { code?: string };
+    };
+    expect(deniedWriteSelectRes.status).toBe(200);
+    expect(deniedWriteSelect.ok).toBe(false);
+    expect(deniedWriteSelect.structuredContent.code).toBe("PERMISSION_DENIED");
+
+    const deniedGenericWriteRes = await postAction(server.baseUrl, "/actions/call-tool", {
+      toolName: "project_select",
+      input: {
+        projectId: "proj",
+        reason: "generic remote self-grant attempt",
+        preset: "full-write",
+      },
+    });
+    const deniedGenericWrite = (await deniedGenericWriteRes.json()) as {
+      ok: boolean;
+      structuredContent: { code?: string };
+    };
+    expect(deniedGenericWriteRes.status).toBe(200);
+    expect(deniedGenericWrite.ok).toBe(false);
+    expect(deniedGenericWrite.structuredContent.code).toBe("PERMISSION_DENIED");
+
+    const deniedCreateRes = await postAction(server.baseUrl, "/actions/file-create", {
+      projectId: "proj",
+      path: "blocked-before-opt-in.txt",
+      content: "must not be written\n",
+    });
+    const deniedCreate = (await deniedCreateRes.json()) as {
+      ok: boolean;
+      structuredContent: { code?: string };
+    };
+    expect(deniedCreateRes.status).toBe(200);
+    expect(deniedCreate.ok).toBe(false);
+    expect(deniedCreate.structuredContent.code).toBe("PERMISSION_DENIED");
+    await expect(fs.stat(path.join(projectRoot, "blocked-before-opt-in.txt"))).rejects.toThrow();
+
+    process.env.CHATGPT2CODEX_REMOTE_WRITE = "1";
+
+    const writeSelectRes = await postAction(server.baseUrl, "/actions/project-select", {
+      projectId: "proj",
+      reason: "local operator opted in",
+      preset: "full-write",
+    });
+    const writeSelected = (await writeSelectRes.json()) as {
+      ok: boolean;
+      structuredContent: { lease?: Lease };
+    };
+    expect(writeSelectRes.status).toBe(200);
+    expect(writeSelected.ok).toBe(true);
+    expect(writeSelected.structuredContent.lease?.preset).toBe("full-write");
 
     const createRes = await postAction(server.baseUrl, "/actions/file-create", {
       projectId: "proj",
@@ -772,23 +831,27 @@ describe("Custom GPT action bridge", () => {
     const session = (await ctx.store.getSession()) as { lease?: { preset?: string } | null } | null;
     expect(session?.lease?.preset ?? null).not.toBe("control");
 
-    // Omitting preset (defaults to full-write) and explicitly requesting
-    // full-write must both keep working through the same bridge.
+    // Omitting preset is fail-closed to read-only. Explicit full-write is
+    // rejected unless the local operator has opted in with
+    // CHATGPT2CODEX_REMOTE_WRITE=1.
     const defaultedRes = await postAction(server.baseUrl, "/actions/call-tool", {
       toolName: "project_select",
       input: { projectId: "proj", reason: "default preset" },
     });
     const defaulted = (await defaultedRes.json()) as { ok: boolean; structuredContent: { lease?: Lease } };
     expect(defaulted.ok).toBe(true);
-    expect(defaulted.structuredContent.lease?.preset).toBe("full-write");
+    expect(defaulted.structuredContent.lease?.preset).toBe("read-only");
 
     const explicitFullWriteRes = await postAction(server.baseUrl, "/actions/call-tool", {
       toolName: "project_select",
       input: { projectId: "proj", reason: "explicit full-write", preset: "full-write" },
     });
-    const explicitFullWrite = (await explicitFullWriteRes.json()) as { ok: boolean; structuredContent: { lease?: Lease } };
-    expect(explicitFullWrite.ok).toBe(true);
-    expect(explicitFullWrite.structuredContent.lease?.preset).toBe("full-write");
+    const explicitFullWrite = (await explicitFullWriteRes.json()) as {
+      ok: boolean;
+      structuredContent: { code?: string };
+    };
+    expect(explicitFullWrite.ok).toBe(false);
+    expect(explicitFullWrite.structuredContent.code).toBe("PERMISSION_DENIED");
   });
 
   it("re-validates the registered tool's zod inputSchema on the generic call-tool bridge (bypasses the MCP SDK's normal validation otherwise)", async () => {
