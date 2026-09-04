@@ -430,6 +430,7 @@ export async function createFile(
   rel: string,
   content: string,
   overwrite?: boolean,
+  preconditionHash?: string,
 ): Promise<{ path: string; bytes: number }> {
   if (content.includes("\0")) {
     throw new DomainError(ErrorCode.NULLBYTE_REJECTED, "Content contains a null byte");
@@ -442,6 +443,8 @@ export async function createFile(
     if (exists) {
       throw new DomainError(ErrorCode.FILE_EXISTS, `File already exists: ${rel}`, { path: rel });
     }
+  } else if (preconditionHash) {
+    await enforcePrecondition(abs, rel, { [rel]: preconditionHash });
   }
 
   const dir = path.dirname(abs);

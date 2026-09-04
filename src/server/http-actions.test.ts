@@ -240,9 +240,13 @@ describe("Custom GPT action bridge", () => {
     expect(body.info.description).toContain("30 operations");
     expect(body.info.description).toContain("workspace_list_projects");
     expect(body.info.description).toContain("save_chatgpt_image/save_chatgpt_image_from_url");
+    expect(Object.keys(body.paths)).toHaveLength(25);
     expect(body.info["x-chatgpt2codex-tool-proof"]?.namespace).toBe("ChatGPT_To_Codex");
     expect(body.info["x-chatgpt2codex-openapi-operation-count"]).toBeLessThanOrEqual(30);
     expect(body.info["x-chatgpt2codex-tool-names"]).toContain("workspace_list_projects");
+    expect(body.info["x-chatgpt2codex-tool-names"]).toContain("project_skill_list");
+    expect(body.info["x-chatgpt2codex-tool-names"]).toContain("project_skill_read");
+    expect(body.info["x-chatgpt2codex-tool-names"]).toContain("project_skill_write");
     expect(body.info["x-chatgpt2codex-tool-names"]).toContain("command_list");
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("command_run");
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("e2e_open_target");
@@ -257,6 +261,9 @@ describe("Custom GPT action bridge", () => {
     expect(body.paths["/actions/file-apply-patch"]).toBeDefined();
     expect((body.paths["/actions/file-apply-patch"] as { post: { operationId: string } }).post.operationId).toBe("file_apply_patch");
     expect(body.paths["/actions/file-create"]).toBeDefined();
+    expect((body.paths["/actions/project-skill-list"] as { post: { operationId: string } }).post.operationId).toBe("project_skill_list");
+    expect((body.paths["/actions/project-skill-read"] as { post: { operationId: string } }).post.operationId).toBe("project_skill_read");
+    expect((body.paths["/actions/project-skill-write"] as { post: { operationId: string } }).post.operationId).toBe("project_skill_write");
     expect(body.paths["/actions/command-list"]).toBeDefined();
     expect((body.paths["/actions/command-list"] as { post: { operationId: string } }).post.operationId).toBe("command_list");
     expect(body.paths["/actions/local-shell-run"]).toBeUndefined();
@@ -293,6 +300,11 @@ describe("Custom GPT action bridge", () => {
     expect(body.components.schemas.E2eStartServerInput).toBeDefined();
     expect(body.components.schemas.CallToolInput.properties.toolName).toBeDefined();
     expect((body.components.schemas.ProjectOnlyInput as { required?: string[] }).required).toContain("projectId");
+    expect((body.components.schemas.ProjectSkillReadInput as { required?: string[] }).required).toEqual(["projectId", "skill"]);
+    expect((body.components.schemas.ProjectSkillWriteInput as { required?: string[] }).required).toEqual(["projectId", "skill", "content"]);
+    expect((body.components.schemas.ProjectSkillWriteInput as { properties?: Record<string, { enum?: string[]; pattern?: string; maxLength?: number }> }).properties?.source?.enum).toEqual(["codex", "agents", "claude", "chatgpt2codex"]);
+    expect((body.components.schemas.ProjectSkillWriteInput as { properties?: Record<string, { enum?: string[]; pattern?: string; maxLength?: number }> }).properties?.skill?.pattern).toContain("chatgpt2codex");
+    expect((body.components.schemas.ProjectSkillWriteInput as { properties?: Record<string, { enum?: string[]; pattern?: string; maxLength?: number }> }).properties?.content?.maxLength).toBe(262144);
     expect(body.components.schemas.FileApplyPatchInput.properties.patch).toBeDefined();
     expect(body.components.schemas.FileCreateInput.properties.content).toBeDefined();
     expect(body.components.schemas.SaveChatGptImageInput.properties.source?.enum).toEqual(["auto", "url"]);
@@ -349,6 +361,9 @@ describe("Custom GPT action bridge", () => {
     expect(body.openApiToolNames).toContain("workspace_list_projects");
     expect(body.openApiToolNames).toContain("project_select");
     expect(body.openApiToolNames).toContain("file_apply_patch");
+    expect(body.openApiToolNames).toContain("project_skill_list");
+    expect(body.openApiToolNames).toContain("project_skill_read");
+    expect(body.openApiToolNames).toContain("project_skill_write");
     expect(body.openApiToolNames).toContain("command_list");
     expect(body.openApiToolNames).not.toContain("local_shell_run");
     expect(body.openApiToolNames).not.toContain("command_run");

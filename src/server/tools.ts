@@ -44,6 +44,12 @@ import {
 import { gitRepositoryStatus, gitStatus, gitDiffSummary, gitStageAndCommit, gitPush } from "../git/git.js";
 import { resolveInProject } from "../policy/paths.js";
 import { isSecretPath, redact } from "../policy/secrets.js";
+import {
+  PROJECT_SKILL_SOURCES,
+  listProjectSkills,
+  readProjectSkill,
+  writeProjectSkill,
+} from "../skills/project-skills.js";
 import { resolveActiveProject } from "../workspace/active.js";
 import { CONTROL_TOOL_NAMES, isControlChatGptExposed, isControlEnabled } from "../control/policy.js";
 import { clearKill } from "../control/queue.js";
@@ -1533,6 +1539,97 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
           rules.push({ file: candidate, summary });
         }
         return makeResult({ rules }, `Found ${rules.length} rule file(s) for ${entry.name}.`);
+      });
+    },
+  );
+
+  registerTool(
+    "project_skill_list",
+    {
+      title: "List project skills",
+      description:
+        "Discover project-local SKILL.md files only under the dedicated .codex/.agents/.claude/.chatgpt2codex skill roots. Does not scan general hidden directories or return skill bodies.",
+      annotations: READ_ONLY_ANNOTATIONS,
+      _meta: chatGptToolMeta("Discovering project skills...", "Project skills discovered"),
+      inputSchema: { projectId: z.string() },
+    },
+    async (input) => {
+      return withErrorMapping(ctx, "project_skill_list", input, async () => {
+        await requireProjectLease(ctx, input.projectId, "read");
+        const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
+        const skills = await listProjectSkills(entry.root, (abs) => guardSecretPath(ctx, abs, "project_skill_list"));
+        return makeResult({ skills }, `Found ${skills.length} project skill(s).`);
+      });
+    },
+  );
+
+  registerTool(
+    "project_skill_read",
+    {
+      title: "Read project skill",
+      description:
+        "Read one discovered project-local SKILL.md by safe skill name or source:name identifier. This is not a generic project-relative file reader.",
+      annotations: READ_ONLY_ANNOTATIONS,
+      _meta: chatGptToolMeta("Reading project skill...", "Project skill loaded"),
+      inputSchema: {
+        projectId: z.string(),
+        skill: z.string(),
+      },
+    },
+    async (input) => {
+      return withErrorMapping(ctx, "project_skill_read", input, async () => {
+        await requireProjectLease(ctx, input.projectId, "read");
+        const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
+        const skill = await readProjectSkill(entry.root, input.skill, (abs) => guardSecretPath(ctx, abs, "project_skill_read"));
+        return makeResult({ ...skill }, `Read project skill ${skill.skill}.`);
+      });
+    },
+  );
+
+  registerTool(
+    "project_skill_write",
+    {
+      title: "Write project skill",
+      description:
+        "Create or update only <allowed-skill-root>/<skill-name>/SKILL.md. Existing skills require a matching preconditionHash from project_skill_read; new skills fail on conflict. Requires a full-write lease.",
+      annotations: LOCAL_WRITE_ANNOTATIONS,
+      _meta: chatGptToolMeta("Writing project skill...", "Project skill written"),
+      inputSchema: {
+        projectId: z.string(),
+        skill: z.string(),
+        source: z.enum(PROJECT_SKILL_SOURCES as ["codex", "agents", "claude", "chatgpt2codex"]).optional(),
+        content: z.string(),
+        preconditionHash: z.string().optional(),
+      },
+    },
+    async (input) => {
+      return withErrorMapping(ctx, "project_skill_write", input, async () => {
+        await requireProjectLease(ctx, input.projectId, "write");
+        const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
+        const result = await writeProjectSkill(
+          entry.root,
+          {
+            skill: input.skill,
+            source: input.source,
+            content: input.content,
+            preconditionHash: input.preconditionHash,
+          },
+          (abs) => guardSecretPath(ctx, abs, "project_skill_write"),
+        );
+        const checkpoint = await createCheckpoint(entry.root, input.projectId, result.created ? "create-skill" : "update-skill");
+        await ctx.ledger.append({
+          type: "fs.mutation.staged",
+          tool: "project_skill_write",
+          projectId: input.projectId,
+          checkpointId: checkpoint.checkpointId,
+          path: result.path,
+          skill: result.skill,
+          action: result.created ? "create" : "update",
+        });
+        return makeResult(
+          { ...result, checkpointId: checkpoint.checkpointId },
+          `${result.created ? "Created" : "Updated"} project skill ${result.skill}.`,
+        );
       });
     },
   );

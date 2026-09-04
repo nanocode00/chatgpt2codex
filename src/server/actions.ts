@@ -113,6 +113,30 @@ const ACTION_ROUTES: ActionRoute[] = [
     schema: "ProjectOnlyInput",
   },
   {
+    path: "/actions/project-skill-list",
+    tool: "project_skill_list",
+    operationId: "project_skill_list",
+    summary: "List project-local skills",
+    description: "Discover SKILL.md files only under the four allowed project skill roots without returning full bodies.",
+    schema: "ProjectOnlyInput",
+  },
+  {
+    path: "/actions/project-skill-read",
+    tool: "project_skill_read",
+    operationId: "project_skill_read",
+    summary: "Read a project-local skill",
+    description: "Read a discovered project-local SKILL.md by safe name or source:name identifier, including metadata and content hash.",
+    schema: "ProjectSkillReadInput",
+  },
+  {
+    path: "/actions/project-skill-write",
+    tool: "project_skill_write",
+    operationId: "project_skill_write",
+    summary: "Create or update a project-local skill",
+    description: "Create or update only an allowed <skill-name>/SKILL.md. Existing skills require a matching read hash; full-write lease and remote write opt-in rules apply.",
+    schema: "ProjectSkillWriteInput",
+  },
+  {
     path: "/actions/code-search",
     tool: "code_search",
     operationId: "code_search",
@@ -328,6 +352,9 @@ const OPENAPI_ACTION_TOOL_NAMES = new Set([
   "workspace_list_projects",
   "project_status",
   "project_rules",
+  "project_skill_list",
+  "project_skill_read",
+  "project_skill_write",
   "code_search",
   "file_read_slice",
   "file_apply_patch",
@@ -730,6 +757,36 @@ function openApiSpec(publicOrigin: string): Record<string, unknown> {
           additionalProperties: false,
           required: ["projectId"],
           properties: { projectId: { type: "string" } },
+        },
+        ProjectSkillReadInput: {
+          type: "object",
+          additionalProperties: false,
+          required: ["projectId", "skill"],
+          properties: {
+            projectId: { type: "string" },
+            skill: {
+              type: "string",
+              description: "Discovered skill name or safe source:name identifier; never a project-relative path.",
+            },
+          },
+        },
+        ProjectSkillWriteInput: {
+          type: "object",
+          additionalProperties: false,
+          required: ["projectId", "skill", "content"],
+          properties: {
+            projectId: { type: "string" },
+            skill: {
+              type: "string",
+              pattern: "^[a-z0-9][a-z0-9._-]{0,63}$|^(codex|agents|claude|chatgpt2codex):[a-z0-9][a-z0-9._-]{0,63}$",
+            },
+            source: { type: "string", enum: ["codex", "agents", "claude", "chatgpt2codex"] },
+            content: { type: "string", maxLength: 262144 },
+            preconditionHash: {
+              type: "string",
+              description: "Hash returned by project_skill_read. Required when updating an existing skill.",
+            },
+          },
         },
         ProjectSelectInput: {
           type: "object",

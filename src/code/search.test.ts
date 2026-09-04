@@ -57,6 +57,17 @@ describe("codeSearch", () => {
     expect(paths).toContain("real.ts");
   });
 
+  it("keeps .codex excluded from code_search while project skills use dedicated discovery", async () => {
+    await fs.mkdir(path.join(root, ".codex", "skills", "hidden-skill"), { recursive: true });
+    await fs.writeFile(path.join(root, ".codex", "skills", "hidden-skill", "SKILL.md"), "codex_skill_search_marker", "utf8");
+    await fs.writeFile(path.join(root, "visible.ts"), "codex_skill_search_marker", "utf8");
+
+    const result = await codeSearch(root, "codex_skill_search_marker");
+    const paths = result.matches.map((m) => m.path);
+    expect(paths.some((p) => p.includes(".codex"))).toBe(false);
+    expect(paths).toContain("visible.ts");
+  });
+
   it("returns an empty match set for an empty query rather than throwing", async () => {
     await fs.writeFile(path.join(root, "a.ts"), "content", "utf8");
     const result = await codeSearch(root, "");
