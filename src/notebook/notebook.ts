@@ -1,9 +1,10 @@
-import { promises as fs } from "node:fs";
+import { constants as fsConstants, promises as fs } from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { DomainError, ErrorCode } from "../types.js";
 import { resolveInProject } from "../policy/paths.js";
 import { isSecretPath } from "../policy/secrets.js";
+import { buildSafeChildEnv } from "../exec/command-runner.js";
 
 export const MAX_NOTEBOOK_BYTES = 10 * 1024 * 1024;
 const EXEC_TIMEOUT_MS = 120_000;
@@ -28,8 +29,19 @@ export interface NotebookExecutionResult {
   executed: boolean;
   codeCellCount: number;
   durationMs: number;
+  runtimeSource?: NotebookRuntimeSource;
+  projectEnvironmentBypassed?: boolean;
   error?: { cellIndex?: number; exceptionType: string; message: string };
 }
+
+export type NotebookRuntimeSource =
+  | "operator"
+  | "project:.venv"
+  | "project:.venvs/runtime"
+  | "project:venv"
+  | "active-venv"
+  | "active-conda"
+  | "system";
 
 type NotebookCell = Record<string, unknown> & { cell_type: string; source: string | string[]; metadata: Record<string, unknown> };
 type NotebookDoc = Record<string, unknown> & { nbformat: number; nbformat_minor: number; metadata: Record<string, unknown>; cells: NotebookCell[] };
@@ -92,22 +104,124 @@ async function readNotebook(root: string, rel: string): Promise<{ abs: string; d
   return { abs, doc: parseNotebook(text) };
 }
 
-async function discoverPython(root: string): Promise<string | undefined> {
-  const candidates = [
-    path.join(root, ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python"),
-    path.join(root, ".venvs", "runtime", process.platform === "win32" ? "Scripts/python.exe" : "bin/python"),
-    path.join(root, "venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python"),
-  ];
-  for (const candidate of candidates) {
-    const st = await fs.lstat(candidate).catch(() => null);
-    if (st?.isFile() && !st.isSymbolicLink()) return candidate;
+type NotebookPythonCandidate = { interpreter: string; source: NotebookRuntimeSource };
+type NotebookPythonProbe = (interpreter: string) => Promise<boolean>;
+type NotebookPythonRuntime = NotebookPythonCandidate & { projectEnvironmentBypassed: boolean };
+
+const RUNTIME_PROBE_HELPER = "import nbformat,nbclient,ipykernel";
+
+function activeVenvPython(prefix: string, platform: NodeJS.Platform): string {
+  return platform === "win32" ? path.join(prefix, "Scripts", "python.exe") : path.join(prefix, "bin", "python");
+}
+
+function activeCondaPython(prefix: string, platform: NodeJS.Platform): string {
+  return platform === "win32" ? path.join(prefix, "python.exe") : path.join(prefix, "bin", "python");
+}
+
+function projectPython(root: string, rel: string, platform: NodeJS.Platform): string {
+  return platform === "win32" ? path.join(root, rel, "Scripts", "python.exe") : path.join(root, rel, "bin", "python");
+}
+
+function addAbsoluteCandidate(candidates: NotebookPythonCandidate[], value: string | undefined, source: NotebookRuntimeSource, mapPath: (value: string) => string = (value) => value): void {
+  const raw = value?.trim();
+  if (!raw || !path.isAbsolute(raw)) return;
+  candidates.push({ interpreter: mapPath(raw), source });
+}
+
+async function isTrustedInterpreterFile(candidate: string): Promise<boolean> {
+  const st = await fs.lstat(candidate).catch(() => null);
+  return Boolean(st?.isFile() && !st.isSymbolicLink());
+}
+
+export async function resolveSystemNotebookPython(
+  pathValue: string | undefined,
+  platform: NodeJS.Platform = process.platform,
+): Promise<string | undefined> {
+  if (!pathValue) return undefined;
+  const pathApi = platform === "win32" ? path.win32 : path.posix;
+  const delimiter = platform === "win32" ? ";" : ":";
+  const executable = platform === "win32" ? "python.exe" : "python3";
+  for (const rawEntry of pathValue.split(delimiter)) {
+    const entry = rawEntry.trim();
+    if (!entry || !pathApi.isAbsolute(entry)) continue;
+    const candidate = pathApi.join(entry, executable);
+    let canonical: string;
+    try {
+      canonical = await fs.realpath(candidate);
+      const st = await fs.stat(canonical);
+      if (!st.isFile()) continue;
+      if (platform !== "win32") await fs.access(canonical, fsConstants.X_OK);
+    } catch {
+      continue;
+    }
+    return canonical;
   }
-  return process.platform === "win32" ? "python.exe" : "python3";
+  return undefined;
+}
+
+async function defaultRuntimeProbe(interpreter: string): Promise<boolean> {
+  try {
+    const result = await runPython(interpreter, RUNTIME_PROBE_HELPER, "", 5_000);
+    return !result.timedOut && result.code === 0;
+  } catch {
+    return false;
+  }
+}
+
+export async function discoverNotebookPython(
+  root: string,
+  options: {
+    env?: NodeJS.ProcessEnv;
+    platform?: NodeJS.Platform;
+    requireNotebookRuntime?: boolean;
+    probe?: NotebookPythonProbe;
+  } = {},
+): Promise<NotebookPythonRuntime | undefined> {
+  const env = options.env ?? process.env;
+  const platform = options.platform ?? process.platform;
+  const requireRuntime = options.requireNotebookRuntime ?? true;
+  const probe = options.probe ?? defaultRuntimeProbe;
+  const operatorCandidates: NotebookPythonCandidate[] = [];
+  addAbsoluteCandidate(operatorCandidates, env.CHATGPT2CODEX_NOTEBOOK_PYTHON, "operator");
+  for (const candidate of operatorCandidates) {
+    if (!(await isTrustedInterpreterFile(candidate.interpreter))) continue;
+    if (requireRuntime && !(await probe(candidate.interpreter))) continue;
+    return { ...candidate, projectEnvironmentBypassed: false };
+  }
+
+  const projectCandidates: NotebookPythonCandidate[] = [
+    { interpreter: projectPython(root, ".venv", platform), source: "project:.venv" },
+    { interpreter: projectPython(root, path.join(".venvs", "runtime"), platform), source: "project:.venvs/runtime" },
+    { interpreter: projectPython(root, "venv", platform), source: "project:venv" },
+  ];
+  let trustedProjectEnvironmentExists = false;
+  for (const candidate of projectCandidates) {
+    if (!(await isTrustedInterpreterFile(candidate.interpreter))) continue;
+    trustedProjectEnvironmentExists = true;
+    if (requireRuntime && !(await probe(candidate.interpreter))) continue;
+    return { ...candidate, projectEnvironmentBypassed: false };
+  }
+  if (requireRuntime && trustedProjectEnvironmentExists && env.CHATGPT2CODEX_NOTEBOOK_STRICT_PROJECT_ENV === "1") return undefined;
+
+  const fallbackCandidates: NotebookPythonCandidate[] = [];
+  addAbsoluteCandidate(fallbackCandidates, env.VIRTUAL_ENV, "active-venv", (prefix) => activeVenvPython(prefix, platform));
+  addAbsoluteCandidate(fallbackCandidates, env.CONDA_PREFIX, "active-conda", (prefix) => activeCondaPython(prefix, platform));
+  for (const candidate of fallbackCandidates) {
+    if (!(await isTrustedInterpreterFile(candidate.interpreter))) continue;
+    if (requireRuntime && !(await probe(candidate.interpreter))) continue;
+    return { ...candidate, projectEnvironmentBypassed: trustedProjectEnvironmentExists };
+  }
+
+  const safePath = options.env === undefined ? buildSafeChildEnv().PATH : env.PATH;
+  const systemInterpreter = await resolveSystemNotebookPython(safePath, platform);
+  if (!systemInterpreter) return undefined;
+  if (requireRuntime && !(await probe(systemInterpreter))) return undefined;
+  return { interpreter: systemInterpreter, source: "system", projectEnvironmentBypassed: trustedProjectEnvironmentExists };
 }
 
 function runPython(interpreter: string, script: string, stdinText: string, timeoutMs: number): Promise<{ code: number | null; stdout: string; stderr: string; timedOut: boolean }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(interpreter, ["-I", "-c", script], { shell: false, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+    const child = spawn(interpreter, ["-I", "-c", script], { shell: false, stdio: ["pipe", "pipe", "pipe"], windowsHide: true, env: buildSafeChildEnv() });
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8");
@@ -136,10 +250,10 @@ export async function validateNotebook(root: string, rel: string): Promise<Noteb
   const { doc } = await readNotebook(root, rel);
   const codeCells = doc.cells.map((c, i) => ({ c, i })).filter(({ c }) => c.cell_type === "code");
   let syntaxErrors: NotebookSyntaxError[] = [];
-  const interpreter = await discoverPython(root);
-  if (interpreter && codeCells.length) {
+  const runtime = await discoverNotebookPython(root, { requireNotebookRuntime: false });
+  if (runtime && codeCells.length) {
     try {
-      const r = await runPython(interpreter, SYNTAX_HELPER, JSON.stringify(codeCells.map(({ c, i }) => ({ index: i, source: Array.isArray(c.source) ? c.source.join("") : c.source }))), 15_000);
+      const r = await runPython(runtime.interpreter, SYNTAX_HELPER, JSON.stringify(codeCells.map(({ c, i }) => ({ index: i, source: Array.isArray(c.source) ? c.source.join("") : c.source }))), 15_000);
       if (!r.timedOut && r.code === 0) syntaxErrors = JSON.parse(r.stdout) as NotebookSyntaxError[];
     } catch {
       // Static syntax checking is best-effort; structural validation remains authoritative.
@@ -192,14 +306,14 @@ export async function executeNotebook(
   const started = Date.now();
   const { abs, doc } = await readNotebook(root, rel);
   const before = await fs.readFile(abs);
-  const interpreter = await discoverPython(root);
-  if (!interpreter) throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "Python runtime unavailable for notebook execution");
+  const runtime = await discoverNotebookPython(root);
+  if (!runtime) throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "Python runtime unavailable for notebook execution");
   const payload = { notebook: doc, timeout: internalOptions?.cellTimeoutSec ?? 30, cwd: path.dirname(abs) };
   let r;
   try {
-    r = await runPython(interpreter, EXEC_HELPER, JSON.stringify(payload), internalOptions?.overallTimeoutMs ?? EXEC_TIMEOUT_MS);
+    r = await runPython(runtime.interpreter, EXEC_HELPER, JSON.stringify(payload), internalOptions?.overallTimeoutMs ?? EXEC_TIMEOUT_MS);
   } catch (e) {
-    throw new DomainError(ErrorCode.NOT_IMPLEMENTED, `Python runtime unavailable for notebook execution: ${e instanceof Error ? e.message : String(e)}`);
+    throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "Python runtime unavailable for notebook execution");
   }
   const after = await fs.readFile(abs);
   if (!before.equals(after)) throw new DomainError(ErrorCode.PERMISSION_DENIED, "original notebook changed during execution validation");
@@ -207,10 +321,10 @@ export async function executeNotebook(
   let detail: Record<string, unknown> = {};
   try { detail = JSON.parse(r.stdout.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? "{}"); } catch {}
   const codeCellCount = doc.cells.filter((c) => c.cell_type === "code").length;
-  if (r.code === 0 && detail.kind === "ok") return { path: rel, executed: true, codeCellCount, durationMs: Date.now() - started };
+  if (r.code === 0 && detail.kind === "ok") return { path: rel, executed: true, codeCellCount, durationMs: Date.now() - started, runtimeSource: runtime.source, projectEnvironmentBypassed: runtime.projectEnvironmentBypassed };
   if (r.code === 5 || detail.kind === "timeout") throw new DomainError(ErrorCode.TIMEOUT, "notebook cell execution timed out");
   const exceptionType = typeof detail.type === "string" ? detail.type.slice(0, 80) : (r.code === 3 ? "DependencyUnavailable" : "NotebookExecutionError");
   const message = (typeof detail.message === "string" ? detail.message : "notebook execution failed").slice(0, MAX_MESSAGE);
   if (r.code === 3) throw new DomainError(ErrorCode.NOT_IMPLEMENTED, `Notebook runtime dependency unavailable: ${exceptionType}: ${message}`);
-  return { path: rel, executed: false, codeCellCount, durationMs: Date.now() - started, error: { cellIndex: typeof detail.cellIndex === "number" ? detail.cellIndex : undefined, exceptionType, message } };
+  return { path: rel, executed: false, codeCellCount, durationMs: Date.now() - started, runtimeSource: runtime.source, projectEnvironmentBypassed: runtime.projectEnvironmentBypassed, error: { cellIndex: typeof detail.cellIndex === "number" ? detail.cellIndex : undefined, exceptionType, message } };
 }

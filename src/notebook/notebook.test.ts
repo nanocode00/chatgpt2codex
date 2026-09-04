@@ -2,8 +2,9 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { executeNotebook, MAX_NOTEBOOK_BYTES, validateNotebook } from "./notebook.js";
+import { discoverNotebookPython, executeNotebook, MAX_NOTEBOOK_BYTES, resolveSystemNotebookPython, validateNotebook } from "./notebook.js";
 import { DomainError, ErrorCode } from "../types.js";
+import { buildSafeChildEnv } from "../exec/command-runner.js";
 
 let root: string;
 
@@ -28,6 +29,261 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await fs.rm(root, { recursive: true, force: true });
+});
+
+async function fakePython(file: string): Promise<string> {
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, "fake-python");
+  return file;
+}
+
+async function executableFile(file: string, content = "fake-executable"): Promise<string> {
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, content);
+  if (process.platform !== "win32") await fs.chmod(file, 0o755);
+  return file;
+}
+
+const unixPython = (prefix: string) => path.join(prefix, "bin", "python");
+
+describe("notebook interpreter discovery", () => {
+  it("uses the explicit operator Python first", async () => {
+    const operator = await fakePython(path.join(root, "operator", "python"));
+    await fakePython(unixPython(path.join(root, ".venv")));
+    const result = await discoverNotebookPython(root, { platform: "linux", env: { CHATGPT2CODEX_NOTEBOOK_PYTHON: operator }, probe: async () => true });
+    expect(result).toEqual({ interpreter: operator, source: "operator", projectEnvironmentBypassed: false });
+  });
+
+  it.each([
+    [".venv", "project:.venv"],
+    [path.join(".venvs", "runtime"), "project:.venvs/runtime"],
+    ["venv", "project:venv"],
+  ] as const)("selects project-local %s", async (rel, source) => {
+    const interpreter = await fakePython(unixPython(path.join(root, rel)));
+    const result = await discoverNotebookPython(root, { platform: "linux", env: {}, probe: async () => true });
+    expect(result).toEqual({ interpreter, source, projectEnvironmentBypassed: false });
+  });
+
+  it("selects inherited active VIRTUAL_ENV then CONDA_PREFIX", async () => {
+    const venv = path.join(root, "active-venv");
+    const conda = path.join(root, "active-conda");
+    await fakePython(unixPython(venv));
+    await fakePython(unixPython(conda));
+    expect(await discoverNotebookPython(root, { platform: "linux", env: { VIRTUAL_ENV: venv, CONDA_PREFIX: conda }, probe: async () => true }))
+      .toMatchObject({ source: "active-venv" });
+    expect(await discoverNotebookPython(root, { platform: "linux", env: { CONDA_PREFIX: conda }, probe: async () => true }))
+      .toMatchObject({ source: "active-conda" });
+  });
+
+  it("falls back from a project env without notebook runtime to an active env", async () => {
+    const project = await fakePython(unixPython(path.join(root, ".venv")));
+    const condaPrefix = path.join(root, "conda");
+    const conda = await fakePython(unixPython(condaPrefix));
+    const result = await discoverNotebookPython(root, {
+      platform: "linux",
+      env: { CONDA_PREFIX: condaPrefix },
+      probe: async (candidate) => candidate === conda,
+    });
+    expect(project).not.toBe(conda);
+    expect(result).toEqual({ interpreter: conda, source: "active-conda", projectEnvironmentBypassed: true });
+  });
+
+  it("returns unavailable when no trusted candidate has notebook runtime", async () => {
+    await fakePython(unixPython(path.join(root, ".venv")));
+    expect(await discoverNotebookPython(root, { platform: "linux", env: {}, probe: async () => false })).toBeUndefined();
+  });
+
+  it("ignores malformed/nonexistent operator override and safely falls back", async () => {
+    const project = await fakePython(unixPython(path.join(root, ".venv")));
+    expect(await discoverNotebookPython(root, { platform: "linux", env: { CHATGPT2CODEX_NOTEBOOK_PYTHON: "relative/python" }, probe: async () => true }))
+      .toEqual({ interpreter: project, source: "project:.venv", projectEnvironmentBypassed: false });
+    expect(await discoverNotebookPython(root, { platform: "linux", env: { CHATGPT2CODEX_NOTEBOOK_PYTHON: path.join(root, "missing-python") }, probe: async () => true }))
+      .toEqual({ interpreter: project, source: "project:.venv", projectEnvironmentBypassed: false });
+  });
+
+  it("rejects symlink interpreters", async () => {
+    const target = await fakePython(path.join(root, "target-python"));
+    const link = unixPython(path.join(root, ".venv"));
+    await fs.mkdir(path.dirname(link), { recursive: true });
+    await fs.symlink(target, link);
+    const activePrefix = path.join(root, "active");
+    const active = await fakePython(unixPython(activePrefix));
+    const result = await discoverNotebookPython(root, { platform: "linux", env: { VIRTUAL_ENV: activePrefix }, probe: async () => true });
+    expect(result).toEqual({ interpreter: active, source: "active-venv", projectEnvironmentBypassed: false });
+  });
+
+  it("does not derive candidates from notebook-controlled environment names", async () => {
+    const seen: string[] = [];
+    await discoverNotebookPython(root, { platform: "linux", env: { PATH: "" }, probe: async (candidate) => { seen.push(candidate); return false; } });
+    expect(seen).toEqual([]);
+    expect(seen.join(" ")).not.toMatch(/conda run|conda activate|kernel|argv/i);
+  });
+
+  it("marks project bypass when system fallback is selected", async () => {
+    await fakePython(unixPython(path.join(root, ".venv")));
+    const systemDir = path.join(root, "system-bin");
+    const systemPython = await executableFile(path.join(systemDir, "python3"));
+    const result = await discoverNotebookPython(root, {
+      platform: "linux",
+      env: { PATH: systemDir },
+      probe: async (candidate) => candidate === systemPython,
+    });
+    expect(result).toEqual({ interpreter: systemPython, source: "system", projectEnvironmentBypassed: true });
+  });
+
+  it("strict project affinity blocks active/system fallback only for trusted project interpreters", async () => {
+    const project = await fakePython(unixPython(path.join(root, ".venv")));
+    const condaPrefix = path.join(root, "conda");
+    const conda = await fakePython(unixPython(condaPrefix));
+    expect(await discoverNotebookPython(root, {
+      platform: "linux",
+      env: { CONDA_PREFIX: condaPrefix, CHATGPT2CODEX_NOTEBOOK_STRICT_PROJECT_ENV: "1" },
+      probe: async (candidate) => candidate === conda && candidate !== project,
+    })).toBeUndefined();
+  });
+
+  it("strict mode still allows fallback when project interpreter is missing, malformed, or symlink-rejected", async () => {
+    const condaPrefix = path.join(root, "conda");
+    const conda = await fakePython(unixPython(condaPrefix));
+    const target = await fakePython(path.join(root, "target-python"));
+    const rejected = unixPython(path.join(root, ".venv"));
+    await fs.mkdir(path.dirname(rejected), { recursive: true });
+    await fs.symlink(target, rejected);
+    await fs.mkdir(unixPython(path.join(root, ".venvs", "runtime")), { recursive: true });
+    const result = await discoverNotebookPython(root, {
+      platform: "linux",
+      env: { CONDA_PREFIX: condaPrefix, CHATGPT2CODEX_NOTEBOOK_STRICT_PROJECT_ENV: "1" },
+      probe: async () => true,
+    });
+    expect(result).toEqual({ interpreter: conda, source: "active-conda", projectEnvironmentBypassed: false });
+  });
+
+  it("operator override keeps priority in strict mode", async () => {
+    const operator = await fakePython(path.join(root, "operator", "python"));
+    await fakePython(unixPython(path.join(root, ".venv")));
+    const result = await discoverNotebookPython(root, {
+      platform: "linux",
+      env: { CHATGPT2CODEX_NOTEBOOK_PYTHON: operator, CHATGPT2CODEX_NOTEBOOK_STRICT_PROJECT_ENV: "1" },
+      probe: async (candidate) => candidate === operator,
+    });
+    expect(result).toEqual({ interpreter: operator, source: "operator", projectEnvironmentBypassed: false });
+  });
+
+  it("does not pass notebook interpreter-selection operator env into child environments", () => {
+    const saved = {
+      strict: process.env.CHATGPT2CODEX_NOTEBOOK_STRICT_PROJECT_ENV,
+      python: process.env.CHATGPT2CODEX_NOTEBOOK_PYTHON,
+      venv: process.env.VIRTUAL_ENV,
+      conda: process.env.CONDA_PREFIX,
+    };
+    process.env.CHATGPT2CODEX_NOTEBOOK_STRICT_PROJECT_ENV = "1";
+    process.env.CHATGPT2CODEX_NOTEBOOK_PYTHON = "/private/operator/python";
+    process.env.VIRTUAL_ENV = "/private/venv";
+    process.env.CONDA_PREFIX = "/private/conda";
+    try {
+      const childEnv = buildSafeChildEnv();
+      expect(childEnv.CHATGPT2CODEX_NOTEBOOK_STRICT_PROJECT_ENV).toBeUndefined();
+      expect(childEnv.CHATGPT2CODEX_NOTEBOOK_PYTHON).toBeUndefined();
+      expect(childEnv.VIRTUAL_ENV).toBeUndefined();
+      expect(childEnv.CONDA_PREFIX).toBeUndefined();
+    } finally {
+      if (saved.strict === undefined) delete process.env.CHATGPT2CODEX_NOTEBOOK_STRICT_PROJECT_ENV; else process.env.CHATGPT2CODEX_NOTEBOOK_STRICT_PROJECT_ENV = saved.strict;
+      if (saved.python === undefined) delete process.env.CHATGPT2CODEX_NOTEBOOK_PYTHON; else process.env.CHATGPT2CODEX_NOTEBOOK_PYTHON = saved.python;
+      if (saved.venv === undefined) delete process.env.VIRTUAL_ENV; else process.env.VIRTUAL_ENV = saved.venv;
+      if (saved.conda === undefined) delete process.env.CONDA_PREFIX; else process.env.CONDA_PREFIX = saved.conda;
+    }
+  });
+});
+
+describe("system notebook Python resolution", () => {
+  it("resolves the first absolute PATH candidate once to a canonical regular executable", async () => {
+    if (process.platform === "win32") return;
+    const first = path.join(root, "first");
+    const target = await executableFile(path.join(root, "targets", "python-real"));
+    await fs.mkdir(first, { recursive: true });
+    await fs.symlink(target, path.join(first, "python3"));
+    const resolved = await resolveSystemNotebookPython(`:${path.join("relative", "bin")}:${first}`, "linux");
+    expect(resolved).toBe(await fs.realpath(target));
+    expect(path.isAbsolute(resolved!)).toBe(true);
+  });
+
+  it("rejects a symlink whose final target is not a regular file", async () => {
+    if (process.platform === "win32") return;
+    const bin = path.join(root, "bin");
+    const dirTarget = path.join(root, "directory-target");
+    await fs.mkdir(bin, { recursive: true });
+    await fs.mkdir(dirTarget, { recursive: true });
+    await fs.symlink(dirTarget, path.join(bin, "python3"));
+    expect(await resolveSystemNotebookPython(bin, "linux")).toBeUndefined();
+  });
+
+  it("rejects a non-executable Unix final target", async () => {
+    if (process.platform === "win32") return;
+    const bin = path.join(root, "bin");
+    await fs.mkdir(bin, { recursive: true });
+    await fs.writeFile(path.join(bin, "python3"), "not executable");
+    await fs.chmod(path.join(bin, "python3"), 0o644);
+    expect(await resolveSystemNotebookPython(bin, "linux")).toBeUndefined();
+  });
+
+  it("returns unavailable when no system interpreter is found", async () => {
+    expect(await discoverNotebookPython(root, { platform: process.platform, env: { PATH: path.join(root, "missing-bin") }, probe: async () => true })).toBeUndefined();
+  });
+
+  it("keeps the selected canonical interpreter after the discovery PATH value changes", async () => {
+    if (process.platform === "win32") return;
+    const firstBin = path.join(root, "first-bin");
+    const secondBin = path.join(root, "second-bin");
+    const first = await executableFile(path.join(firstBin, "python3"));
+    await executableFile(path.join(secondBin, "python3"));
+    const env: NodeJS.ProcessEnv = { PATH: firstBin };
+    const selected = await discoverNotebookPython(root, { platform: "linux", env, probe: async () => true });
+    env.PATH = secondBin;
+    expect(selected?.interpreter).toBe(await fs.realpath(first));
+    expect(selected?.source).toBe("system");
+  });
+
+  it("uses the same canonical system executable after the PATH entry changes", async () => {
+    if (process.platform === "win32") return;
+    const bin = path.join(root, "bin");
+    const targetA = path.join(root, "python-a");
+    const targetB = path.join(root, "python-b");
+    const link = path.join(bin, "python3");
+    const log = path.join(root, "runs.log");
+    await fs.mkdir(bin, { recursive: true });
+    const scriptA = `#!${process.execPath}\nconst fs=require('fs');const link=${JSON.stringify(link)};const b=${JSON.stringify(targetB)};const log=${JSON.stringify(log)};process.stdin.resume();process.stdin.on('end',()=>{fs.appendFileSync(log,'A\\n');try{fs.unlinkSync(link)}catch{};fs.symlinkSync(b,link);console.log(JSON.stringify({kind:'ok'}));});\n`;
+    const scriptB = `#!${process.execPath}\nconst fs=require('fs');const log=${JSON.stringify(log)};process.stdin.resume();process.stdin.on('end',()=>{fs.appendFileSync(log,'B\\n');console.log(JSON.stringify({kind:'ok'}));});\n`;
+    await executableFile(targetA, scriptA);
+    await executableFile(targetB, scriptB);
+    await fs.symlink(targetA, link);
+    await fs.writeFile(path.join(root, "system.ipynb"), nb([{ cell_type: "code", source: "x=1\n" }]));
+
+    const saved = {
+      path: process.env.PATH,
+      operator: process.env.CHATGPT2CODEX_NOTEBOOK_PYTHON,
+      strict: process.env.CHATGPT2CODEX_NOTEBOOK_STRICT_PROJECT_ENV,
+      venv: process.env.VIRTUAL_ENV,
+      conda: process.env.CONDA_PREFIX,
+    };
+    process.env.PATH = bin;
+    delete process.env.CHATGPT2CODEX_NOTEBOOK_PYTHON;
+    delete process.env.CHATGPT2CODEX_NOTEBOOK_STRICT_PROJECT_ENV;
+    delete process.env.VIRTUAL_ENV;
+    delete process.env.CONDA_PREFIX;
+    try {
+      const result = await executeNotebook(root, "system.ipynb");
+      expect(result).toMatchObject({ executed: true, runtimeSource: "system", projectEnvironmentBypassed: false });
+      expect(JSON.stringify(result)).not.toContain(root);
+      expect((await fs.readFile(log, "utf8")).trim().split("\n")).toEqual(["A", "A"]);
+      expect(await fs.realpath(link)).toBe(await fs.realpath(targetB));
+    } finally {
+      if (saved.path === undefined) delete process.env.PATH; else process.env.PATH = saved.path;
+      if (saved.operator === undefined) delete process.env.CHATGPT2CODEX_NOTEBOOK_PYTHON; else process.env.CHATGPT2CODEX_NOTEBOOK_PYTHON = saved.operator;
+      if (saved.strict === undefined) delete process.env.CHATGPT2CODEX_NOTEBOOK_STRICT_PROJECT_ENV; else process.env.CHATGPT2CODEX_NOTEBOOK_STRICT_PROJECT_ENV = saved.strict;
+      if (saved.venv === undefined) delete process.env.VIRTUAL_ENV; else process.env.VIRTUAL_ENV = saved.venv;
+      if (saved.conda === undefined) delete process.env.CONDA_PREFIX; else process.env.CONDA_PREFIX = saved.conda;
+    }
+  });
 });
 
 describe("notebook validation", () => {
