@@ -209,6 +209,14 @@ const ACTION_ROUTES: ActionRoute[] = [
     schema: "NotebookPathInput",
   },
   {
+    path: "/actions/python-execute",
+    tool: "python_execute",
+    operationId: "python_execute",
+    summary: "Execute Python script",
+    description: "Execute a project-confined .py file with trusted Python discovery. Requires full-write and remote exec/write opt-ins; accepts only projectId and path.",
+    schema: "PythonPathInput",
+  },
+  {
     path: "/actions/local-shell-run",
     tool: "local_shell_run",
     operationId: "local_shell_run",
@@ -379,6 +387,7 @@ const OPENAPI_ACTION_TOOL_NAMES = new Set([
   "command_run",
   "notebook_validate",
   "notebook_execute",
+  "python_execute",
   "e2e_open_target",
   "e2e_test_and_show_screenshot",
   "repo_status",
@@ -601,19 +610,6 @@ async function actionResponse(ctx: ToolContext, publicOrigin: string, tool: stri
 
 function openApiSpec(publicOrigin: string): Record<string, unknown> {
   const paths: Record<string, unknown> = {
-    "/actions/health": {
-      get: {
-        operationId: "action_health",
-        summary: "Check chatgpt2codex action bridge health",
-        security: [],
-        responses: {
-          "200": {
-            description: "Health status",
-            content: { "application/json": { schema: { "$ref": "#/components/schemas/HealthResponse" } } },
-          },
-        },
-      },
-    },
     "/actions/call-tool": {
       post: {
         operationId: "call_tool",
@@ -670,7 +666,7 @@ function openApiSpec(publicOrigin: string): Record<string, unknown> {
       title: "chatgpt2codex Custom GPT Actions",
       version: "0.1.6",
       description:
-        "OpenAPI bridge for Custom GPTs. Remote project selection defaults to read-only and full-write requires local CHATGPT2CODEX_REMOTE_WRITE=1 opt-in. This does not call OpenAI Codex or spend Codex quota; ChatGPT drives local coding actions through chatgpt2codex. Hard gate: do not claim local project inspection, edits, tests, commits, or image saves unless a current-turn ActionToolResponse includes ok=true and toolCall.namespace=ChatGPT_To_Codex. If the active ChatGPT app was Image Generation/ImageGen, image_gen, python_user_visible, or a text-only answer, no chatgpt2codex local work happened; reselect/reconnect ChatGPT To Codex or refresh this Action schema. For /goal or broad implementation prompts, call goal_intake or goal_loop immediately before long reasoning. This compact schema stays under 30 operations including action_health and call_tool, and exposes exact tool names such as workspace_list_projects, project_select, code_search, file_read_slice, file_apply_patch, file_create, command_list, command_run, and e2e_test_and_show_screenshot for source editing and E2E proof. It avoids broad context-pack actions that ChatGPT safety may block; inspect with code_search followed by narrow file_read_slice calls instead. It exposes dedicated command discovery plus allowlisted command execution and one-shot E2E/screenshot proof. Arbitrary-command tools remain blocked through both dedicated routes and call_tool. ChatGPT's sandbox cannot write /Users/... directly; use these actions. For generated images, pass an explicit Share/Copy Link/content URL to save_chatgpt_image/save_chatgpt_image_from_url; remote Actions never inspect the local clipboard, Downloads, or arbitrary paths.",
+        "OpenAPI bridge for Custom GPTs. Remote project selection defaults to read-only and full-write requires local CHATGPT2CODEX_REMOTE_WRITE=1 opt-in. This does not call OpenAI Codex or spend Codex quota; ChatGPT drives local coding actions through chatgpt2codex. Hard gate: do not claim local project inspection, edits, tests, commits, or image saves unless a current-turn ActionToolResponse includes ok=true and toolCall.namespace=ChatGPT_To_Codex. If the active ChatGPT app was Image Generation/ImageGen, image_gen, python_user_visible, or a text-only answer, no chatgpt2codex local work happened; reselect/reconnect ChatGPT To Codex or refresh this Action schema. For /goal or broad implementation prompts, call goal_intake or goal_loop immediately before long reasoning. This compact Custom GPT schema stays at or below 30 operations; the unauthenticated /actions/health endpoint remains available over HTTP but is intentionally omitted from the Action schema to preserve the operation budget. Dedicated tools include workspace_list_projects, project_select, code_search, file_read_slice, file_apply_patch, file_create, command_list, command_run, python_execute, and e2e_test_and_show_screenshot for source editing, allowlisted command execution and one-shot E2E/screenshot proof. It avoids broad context-pack actions that ChatGPT safety may block; inspect with code_search followed by narrow file_read_slice calls instead. Arbitrary-command tools remain blocked through both dedicated routes and call_tool. ChatGPT's sandbox cannot write /Users/... directly; use these actions. For generated images, pass an explicit Share/Copy Link/content URL to save_chatgpt_image/save_chatgpt_image_from_url; remote Actions never inspect the local clipboard, Downloads, or arbitrary paths.",
       "x-chatgpt2codex-tool-proof": TOOL_AVAILABILITY_GATE,
       "x-chatgpt2codex-openapi-operation-count": Object.keys(paths).length,
       "x-chatgpt2codex-tool-names": openApiActionRoutes().map((route) => route.tool),
@@ -887,6 +883,15 @@ function openApiSpec(publicOrigin: string): Record<string, unknown> {
           properties: {
             projectId: { type: "string" },
             path: { type: "string", description: "Project-relative .ipynb path." },
+          },
+        },
+        PythonPathInput: {
+          type: "object",
+          additionalProperties: false,
+          required: ["projectId", "path"],
+          properties: {
+            projectId: { type: "string" },
+            path: { type: "string", description: "Project-relative .py path." },
           },
         },
         LocalShellRunInput: {

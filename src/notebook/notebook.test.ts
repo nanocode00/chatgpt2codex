@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { discoverNotebookPython, executeNotebook, MAX_NOTEBOOK_BYTES, resolveSystemNotebookPython, validateNotebook } from "./notebook.js";
+import { discoverNotebookPython, discoverPythonScriptRuntime, executeNotebook, MAX_NOTEBOOK_BYTES, resolveSystemNotebookPython, validateNotebook } from "./notebook.js";
 import { DomainError, ErrorCode } from "../types.js";
 import { buildSafeChildEnv } from "../exec/command-runner.js";
 
@@ -192,6 +192,85 @@ describe("notebook interpreter discovery", () => {
       if (saved.venv === undefined) delete process.env.VIRTUAL_ENV; else process.env.VIRTUAL_ENV = saved.venv;
       if (saved.conda === undefined) delete process.env.CONDA_PREFIX; else process.env.CONDA_PREFIX = saved.conda;
     }
+  });
+});
+
+describe("Python script interpreter discovery", () => {
+  it("uses CHATGPT2CODEX_PYTHON as the script-only operator override", async () => {
+    const operator = await executableFile(path.join(root, "operator", "python"));
+    await executableFile(unixPython(path.join(root, ".venv")));
+    expect(await discoverPythonScriptRuntime(root, { platform: "linux", env: { CHATGPT2CODEX_PYTHON: operator } }))
+      .toEqual({ interpreter: operator, source: "operator", projectEnvironmentBypassed: false });
+
+    const project = unixPython(path.join(root, ".venv"));
+    expect(await discoverPythonScriptRuntime(root, { platform: "linux", env: {} }))
+      .toEqual({ interpreter: project, source: "project:.venv", projectEnvironmentBypassed: false });
+  });
+
+  it("ignores CHATGPT2CODEX_NOTEBOOK_PYTHON and keeps project affinity", async () => {
+    const notebookOnly = await executableFile(path.join(root, "notebook-only", "python"));
+    const project = await executableFile(unixPython(path.join(root, ".venv")));
+    expect(await discoverPythonScriptRuntime(root, {
+      platform: "linux",
+      env: { CHATGPT2CODEX_NOTEBOOK_PYTHON: notebookOnly },
+    })).toEqual({ interpreter: project, source: "project:.venv", projectEnvironmentBypassed: false });
+  });
+
+  it("keeps notebook and script operator overrides independent when both are set", async () => {
+    const scriptOperator = await executableFile(path.join(root, "script-operator", "python"));
+    const notebookOperator = await executableFile(path.join(root, "notebook-operator", "python"));
+    expect(await discoverPythonScriptRuntime(root, {
+      platform: "linux",
+      env: {
+        CHATGPT2CODEX_PYTHON: scriptOperator,
+        CHATGPT2CODEX_NOTEBOOK_PYTHON: notebookOperator,
+      },
+    })).toEqual({ interpreter: scriptOperator, source: "operator", projectEnvironmentBypassed: false });
+
+    expect(await discoverNotebookPython(root, {
+      platform: "linux",
+      env: {
+        CHATGPT2CODEX_PYTHON: scriptOperator,
+        CHATGPT2CODEX_NOTEBOOK_PYTHON: notebookOperator,
+      },
+      probe: async (candidate) => candidate === notebookOperator,
+    })).toEqual({ interpreter: notebookOperator, source: "operator", projectEnvironmentBypassed: false });
+  });
+
+  it("does not let CHATGPT2CODEX_PYTHON change notebook selection", async () => {
+    const scriptOperator = await executableFile(path.join(root, "script-only", "python"));
+    const project = await executableFile(unixPython(path.join(root, ".venv")));
+    expect(await discoverNotebookPython(root, {
+      platform: "linux",
+      env: { CHATGPT2CODEX_PYTHON: scriptOperator },
+      probe: async (candidate) => candidate === project,
+    })).toEqual({ interpreter: project, source: "project:.venv", projectEnvironmentBypassed: false });
+  });
+
+  it.each([
+    [".venv", "project:.venv"],
+    [path.join(".venvs", "runtime"), "project:.venvs/runtime"],
+    ["venv", "project:venv"],
+  ] as const)("selects executable project-local %s", async (rel, source) => {
+    const interpreter = await executableFile(unixPython(path.join(root, rel)));
+    expect(await discoverPythonScriptRuntime(root, { platform: "linux", env: {} }))
+      .toEqual({ interpreter, source, projectEnvironmentBypassed: false });
+  });
+
+  it("falls back active venv then conda, then canonical system Python", async () => {
+    const venv = path.join(root, "active-venv");
+    const conda = path.join(root, "active-conda");
+    await executableFile(unixPython(venv));
+    await executableFile(unixPython(conda));
+    expect(await discoverPythonScriptRuntime(root, { platform: "linux", env: { VIRTUAL_ENV: venv, CONDA_PREFIX: conda } })).toMatchObject({ source: "active-venv" });
+    expect(await discoverPythonScriptRuntime(root, { platform: "linux", env: { CONDA_PREFIX: conda } })).toMatchObject({ source: "active-conda" });
+
+    const bin = path.join(root, "system-bin");
+    const target = await executableFile(path.join(root, "canonical-python"));
+    await fs.mkdir(bin, { recursive: true });
+    await fs.symlink(target, path.join(bin, "python3"));
+    expect(await discoverPythonScriptRuntime(root, { platform: "linux", env: { PATH: bin } }))
+      .toEqual({ interpreter: await fs.realpath(target), source: "system", projectEnvironmentBypassed: false });
   });
 });
 

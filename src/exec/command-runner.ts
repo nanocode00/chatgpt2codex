@@ -297,7 +297,7 @@ function buildExecFileInvocation(cmd: string, args: string[]): { file: string; a
   return { file: cmd, args };
 }
 
-function killProcessTree(pid: number | undefined, done: () => void): void {
+export function killProcessTree(pid: number | undefined, done: () => void): void {
   if (!pid) {
     done();
     return;

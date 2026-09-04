@@ -73,6 +73,7 @@ const ENABLED_VALUES = new Set(["1", "true", "yes", "on"]);
 export const REMOTE_EXECUTION_TOOL_NAMES: ReadonlySet<string> = new Set([
   "command_run",
   "notebook_execute",
+  "python_execute",
   "e2e_test_and_show_screenshot",
 ]);
 

@@ -106,7 +106,7 @@ async function readNotebook(root: string, rel: string): Promise<{ abs: string; d
 
 type NotebookPythonCandidate = { interpreter: string; source: NotebookRuntimeSource };
 type NotebookPythonProbe = (interpreter: string) => Promise<boolean>;
-type NotebookPythonRuntime = NotebookPythonCandidate & { projectEnvironmentBypassed: boolean };
+export type NotebookPythonRuntime = NotebookPythonCandidate & { projectEnvironmentBypassed: boolean };
 
 const RUNTIME_PROBE_HELPER = "import nbformat,nbclient,ipykernel";
 
@@ -131,6 +131,17 @@ function addAbsoluteCandidate(candidates: NotebookPythonCandidate[], value: stri
 async function isTrustedInterpreterFile(candidate: string): Promise<boolean> {
   const st = await fs.lstat(candidate).catch(() => null);
   return Boolean(st?.isFile() && !st.isSymbolicLink());
+}
+
+async function isExecutableTrustedInterpreterFile(candidate: string, platform: NodeJS.Platform): Promise<boolean> {
+  if (!(await isTrustedInterpreterFile(candidate))) return false;
+  if (platform === "win32") return true;
+  try {
+    await fs.access(candidate, fsConstants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function resolveSystemNotebookPython(
@@ -217,6 +228,42 @@ export async function discoverNotebookPython(
   if (!systemInterpreter) return undefined;
   if (requireRuntime && !(await probe(systemInterpreter))) return undefined;
   return { interpreter: systemInterpreter, source: "system", projectEnvironmentBypassed: trustedProjectEnvironmentExists };
+}
+
+/**
+ * Select a trusted Python for ordinary script execution. Unlike notebook
+ * execution this deliberately does not probe for nbformat/nbclient/ipykernel,
+ * so the first trusted project environment wins even when it has no Jupyter
+ * tooling installed.
+ */
+export async function discoverPythonScriptRuntime(
+  root: string,
+  options: { env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform } = {},
+): Promise<NotebookPythonRuntime | undefined> {
+  const env = options.env ?? process.env;
+  const platform = options.platform ?? process.platform;
+  const operatorCandidates: NotebookPythonCandidate[] = [];
+  addAbsoluteCandidate(operatorCandidates, env.CHATGPT2CODEX_PYTHON, "operator");
+  for (const candidate of operatorCandidates) {
+    if (await isExecutableTrustedInterpreterFile(candidate.interpreter, platform)) return { ...candidate, projectEnvironmentBypassed: false };
+  }
+  const projectCandidates: NotebookPythonCandidate[] = [
+    { interpreter: projectPython(root, ".venv", platform), source: "project:.venv" },
+    { interpreter: projectPython(root, path.join(".venvs", "runtime"), platform), source: "project:.venvs/runtime" },
+    { interpreter: projectPython(root, "venv", platform), source: "project:venv" },
+  ];
+  for (const candidate of projectCandidates) {
+    if (await isExecutableTrustedInterpreterFile(candidate.interpreter, platform)) return { ...candidate, projectEnvironmentBypassed: false };
+  }
+  const fallbackCandidates: NotebookPythonCandidate[] = [];
+  addAbsoluteCandidate(fallbackCandidates, env.VIRTUAL_ENV, "active-venv", (prefix) => activeVenvPython(prefix, platform));
+  addAbsoluteCandidate(fallbackCandidates, env.CONDA_PREFIX, "active-conda", (prefix) => activeCondaPython(prefix, platform));
+  for (const candidate of fallbackCandidates) {
+    if (await isExecutableTrustedInterpreterFile(candidate.interpreter, platform)) return { ...candidate, projectEnvironmentBypassed: false };
+  }
+  const safePath = options.env === undefined ? buildSafeChildEnv().PATH : env.PATH;
+  const systemInterpreter = await resolveSystemNotebookPython(safePath, platform);
+  return systemInterpreter ? { interpreter: systemInterpreter, source: "system", projectEnvironmentBypassed: false } : undefined;
 }
 
 function runPython(interpreter: string, script: string, stdinText: string, timeoutMs: number): Promise<{ code: number | null; stdout: string; stderr: string; timedOut: boolean }> {

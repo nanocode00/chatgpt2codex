@@ -225,6 +225,7 @@ describe("Custom GPT action bridge", () => {
           FileApplyPatchInput: { properties: Record<string, unknown> };
           FileCreateInput: { properties: Record<string, unknown> };
           NotebookPathInput: { required?: string[]; additionalProperties?: boolean; properties: Record<string, unknown> };
+          PythonPathInput: { required?: string[]; additionalProperties?: boolean; properties: Record<string, unknown> };
           SaveChatGptImageInput: { properties: Record<string, { enum?: string[] }> };
           ActionToolResponse: { required?: string[]; properties: Record<string, unknown> };
           ToolCallProof: Record<string, unknown>;
@@ -241,7 +242,7 @@ describe("Custom GPT action bridge", () => {
     expect(body.info.description).toContain("30 operations");
     expect(body.info.description).toContain("workspace_list_projects");
     expect(body.info.description).toContain("save_chatgpt_image/save_chatgpt_image_from_url");
-    expect(Object.keys(body.paths)).toHaveLength(26);
+    expect(Object.keys(body.paths)).toHaveLength(25);
     expect(body.info["x-chatgpt2codex-tool-proof"]?.namespace).toBe("ChatGPT_To_Codex");
     expect(body.info["x-chatgpt2codex-openapi-operation-count"]).toBeLessThanOrEqual(30);
     expect(body.info["x-chatgpt2codex-tool-names"]).toContain("workspace_list_projects");
@@ -251,6 +252,7 @@ describe("Custom GPT action bridge", () => {
     expect(body.info["x-chatgpt2codex-tool-names"]).toContain("command_list");
     expect(body.info["x-chatgpt2codex-tool-names"]).toContain("notebook_validate");
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("notebook_execute");
+    expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("python_execute");
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("command_run");
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("e2e_open_target");
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("e2e_test_and_show_screenshot");
@@ -260,6 +262,7 @@ describe("Custom GPT action bridge", () => {
     expect(body.info.description).toContain("toolCall.namespace=ChatGPT_To_Codex");
     expect(body.servers[0]?.url).toBe(server.baseUrl);
     expect(body.paths["/actions/call-tool"]).toBeDefined();
+    expect(body.paths["/actions/health"]).toBeUndefined();
     expect((body.paths["/actions/call-tool"] as { post: { operationId: string } }).post.operationId).toBe("call_tool");
     expect(body.paths["/actions/file-apply-patch"]).toBeDefined();
     expect((body.paths["/actions/file-apply-patch"] as { post: { operationId: string } }).post.operationId).toBe("file_apply_patch");
@@ -278,6 +281,7 @@ describe("Custom GPT action bridge", () => {
     expect(body.paths["/actions/notebook-validate"]).toBeDefined();
     expect((body.paths["/actions/notebook-validate"] as { post: { operationId: string } }).post.operationId).toBe("notebook_validate");
     expect(body.paths["/actions/notebook-execute"]).toBeUndefined();
+    expect(body.paths["/actions/python-execute"]).toBeUndefined();
     expect(body.paths["/actions/e2e-open-target"]).toBeUndefined();
     expect(body.paths["/actions/e2e-test-and-show-screenshot"]).toBeUndefined();
     expect(body.paths["/actions/e2e-screenshot"]).toBeUndefined();
@@ -316,6 +320,9 @@ describe("Custom GPT action bridge", () => {
     expect(body.components.schemas.NotebookPathInput.required).toEqual(["projectId", "path"]);
     expect(body.components.schemas.NotebookPathInput.additionalProperties).toBe(false);
     expect(Object.keys(body.components.schemas.NotebookPathInput.properties)).toEqual(["projectId", "path"]);
+    expect(body.components.schemas.PythonPathInput.required).toEqual(["projectId", "path"]);
+    expect(body.components.schemas.PythonPathInput.additionalProperties).toBe(false);
+    expect(Object.keys(body.components.schemas.PythonPathInput.properties)).toEqual(["projectId", "path"]);
     expect(body.components.schemas.SaveChatGptImageInput.properties.source?.enum).toEqual(["auto", "url"]);
     expect(body.components.schemas.SaveChatGptImageInput.properties.sourcePath).toBeUndefined();
     expect(body.components.schemas.SaveChatGptImageInput.properties.maxAgeSec).toBeUndefined();
@@ -344,6 +351,7 @@ describe("Custom GPT action bridge", () => {
     expect(body.paths["/actions/command-run"]).toBeDefined();
     expect(body.paths["/actions/notebook-validate"]).toBeDefined();
     expect(body.paths["/actions/notebook-execute"]).toBeDefined();
+    expect(body.paths["/actions/python-execute"]).toBeDefined();
     expect(body.paths["/actions/e2e-open-target"]).toBeDefined();
     expect(body.paths["/actions/e2e-test-and-show-screenshot"]).toBeDefined();
     expect(body.paths["/actions/e2e-screenshot"]).toBeUndefined();

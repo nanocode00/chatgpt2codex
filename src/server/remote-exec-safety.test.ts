@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createServer } from "./mcp-server.js";
 import type { Lease, LeasePreset, ToolContext } from "../types.js";
 
-const EXEC_TOOLS = ["command_run", "notebook_execute"] as const;
+const EXEC_TOOLS = ["command_run", "notebook_execute", "python_execute"] as const;
 const E2E_TOOLS = [
   "e2e_open_target",
   "e2e_test_and_show_screenshot",
@@ -151,6 +151,21 @@ describe("remote execution and E2E safety", () => {
     const { tools } = await serverTools(true, "full-write");
     const result = await tools?.notebook_execute?.handler?.({ projectId: "proj", path: "run.ipynb" });
 
+    expect(result?.isError).toBe(true);
+    expect(result?.structuredContent?.code).toBe("PERMISSION_DENIED");
+  });
+
+  it("rejects direct remote python_execute without local exec opt-in", async () => {
+    const { tools } = await serverTools(true, "full-write");
+    const result = await tools?.python_execute?.handler?.({ projectId: "proj", path: "run.py" });
+    expect(result?.isError).toBe(true);
+    expect(result?.structuredContent?.code).toBe("PERMISSION_DENIED");
+  });
+
+  it("does not let Python remote exec opt-in bypass remote write policy", async () => {
+    process.env.CHATGPT2CODEX_REMOTE_EXEC = "1";
+    const { tools } = await serverTools(true, "full-write");
+    const result = await tools?.python_execute?.handler?.({ projectId: "proj", path: "run.py" });
     expect(result?.isError).toBe(true);
     expect(result?.structuredContent?.code).toBe("PERMISSION_DENIED");
   });

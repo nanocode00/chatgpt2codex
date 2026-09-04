@@ -29,6 +29,7 @@ import { prepareChatGptImagesApp } from "../assets/chatgpt-images-app.js";
 import { listCommands, runCommand } from "../exec/command-runner.js";
 import { runLocalShell } from "../exec/local-shell.js";
 import { executeNotebook, validateNotebook } from "../notebook/notebook.js";
+import { executePythonScript } from "../python/python-execute.js";
 import { createE2eScreenshotShare } from "../e2e/screenshot-share.js";
 import { addToolCallProof, TOOL_AVAILABILITY_GATE } from "./tool-proof.js";
 import {
@@ -1978,6 +1979,26 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
         const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
         const result = await executeNotebook(entry.root, input.path);
         return makeResult({ ...result }, result.executed ? `Notebook ${input.path} executed successfully.` : `Notebook ${input.path} failed during execution.`);
+      });
+    },
+  );
+
+  registerTool(
+    "python_execute",
+    {
+      title: "Execute Python script",
+      description: "Execute a project-confined .py file with a trusted Python runtime. No caller-supplied interpreter, argv, env, cwd, timeout, shell, module, or command is accepted.",
+      annotations: COMMAND_RUN_ANNOTATIONS,
+      _meta: chatGptToolMeta("Executing Python script...", "Python execution finished"),
+      inputSchema: { projectId: z.string(), path: z.string() },
+    },
+    async (input) => {
+      return withErrorMapping(ctx, "python_execute", input, async () => {
+        assertRemoteExecAllowed(ctx, "python_execute");
+        await requireProjectLease(ctx, input.projectId, "write");
+        const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
+        const result = await executePythonScript(entry.root, input.path);
+        return makeResult({ ...result }, `Python script ${input.path} exited ${result.exitCode}.`);
       });
     },
   );
