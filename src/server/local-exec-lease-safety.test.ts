@@ -120,6 +120,17 @@ describe("local execution lease safety", () => {
     expect(result?.structuredContent?.code).toBe("PERMISSION_DENIED");
   });
 
+  it("notebook_execute requires full-write because notebook code may mutate", async () => {
+    const registered = await tools("read-only");
+    const result = await registered?.notebook_execute?.handler?.({
+      projectId: "proj",
+      path: "run.ipynb",
+    });
+
+    expect(result?.isError).toBe(true);
+    expect(result?.structuredContent?.code).toBe("PERMISSION_DENIED");
+  });
+
   it("one-shot E2E requires full-write before executing discovered scripts", async () => {
     await fs.writeFile(
       path.join(projectRoot, "package.json"),

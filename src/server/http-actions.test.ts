@@ -224,6 +224,7 @@ describe("Custom GPT action bridge", () => {
           E2eStartServerInput: Record<string, unknown>;
           FileApplyPatchInput: { properties: Record<string, unknown> };
           FileCreateInput: { properties: Record<string, unknown> };
+          NotebookPathInput: { required?: string[]; additionalProperties?: boolean; properties: Record<string, unknown> };
           SaveChatGptImageInput: { properties: Record<string, { enum?: string[] }> };
           ActionToolResponse: { required?: string[]; properties: Record<string, unknown> };
           ToolCallProof: Record<string, unknown>;
@@ -240,7 +241,7 @@ describe("Custom GPT action bridge", () => {
     expect(body.info.description).toContain("30 operations");
     expect(body.info.description).toContain("workspace_list_projects");
     expect(body.info.description).toContain("save_chatgpt_image/save_chatgpt_image_from_url");
-    expect(Object.keys(body.paths)).toHaveLength(25);
+    expect(Object.keys(body.paths)).toHaveLength(26);
     expect(body.info["x-chatgpt2codex-tool-proof"]?.namespace).toBe("ChatGPT_To_Codex");
     expect(body.info["x-chatgpt2codex-openapi-operation-count"]).toBeLessThanOrEqual(30);
     expect(body.info["x-chatgpt2codex-tool-names"]).toContain("workspace_list_projects");
@@ -248,6 +249,8 @@ describe("Custom GPT action bridge", () => {
     expect(body.info["x-chatgpt2codex-tool-names"]).toContain("project_skill_read");
     expect(body.info["x-chatgpt2codex-tool-names"]).toContain("project_skill_write");
     expect(body.info["x-chatgpt2codex-tool-names"]).toContain("command_list");
+    expect(body.info["x-chatgpt2codex-tool-names"]).toContain("notebook_validate");
+    expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("notebook_execute");
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("command_run");
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("e2e_open_target");
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("e2e_test_and_show_screenshot");
@@ -272,6 +275,9 @@ describe("Custom GPT action bridge", () => {
     expect(body.paths["/actions/e2e-start-server"]).toBeUndefined();
     expect(body.paths["/actions/e2e-run-command"]).toBeUndefined();
     expect(body.paths["/actions/command-run"]).toBeUndefined();
+    expect(body.paths["/actions/notebook-validate"]).toBeDefined();
+    expect((body.paths["/actions/notebook-validate"] as { post: { operationId: string } }).post.operationId).toBe("notebook_validate");
+    expect(body.paths["/actions/notebook-execute"]).toBeUndefined();
     expect(body.paths["/actions/e2e-open-target"]).toBeUndefined();
     expect(body.paths["/actions/e2e-test-and-show-screenshot"]).toBeUndefined();
     expect(body.paths["/actions/e2e-screenshot"]).toBeUndefined();
@@ -307,6 +313,9 @@ describe("Custom GPT action bridge", () => {
     expect((body.components.schemas.ProjectSkillWriteInput as { properties?: Record<string, { enum?: string[]; pattern?: string; maxLength?: number }> }).properties?.content?.maxLength).toBe(262144);
     expect(body.components.schemas.FileApplyPatchInput.properties.patch).toBeDefined();
     expect(body.components.schemas.FileCreateInput.properties.content).toBeDefined();
+    expect(body.components.schemas.NotebookPathInput.required).toEqual(["projectId", "path"]);
+    expect(body.components.schemas.NotebookPathInput.additionalProperties).toBe(false);
+    expect(Object.keys(body.components.schemas.NotebookPathInput.properties)).toEqual(["projectId", "path"]);
     expect(body.components.schemas.SaveChatGptImageInput.properties.source?.enum).toEqual(["auto", "url"]);
     expect(body.components.schemas.SaveChatGptImageInput.properties.sourcePath).toBeUndefined();
     expect(body.components.schemas.SaveChatGptImageInput.properties.maxAgeSec).toBeUndefined();
@@ -333,10 +342,13 @@ describe("Custom GPT action bridge", () => {
     const body = (await res.json()) as { paths: Record<string, unknown> };
 
     expect(body.paths["/actions/command-run"]).toBeDefined();
+    expect(body.paths["/actions/notebook-validate"]).toBeDefined();
+    expect(body.paths["/actions/notebook-execute"]).toBeDefined();
     expect(body.paths["/actions/e2e-open-target"]).toBeDefined();
     expect(body.paths["/actions/e2e-test-and-show-screenshot"]).toBeDefined();
-    expect(body.paths["/actions/e2e-screenshot"]).toBeDefined();
-    expect(body.paths["/actions/e2e-open-url-screenshot"]).toBeDefined();
+    expect(body.paths["/actions/e2e-screenshot"]).toBeUndefined();
+    expect(body.paths["/actions/e2e-open-url-screenshot"]).toBeUndefined();
+    expect(Object.keys(body.paths)).toHaveLength(30);
   });
 
   it("exposes the tool-call gate on action health", async () => {

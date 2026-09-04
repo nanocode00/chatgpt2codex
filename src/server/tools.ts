@@ -28,6 +28,7 @@ import { fetchImageFromUrl } from "../assets/image-url.js";
 import { prepareChatGptImagesApp } from "../assets/chatgpt-images-app.js";
 import { listCommands, runCommand } from "../exec/command-runner.js";
 import { runLocalShell } from "../exec/local-shell.js";
+import { executeNotebook, validateNotebook } from "../notebook/notebook.js";
 import { createE2eScreenshotShare } from "../e2e/screenshot-share.js";
 import { addToolCallProof, TOOL_AVAILABILITY_GATE } from "./tool-proof.js";
 import {
@@ -1939,6 +1940,44 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
           },
           `Command ${input.commandId} exited ${result.exitCode} in ${result.durationMs}ms.`,
         );
+      });
+    },
+  );
+
+  registerTool(
+    "notebook_validate",
+    {
+      title: "Validate Jupyter notebook",
+      description: "Statically validate a project-confined .ipynb without executing notebook cells.",
+      annotations: READ_ONLY_ANNOTATIONS,
+      _meta: chatGptToolMeta("Validating notebook...", "Notebook validated"),
+      inputSchema: { projectId: z.string(), path: z.string() },
+    },
+    async (input) => {
+      return withErrorMapping(ctx, "notebook_validate", input, async () => {
+        const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
+        const result = await validateNotebook(entry.root, input.path);
+        return makeResult({ ...result }, `Validated notebook ${input.path}.`);
+      });
+    },
+  );
+
+  registerTool(
+    "notebook_execute",
+    {
+      title: "Execute Jupyter notebook",
+      description: "Execute a project-confined .ipynb for verification without mutating the original notebook. No caller-supplied command, argv, env, or kernel selection is accepted.",
+      annotations: COMMAND_RUN_ANNOTATIONS,
+      _meta: chatGptToolMeta("Executing notebook...", "Notebook execution finished"),
+      inputSchema: { projectId: z.string(), path: z.string() },
+    },
+    async (input) => {
+      return withErrorMapping(ctx, "notebook_execute", input, async () => {
+        assertRemoteExecAllowed(ctx, "notebook_execute");
+        await requireProjectLease(ctx, input.projectId, "write");
+        const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
+        const result = await executeNotebook(entry.root, input.path);
+        return makeResult({ ...result }, result.executed ? `Notebook ${input.path} executed successfully.` : `Notebook ${input.path} failed during execution.`);
       });
     },
   );
