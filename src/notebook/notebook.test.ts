@@ -7,6 +7,7 @@ import { DomainError, ErrorCode } from "../types.js";
 import { buildSafeChildEnv } from "../exec/command-runner.js";
 
 let root: string;
+let savedProfiles: string | undefined;
 
 function nb(cells: unknown[], extra: Record<string, unknown> = {}) {
   return JSON.stringify({
@@ -25,9 +26,13 @@ function nb(cells: unknown[], extra: Record<string, unknown> = {}) {
 
 beforeEach(async () => {
   root = await fs.mkdtemp(path.join(os.tmpdir(), "chatgpt2codex-notebook-"));
+  savedProfiles = process.env.CHATGPT2CODEX_PYTHON_RUNTIME_PROFILES;
+  delete process.env.CHATGPT2CODEX_PYTHON_RUNTIME_PROFILES;
 });
 
 afterEach(async () => {
+  if (savedProfiles === undefined) delete process.env.CHATGPT2CODEX_PYTHON_RUNTIME_PROFILES;
+  else process.env.CHATGPT2CODEX_PYTHON_RUNTIME_PROFILES = savedProfiles;
   await fs.rm(root, { recursive: true, force: true });
 });
 
@@ -423,6 +428,51 @@ describe("notebook validation", () => {
 });
 
 describe("notebook execution", () => {
+  it("treats runtimeProfile=auto like omitted auto discovery even with malformed profile config", async () => {
+    process.env.CHATGPT2CODEX_PYTHON_RUNTIME_PROFILES = "not-json";
+    await fs.writeFile(path.join(root, "auto.ipynb"), nb([{ cell_type: "code", source: "x=1\n" }]));
+    try {
+      const omitted = await executeNotebook(root, "auto.ipynb");
+      const auto = await executeNotebook(root, "auto.ipynb", { runtimeProfile: "auto" });
+      expect(auto.runtimeSource).toBe(omitted.runtimeSource);
+      expect(auto.runtimeProfile).toBeUndefined();
+    } catch (e) {
+      if (e instanceof DomainError && e.code === ErrorCode.NOT_IMPLEMENTED) return;
+      throw e;
+    }
+  });
+
+  it("uses an explicit configured profile with notebook dependencies and exposes alias only", async () => {
+    const runtime = await discoverNotebookPython(root);
+    if (!runtime) return;
+    process.env.CHATGPT2CODEX_PYTHON_RUNTIME_PROFILES = JSON.stringify({ chosen: runtime.interpreter });
+    process.env.CHATGPT2CODEX_NOTEBOOK_PYTHON = path.join(root, "ignored-operator-python");
+    await fs.writeFile(path.join(root, "profile.ipynb"), nb([{ cell_type: "code", source: "x=2\n" }], {
+      metadata: { kernelspec: { name: "attacker-controlled", argv: ["/tmp/evil"] } },
+    }));
+    const result = await executeNotebook(root, "profile.ipynb", { runtimeProfile: "chosen" });
+    expect(result.executed).toBe(true);
+    expect(result.runtimeSource).toBe("profile");
+    expect(result.runtimeProfile).toBe("chosen");
+    expect(JSON.stringify(result)).not.toContain(runtime.interpreter);
+  });
+
+  it("fails closed for an explicit profile without Jupyter dependencies and never falls back", async () => {
+    if (process.platform === "win32") return;
+    const system = await discoverPythonScriptRuntime(root, { env: { PATH: process.env.PATH } });
+    if (!system) return;
+    const wrapper = path.join(root, "no-jupyter-python");
+    await executableFile(wrapper, `#!${system.interpreter}\nimport sys\nraise SystemExit(17)\n`);
+    process.env.CHATGPT2CODEX_PYTHON_RUNTIME_PROFILES = JSON.stringify({ bare: wrapper });
+    await fs.writeFile(path.join(root, "no-jupyter.ipynb"), nb([{ cell_type: "code", source: "x=3\n" }]));
+    await expect(executeNotebook(root, "no-jupyter.ipynb", { runtimeProfile: "bare" })).rejects.toMatchObject({ code: ErrorCode.NOT_IMPLEMENTED });
+  });
+
+  it("fails closed for unknown explicit notebook profiles", async () => {
+    await fs.writeFile(path.join(root, "unknown.ipynb"), nb([{ cell_type: "code", source: "x=4\n" }]));
+    await expect(executeNotebook(root, "unknown.ipynb", { runtimeProfile: "missing" })).rejects.toMatchObject({ code: ErrorCode.COMMAND_NOT_ALLOWED });
+  });
+
   it("executes successfully when the trusted notebook runtime is available", async () => {
     const p = path.join(root, "success.ipynb");
     await fs.writeFile(p, nb([{ cell_type: "code", source: "x = 1 + 1\n" }]));

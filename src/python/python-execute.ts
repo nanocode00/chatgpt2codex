@@ -6,6 +6,7 @@ import { discoverPythonScriptRuntime, type NotebookRuntimeSource } from "../note
 import { resolveInProject } from "../policy/paths.js";
 import { isSecretPath } from "../policy/secrets.js";
 import { DomainError, ErrorCode } from "../types.js";
+import { resolvePythonRuntimeProfile } from "./runtime-profiles.js";
 
 export const MAX_PYTHON_SOURCE_BYTES = 2 * 1024 * 1024;
 export const PYTHON_EXEC_TIMEOUT_MS = 30_000;
@@ -17,6 +18,7 @@ export interface PythonExecutionResult {
   executed: boolean;
   path: string;
   runtimeSource: NotebookRuntimeSource;
+  runtimeProfile?: string;
   exitCode: number | null;
   signal: NodeJS.Signals | null;
   stdout: string;
@@ -90,9 +92,11 @@ function killPythonExecution(pid: number | undefined, done: () => void): void {
   done();
 }
 
-export async function executePythonScript(root: string, rel: string): Promise<PythonExecutionResult> {
+export async function executePythonScript(root: string, rel: string, runtimeProfile?: string): Promise<PythonExecutionResult> {
   const absScript = await resolvePythonSource(root, rel);
-  const runtime = await discoverPythonScriptRuntime(root);
+  const runtime = runtimeProfile && runtimeProfile !== "auto"
+    ? { interpreter: await resolvePythonRuntimeProfile(runtimeProfile), source: "profile" as const, projectEnvironmentBypassed: false }
+    : await discoverPythonScriptRuntime(root);
   if (!runtime) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "No trusted executable Python runtime is available");
 
   const started = Date.now();
@@ -140,6 +144,7 @@ export async function executePythonScript(root: string, rel: string): Promise<Py
         executed: code === 0,
         path: rel,
         runtimeSource: runtime.source,
+        runtimeProfile: runtimeProfile && runtimeProfile !== "auto" ? runtimeProfile : undefined,
         exitCode: code,
         signal,
         stdout: stdout.text,

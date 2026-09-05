@@ -202,6 +202,14 @@ const ACTION_ROUTES: ActionRoute[] = [
     schema: "CommandRunInput",
   },
   {
+    path: "/actions/python-runtime-list",
+    tool: "python_runtime_list",
+    operationId: "python_runtime_list",
+    summary: "List configured Python runtime profiles",
+    description: "List operator-configured Python runtime aliases without executing Python or exposing executable paths. Read-only.",
+    schema: "ProjectOnlyInput",
+  },
+  {
     path: "/actions/notebook-validate",
     tool: "notebook_validate",
     operationId: "notebook_validate",
@@ -214,15 +222,15 @@ const ACTION_ROUTES: ActionRoute[] = [
     tool: "notebook_execute",
     operationId: "notebook_execute",
     summary: "Execute Jupyter notebook",
-    description: "Execute a project-confined .ipynb with trusted runtime discovery. Requires full-write and remote exec/write opt-ins.",
-    schema: "NotebookPathInput",
+    description: "Execute a project-confined .ipynb with trusted runtime discovery or an operator-configured runtimeProfile alias. Requires full-write and remote exec/write opt-ins.",
+    schema: "NotebookExecuteInput",
   },
   {
     path: "/actions/python-execute",
     tool: "python_execute",
     operationId: "python_execute",
     summary: "Execute Python script",
-    description: "Execute a project-confined .py file with trusted Python discovery. Requires full-write and remote exec/write opt-ins; accepts only projectId and path.",
+    description: "Execute a project-confined .py file with trusted Python discovery or an operator-configured runtimeProfile alias. Requires full-write and remote exec/write opt-ins; callers cannot supply interpreter paths, argv, or env.",
     schema: "PythonPathInput",
   },
   {
@@ -402,6 +410,7 @@ const OPENAPI_ACTION_TOOL_NAMES = new Set([
   "file_create",
   "command_list",
   "command_run",
+  "python_runtime_list",
   "notebook_validate",
   "notebook_execute",
   "python_execute",
@@ -469,6 +478,19 @@ async function callDedicatedAction(
   route: ActionRoute,
   input: Record<string, unknown>,
 ): Promise<CallToolResultLike> {
+  if (route.tool === "python_runtime_list") {
+    const extraKeys = Object.keys(input).filter((key) => key !== "projectId");
+    if (extraKeys.length > 0) return invalidActionInput(route.tool, `unexpected properties: ${extraKeys.join(", ")}`);
+    return callRegisteredTool(ctx, route.tool, input);
+  }
+
+  if (route.tool === "python_execute" || route.tool === "notebook_execute") {
+    const allowedKeys = new Set(["projectId", "path", "runtimeProfile"]);
+    const extraKeys = Object.keys(input).filter((key) => !allowedKeys.has(key));
+    if (extraKeys.length > 0) return invalidActionInput(route.tool, `unexpected properties: ${extraKeys.join(", ")}`);
+    return callRegisteredTool(ctx, route.tool, input);
+  }
+
   if (route.tool === "repo_inspect") {
     const extraKeys = Object.keys(input).filter((key) => key !== "projectId" && key !== "view");
     if (extraKeys.length > 0) {
@@ -1008,6 +1030,16 @@ function openApiSpec(publicOrigin: string): Record<string, unknown> {
             path: { type: "string", description: "Project-relative .ipynb path." },
           },
         },
+        NotebookExecuteInput: {
+          type: "object",
+          additionalProperties: false,
+          required: ["projectId", "path"],
+          properties: {
+            projectId: { type: "string" },
+            path: { type: "string", description: "Project-relative .ipynb path." },
+            runtimeProfile: { type: "string", description: "Operator-configured Python runtime alias, or auto. Never an executable path." },
+          },
+        },
         PythonPathInput: {
           type: "object",
           additionalProperties: false,
@@ -1015,6 +1047,7 @@ function openApiSpec(publicOrigin: string): Record<string, unknown> {
           properties: {
             projectId: { type: "string" },
             path: { type: "string", description: "Project-relative .py path." },
+            runtimeProfile: { type: "string", description: "Operator-configured Python runtime alias, or auto. Never an executable path." },
           },
         },
         LocalShellRunInput: {

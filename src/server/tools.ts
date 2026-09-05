@@ -30,6 +30,7 @@ import { listCommands, runCommand } from "../exec/command-runner.js";
 import { runLocalShell } from "../exec/local-shell.js";
 import { executeNotebook, validateNotebook } from "../notebook/notebook.js";
 import { executePythonScript } from "../python/python-execute.js";
+import { parsePythonRuntimeProfiles } from "../python/runtime-profiles.js";
 import { createE2eScreenshotShare } from "../e2e/screenshot-share.js";
 import { addToolCallProof, TOOL_AVAILABILITY_GATE } from "./tool-proof.js";
 import {
@@ -901,6 +902,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
               "If ChatGPT's app selector changed to Image Generation/ImageGen, finish generation there, then reselect ChatGPT To Codex or use the Custom GPT Action bridge before doing source work.",
               "For /goal, deep research, or broad implementation prompts on the Custom GPT dedicated surface: call goal_workflow with mode=intake or mode=loop immediately, then continue with project selection and inspection. The underlying goal_intake/goal_loop tools remain available for MCP/local/generic compatibility.",
               "For Codex-style persistence on the Custom GPT dedicated surface: use goal_workflow mode=loop, perform one small inspect/edit/verify batch, then call goal_workflow mode=loop again with lastResult. Repeat until done or truly blocked.",
+              "For configured Python runtimes, call python_runtime_list to see operator-approved aliases only. Use runtimeProfile only when the user requests a specific configured runtime or one is clearly required; otherwise omit it and use auto discovery. Never request, guess, or supply an interpreter path, Conda prefix, argv, or env.",
               "workspace_list_projects or workspace_refresh_index",
               ctx.remote && !isRemoteWriteEnabled()
                 ? "Remote sessions start read-only. Full-write requires the local operator to set CHATGPT2CODEX_REMOTE_WRITE=1 before project_select preset=full-write can succeed."
@@ -1946,6 +1948,25 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
   );
 
   registerTool(
+    "python_runtime_list",
+    {
+      title: "List configured Python runtimes",
+      description: "List operator-configured Python runtime aliases without executing Python or exposing executable paths.",
+      annotations: READ_ONLY_ANNOTATIONS,
+      _meta: chatGptToolMeta("Listing Python runtimes...", "Python runtimes listed"),
+      inputSchema: { projectId: z.string() },
+    },
+    async (input) => {
+      return withErrorMapping(ctx, "python_runtime_list", input, async () => {
+        await requireProjectLease(ctx, input.projectId, "read");
+        await resolveOrThrow(ctx, { projectId: input.projectId });
+        const profiles = parsePythonRuntimeProfiles();
+        return makeResult({ default: "auto", profiles: profiles.aliases }, `Configured Python runtimes: ${profiles.aliases.length}.`);
+      });
+    },
+  );
+
+  registerTool(
     "notebook_validate",
     {
       title: "Validate Jupyter notebook",
@@ -1970,14 +1991,14 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
       description: "Execute a project-confined .ipynb for verification without mutating the original notebook. No caller-supplied command, argv, env, or kernel selection is accepted.",
       annotations: COMMAND_RUN_ANNOTATIONS,
       _meta: chatGptToolMeta("Executing notebook...", "Notebook execution finished"),
-      inputSchema: { projectId: z.string(), path: z.string() },
+      inputSchema: { projectId: z.string(), path: z.string(), runtimeProfile: z.string().optional() },
     },
     async (input) => {
       return withErrorMapping(ctx, "notebook_execute", input, async () => {
         assertRemoteExecAllowed(ctx, "notebook_execute");
         await requireProjectLease(ctx, input.projectId, "write");
         const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
-        const result = await executeNotebook(entry.root, input.path);
+        const result = await executeNotebook(entry.root, input.path, { runtimeProfile: input.runtimeProfile });
         return makeResult({ ...result }, result.executed ? `Notebook ${input.path} executed successfully.` : `Notebook ${input.path} failed during execution.`);
       });
     },
@@ -1990,14 +2011,14 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
       description: "Execute a project-confined .py file with a trusted Python runtime. No caller-supplied interpreter, argv, env, cwd, timeout, shell, module, or command is accepted.",
       annotations: COMMAND_RUN_ANNOTATIONS,
       _meta: chatGptToolMeta("Executing Python script...", "Python execution finished"),
-      inputSchema: { projectId: z.string(), path: z.string() },
+      inputSchema: { projectId: z.string(), path: z.string(), runtimeProfile: z.string().optional() },
     },
     async (input) => {
       return withErrorMapping(ctx, "python_execute", input, async () => {
         assertRemoteExecAllowed(ctx, "python_execute");
         await requireProjectLease(ctx, input.projectId, "write");
         const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
-        const result = await executePythonScript(entry.root, input.path);
+        const result = await executePythonScript(entry.root, input.path, input.runtimeProfile);
         return makeResult({ ...result }, `Python script ${input.path} exited ${result.exitCode}.`);
       });
     },

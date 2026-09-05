@@ -220,6 +220,7 @@ be explicitly enabled by the local operator:
 - `CHATGPT2CODEX_REMOTE_WRITE=1`: allow remote project file mutations
 - `CHATGPT2CODEX_REMOTE_EXEC=1`: allow discovered project command execution
 - `CHATGPT2CODEX_REMOTE_E2E=1`: allow remote E2E/UI and screenshot access
+- `CHATGPT2CODEX_PYTHON_RUNTIME_PROFILES='{"ai-human":"/absolute/path/to/python","mallo":"/absolute/path/to/python"}'`: register operator-approved Python executables under remote-safe aliases. Aliases must match `[a-z0-9][a-z0-9._-]{0,63}`, may not contain `..`, and `auto` is reserved. Executable paths are never returned by the runtime-list Action.
 
 Important security properties:
 

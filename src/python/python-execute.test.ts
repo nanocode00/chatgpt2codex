@@ -9,13 +9,16 @@ import { executePythonScript, MAX_PYTHON_SOURCE_BYTES, PYTHON_EXEC_TIMEOUT_MS } 
 let root: string;
 let savedScriptOperator: string | undefined;
 let savedNotebookOperator: string | undefined;
+let savedProfiles: string | undefined;
 
 beforeEach(async () => {
   root = await fs.mkdtemp(path.join(os.tmpdir(), "chatgpt2codex-python-exec-"));
   savedScriptOperator = process.env.CHATGPT2CODEX_PYTHON;
   savedNotebookOperator = process.env.CHATGPT2CODEX_NOTEBOOK_PYTHON;
+  savedProfiles = process.env.CHATGPT2CODEX_PYTHON_RUNTIME_PROFILES;
   delete process.env.CHATGPT2CODEX_PYTHON;
   delete process.env.CHATGPT2CODEX_NOTEBOOK_PYTHON;
+  delete process.env.CHATGPT2CODEX_PYTHON_RUNTIME_PROFILES;
 });
 
 afterEach(async () => {
@@ -23,6 +26,8 @@ afterEach(async () => {
   else process.env.CHATGPT2CODEX_PYTHON = savedScriptOperator;
   if (savedNotebookOperator === undefined) delete process.env.CHATGPT2CODEX_NOTEBOOK_PYTHON;
   else process.env.CHATGPT2CODEX_NOTEBOOK_PYTHON = savedNotebookOperator;
+  if (savedProfiles === undefined) delete process.env.CHATGPT2CODEX_PYTHON_RUNTIME_PROFILES;
+  else process.env.CHATGPT2CODEX_PYTHON_RUNTIME_PROFILES = savedProfiles;
   await fs.rm(root, { recursive: true, force: true });
 });
 
@@ -293,9 +298,77 @@ describe("python_execute execution", () => {
     expect(runtime?.interpreter).toBe(system.interpreter);
   });
 
+  it("treats omitted and auto runtimeProfile as existing auto discovery", async () => {
+    const system = await discoverPythonScriptRuntime(root, { env: { PATH: process.env.PATH } });
+    if (!system) return;
+    process.env.CHATGPT2CODEX_PYTHON = system.interpreter;
+    process.env.CHATGPT2CODEX_PYTHON_RUNTIME_PROFILES = "not-json";
+    await fs.writeFile(path.join(root, "auto.py"), "print('auto-ok')\n");
+    const omitted = await executePythonScript(root, "auto.py");
+    const auto = await executePythonScript(root, "auto.py", "auto");
+    expect(auto.runtimeSource).toBe(omitted.runtimeSource);
+    expect(auto.stdout).toBe(omitted.stdout);
+    expect(auto.runtimeProfile).toBeUndefined();
+  });
+
+  it("selects an explicit configured profile ahead of project env and exposes alias only", async () => {
+    if (process.platform === "win32") return;
+    const system = await discoverPythonScriptRuntime(root, { env: { PATH: process.env.PATH } });
+    if (!system) return;
+    const projectDeps = path.join(root, "project-deps");
+    const profileDeps = path.join(root, "profile-deps");
+    await fs.mkdir(projectDeps, { recursive: true });
+    await fs.mkdir(profileDeps, { recursive: true });
+    await fs.writeFile(path.join(projectDeps, "selection_dep.py"), "VALUE='project-runtime'\n");
+    await fs.writeFile(path.join(profileDeps, "selection_dep.py"), "VALUE='profile-runtime'\n");
+
+    const projectPython = path.join(root, ".venv", "bin", "python");
+    await fs.mkdir(path.dirname(projectPython), { recursive: true });
+    await fs.writeFile(projectPython, [
+      `#!${system.interpreter}`,
+      "import runpy,sys",
+      `sys.path.insert(0, ${JSON.stringify(projectDeps)})`,
+      "runpy.run_path(sys.argv[1], run_name='__main__')",
+    ].join("\n"));
+    await fs.chmod(projectPython, 0o755);
+
+    const profilePython = path.join(root, "configured", "python");
+    await fs.mkdir(path.dirname(profilePython), { recursive: true });
+    await fs.writeFile(profilePython, [
+      `#!${system.interpreter}`,
+      "import runpy,sys",
+      `sys.path.insert(0, ${JSON.stringify(profileDeps)})`,
+      "runpy.run_path(sys.argv[1], run_name='__main__')",
+    ].join("\n"));
+    await fs.chmod(profilePython, 0o755);
+    process.env.CHATGPT2CODEX_PYTHON_RUNTIME_PROFILES = JSON.stringify({ chosen: profilePython });
+    await fs.writeFile(path.join(root, "profile.py"), "import selection_dep\nprint(selection_dep.VALUE)\n");
+
+    const result = await executePythonScript(root, "profile.py", "chosen");
+    expect(result.executed).toBe(true);
+    expect(result.stdout.trim()).toBe("profile-runtime");
+    expect(result.runtimeSource).toBe("profile");
+    expect(result.runtimeProfile).toBe("chosen");
+    expect(JSON.stringify(result)).not.toContain(profilePython);
+  });
+
+  it("fails closed for unknown or unavailable explicit profiles without fallback or path leakage", async () => {
+    await fs.writeFile(path.join(root, "profile-error.py"), "print('must-not-run')\n");
+    await expect(executePythonScript(root, "profile-error.py", "missing")).rejects.toMatchObject({ code: ErrorCode.COMMAND_NOT_ALLOWED });
+    const unavailable = path.join(root, "missing-runtime", "python");
+    process.env.CHATGPT2CODEX_PYTHON_RUNTIME_PROFILES = JSON.stringify({ broken: unavailable });
+    try {
+      await executePythonScript(root, "profile-error.py", "broken");
+      throw new Error("expected explicit runtime profile failure");
+    } catch (error) {
+      expect(error).toMatchObject({ code: ErrorCode.COMMAND_NOT_ALLOWED });
+      expect(error instanceof Error ? error.message : String(error)).not.toContain(unavailable);
+    }
+  });
+
   it("keeps the process launch surface fixed to interpreter plus script path with shell disabled", async () => {
     const source = await fs.readFile(new URL("./python-execute.ts", import.meta.url), "utf8");
-    expect(executePythonScript.length).toBe(2);
+    expect(executePythonScript.length).toBe(3);
     expect(source).toContain("spawn(runtime.interpreter, [absScript], {");
     expect(source).toMatch(/shell:\s*false/);
     expect(source).toContain("cwd: root");

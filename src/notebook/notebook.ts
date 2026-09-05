@@ -5,6 +5,7 @@ import { DomainError, ErrorCode } from "../types.js";
 import { resolveInProject } from "../policy/paths.js";
 import { isSecretPath } from "../policy/secrets.js";
 import { buildSafeChildEnv } from "../exec/command-runner.js";
+import { resolvePythonRuntimeProfile } from "../python/runtime-profiles.js";
 
 export const MAX_NOTEBOOK_BYTES = 10 * 1024 * 1024;
 const EXEC_TIMEOUT_MS = 120_000;
@@ -30,11 +31,13 @@ export interface NotebookExecutionResult {
   codeCellCount: number;
   durationMs: number;
   runtimeSource?: NotebookRuntimeSource;
+  runtimeProfile?: string;
   projectEnvironmentBypassed?: boolean;
   error?: { cellIndex?: number; exceptionType: string; message: string };
 }
 
 export type NotebookRuntimeSource =
+  | "profile"
   | "operator"
   | "project:.venv"
   | "project:.venvs/runtime"
@@ -348,13 +351,19 @@ with tempfile.TemporaryDirectory(prefix="chatgpt2codex-kernel-") as td:
 export async function executeNotebook(
   root: string,
   rel: string,
-  internalOptions?: { cellTimeoutSec?: number; overallTimeoutMs?: number },
+  internalOptions?: { cellTimeoutSec?: number; overallTimeoutMs?: number; runtimeProfile?: string },
 ): Promise<NotebookExecutionResult> {
   const started = Date.now();
   const { abs, doc } = await readNotebook(root, rel);
   const before = await fs.readFile(abs);
-  const runtime = await discoverNotebookPython(root);
+  const requestedProfile = internalOptions?.runtimeProfile;
+  const runtime = requestedProfile && requestedProfile !== "auto"
+    ? { interpreter: await resolvePythonRuntimeProfile(requestedProfile), source: "profile" as const, projectEnvironmentBypassed: false }
+    : await discoverNotebookPython(root);
   if (!runtime) throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "Python runtime unavailable for notebook execution");
+  if (requestedProfile && requestedProfile !== "auto" && !(await defaultRuntimeProbe(runtime.interpreter))) {
+    throw new DomainError(ErrorCode.NOT_IMPLEMENTED, `Python runtime profile '${requestedProfile}' is unavailable for notebook execution`);
+  }
   const payload = { notebook: doc, timeout: internalOptions?.cellTimeoutSec ?? 30, cwd: path.dirname(abs) };
   let r;
   try {
@@ -368,10 +377,10 @@ export async function executeNotebook(
   let detail: Record<string, unknown> = {};
   try { detail = JSON.parse(r.stdout.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? "{}"); } catch {}
   const codeCellCount = doc.cells.filter((c) => c.cell_type === "code").length;
-  if (r.code === 0 && detail.kind === "ok") return { path: rel, executed: true, codeCellCount, durationMs: Date.now() - started, runtimeSource: runtime.source, projectEnvironmentBypassed: runtime.projectEnvironmentBypassed };
+  if (r.code === 0 && detail.kind === "ok") return { path: rel, executed: true, codeCellCount, durationMs: Date.now() - started, runtimeSource: runtime.source, runtimeProfile: requestedProfile && requestedProfile !== "auto" ? requestedProfile : undefined, projectEnvironmentBypassed: runtime.projectEnvironmentBypassed };
   if (r.code === 5 || detail.kind === "timeout") throw new DomainError(ErrorCode.TIMEOUT, "notebook cell execution timed out");
   const exceptionType = typeof detail.type === "string" ? detail.type.slice(0, 80) : (r.code === 3 ? "DependencyUnavailable" : "NotebookExecutionError");
   const message = (typeof detail.message === "string" ? detail.message : "notebook execution failed").slice(0, MAX_MESSAGE);
   if (r.code === 3) throw new DomainError(ErrorCode.NOT_IMPLEMENTED, `Notebook runtime dependency unavailable: ${exceptionType}: ${message}`);
-  return { path: rel, executed: false, codeCellCount, durationMs: Date.now() - started, runtimeSource: runtime.source, projectEnvironmentBypassed: runtime.projectEnvironmentBypassed, error: { cellIndex: typeof detail.cellIndex === "number" ? detail.cellIndex : undefined, exceptionType, message } };
+  return { path: rel, executed: false, codeCellCount, durationMs: Date.now() - started, runtimeSource: runtime.source, runtimeProfile: requestedProfile && requestedProfile !== "auto" ? requestedProfile : undefined, projectEnvironmentBypassed: runtime.projectEnvironmentBypassed, error: { cellIndex: typeof detail.cellIndex === "number" ? detail.cellIndex : undefined, exceptionType, message } };
 }

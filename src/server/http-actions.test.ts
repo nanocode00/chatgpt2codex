@@ -193,6 +193,7 @@ describe("Custom GPT action bridge", () => {
     delete process.env.CHATGPT2CODEX_REMOTE_WRITE;
     delete process.env.CHATGPT2CODEX_REMOTE_EXEC;
     delete process.env.CHATGPT2CODEX_REMOTE_E2E;
+    delete process.env.CHATGPT2CODEX_PYTHON_RUNTIME_PROFILES;
     await fs.rm(stateDir, { recursive: true, force: true });
     await fs.rm(projectRoot, { recursive: true, force: true });
   });
@@ -227,6 +228,7 @@ describe("Custom GPT action bridge", () => {
           FileApplyPatchInput: { properties: Record<string, unknown> };
           FileCreateInput: { properties: Record<string, unknown> };
           NotebookPathInput: { required?: string[]; additionalProperties?: boolean; properties: Record<string, unknown> };
+          NotebookExecuteInput: { required?: string[]; additionalProperties?: boolean; properties: Record<string, unknown> };
           PythonPathInput: { required?: string[]; additionalProperties?: boolean; properties: Record<string, unknown> };
           SaveChatGptImageInput: { properties: Record<string, { enum?: string[] }> };
           ActionToolResponse: { required?: string[]; properties: Record<string, unknown> };
@@ -244,7 +246,7 @@ describe("Custom GPT action bridge", () => {
     expect(body.info.description).toContain("30 operations");
     expect(body.info.description).toContain("workspace_list_projects");
     expect(body.info.description).toContain("save_chatgpt_image/save_chatgpt_image_from_url");
-    expect(Object.keys(body.paths)).toHaveLength(22);
+    expect(Object.keys(body.paths)).toHaveLength(23);
     expect(body.info["x-chatgpt2codex-tool-proof"]?.namespace).toBe("ChatGPT_To_Codex");
     expect(body.info["x-chatgpt2codex-openapi-operation-count"]).toBeLessThanOrEqual(30);
     expect(body.info["x-chatgpt2codex-tool-names"]).toContain("workspace_list_projects");
@@ -260,6 +262,7 @@ describe("Custom GPT action bridge", () => {
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("goal_intake");
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("goal_loop");
     expect(body.info["x-chatgpt2codex-tool-names"]).toContain("notebook_validate");
+    expect(body.info["x-chatgpt2codex-tool-names"]).toContain("python_runtime_list");
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("notebook_execute");
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("python_execute");
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("command_run");
@@ -298,6 +301,8 @@ describe("Custom GPT action bridge", () => {
     expect((body.paths["/actions/notebook-validate"] as { post: { operationId: string } }).post.operationId).toBe("notebook_validate");
     expect(body.paths["/actions/notebook-execute"]).toBeUndefined();
     expect(body.paths["/actions/python-execute"]).toBeUndefined();
+    expect(body.paths["/actions/python-runtime-list"]).toBeDefined();
+    expect((body.paths["/actions/python-runtime-list"] as { post: { operationId: string } }).post.operationId).toBe("python_runtime_list");
     expect(body.paths["/actions/e2e-open-target"]).toBeUndefined();
     expect(body.paths["/actions/e2e-test-and-show-screenshot"]).toBeUndefined();
     expect(body.paths["/actions/e2e-screenshot"]).toBeUndefined();
@@ -343,9 +348,12 @@ describe("Custom GPT action bridge", () => {
     expect(body.components.schemas.NotebookPathInput.required).toEqual(["projectId", "path"]);
     expect(body.components.schemas.NotebookPathInput.additionalProperties).toBe(false);
     expect(Object.keys(body.components.schemas.NotebookPathInput.properties)).toEqual(["projectId", "path"]);
+    expect(body.components.schemas.NotebookExecuteInput.required).toEqual(["projectId", "path"]);
+    expect(body.components.schemas.NotebookExecuteInput.additionalProperties).toBe(false);
+    expect(Object.keys(body.components.schemas.NotebookExecuteInput.properties)).toEqual(["projectId", "path", "runtimeProfile"]);
     expect(body.components.schemas.PythonPathInput.required).toEqual(["projectId", "path"]);
     expect(body.components.schemas.PythonPathInput.additionalProperties).toBe(false);
-    expect(Object.keys(body.components.schemas.PythonPathInput.properties)).toEqual(["projectId", "path"]);
+    expect(Object.keys(body.components.schemas.PythonPathInput.properties)).toEqual(["projectId", "path", "runtimeProfile"]);
     expect(body.components.schemas.SaveChatGptImageInput.properties.source?.enum).toEqual(["auto", "url"]);
     expect(body.components.schemas.SaveChatGptImageInput.properties.sourcePath).toBeUndefined();
     expect(body.components.schemas.SaveChatGptImageInput.properties.maxAgeSec).toBeUndefined();
@@ -367,10 +375,10 @@ describe("Custom GPT action bridge", () => {
 
   it("keeps the OpenAPI operation budget exact across remote opt-in combinations", async () => {
     const combinations = [
-      { exec: false, e2e: false, expected: 22 },
-      { exec: true, e2e: false, expected: 25 },
-      { exec: false, e2e: true, expected: 23 },
-      { exec: true, e2e: true, expected: 27 },
+      { exec: false, e2e: false, expected: 23 },
+      { exec: true, e2e: false, expected: 26 },
+      { exec: false, e2e: true, expected: 24 },
+      { exec: true, e2e: true, expected: 28 },
     ] as const;
 
     for (const combination of combinations) {
@@ -391,6 +399,7 @@ describe("Custom GPT action bridge", () => {
         .filter((operationId): operationId is string => Boolean(operationId));
       expect(new Set(operationIds).size, JSON.stringify(combination)).toBe(operationIds.length);
       expect(body.paths["/actions/notebook-validate"]).toBeDefined();
+      expect(body.paths["/actions/python-runtime-list"]).toBeDefined();
       expect(body.paths["/actions/project-skill-list"]).toBeDefined();
       expect(body.paths["/actions/project-skill-read"]).toBeDefined();
       expect(body.paths["/actions/project-skill-write"]).toBeDefined();
@@ -402,7 +411,7 @@ describe("Custom GPT action bridge", () => {
     expect(body.paths["/actions/e2e-test-and-show-screenshot"]).toBeDefined();
     expect(body.paths["/actions/e2e-screenshot"]).toBeUndefined();
     expect(body.paths["/actions/e2e-open-url-screenshot"]).toBeUndefined();
-        expect(Object.keys(body.paths)).toHaveLength(27);
+        expect(Object.keys(body.paths)).toHaveLength(28);
       }
     }
   });
@@ -445,6 +454,49 @@ describe("Custom GPT action bridge", () => {
     expect(body.toolAvailabilityGate?.namespace).toBe("ChatGPT_To_Codex");
     expect(body.toolAvailabilityGate?.noResultMeans).toContain("No local project work happened");
     expect(body.toolAvailabilityGate?.wrongSurfaceExamples).toContain("image_gen");
+  });
+
+  it("lists configured Python runtime aliases read-only without probing executables or exposing paths", async () => {
+    process.env.CHATGPT2CODEX_PYTHON_RUNTIME_PROFILES = JSON.stringify({
+      mallo: "/definitely/not-present/mallo/python",
+      "ai-human": "/definitely/not-present/ai-human/python",
+    });
+    const server = await startApp(makeCtx(stateDir, projectRoot));
+    stop = server.stop;
+
+    const selectRes = await postAction(server.baseUrl, "/actions/project-select", {
+      projectId: "proj",
+      reason: "runtime list read-only test",
+    });
+    const selected = (await selectRes.json()) as { ok?: boolean; structuredContent?: { lease?: Lease } };
+    expect(selected.ok).toBe(true);
+    expect(selected.structuredContent?.lease?.preset).toBe("read-only");
+
+    const listRes = await postAction(server.baseUrl, "/actions/python-runtime-list", { projectId: "proj" });
+    const listed = (await listRes.json()) as { ok?: boolean; structuredContent?: { default?: string; profiles?: string[] } };
+    expect(listed.ok).toBe(true);
+    expect(listed.structuredContent).toMatchObject({ default: "auto", profiles: ["ai-human", "mallo"] });
+    expect(JSON.stringify(listed)).not.toContain("/definitely/not-present/");
+
+    const extraRes = await postAction(server.baseUrl, "/actions/python-runtime-list", { projectId: "proj", runtimeProfile: "mallo" });
+    const extra = (await extraRes.json()) as { ok?: boolean; isError?: boolean };
+    expect(extra.ok).toBe(false);
+    expect(extra.isError).toBe(true);
+  });
+
+  it("returns sanitized runtime profile config errors from the read-only list action", async () => {
+    process.env.CHATGPT2CODEX_PYTHON_RUNTIME_PROFILES = '{"safe":"/private/operator/python"';
+    const server = await startApp(makeCtx(stateDir, projectRoot));
+    stop = server.stop;
+    await postAction(server.baseUrl, "/actions/project-select", { projectId: "proj", reason: "runtime list config error" });
+
+    const res = await postAction(server.baseUrl, "/actions/python-runtime-list", { projectId: "proj" });
+    const body = (await res.json()) as { ok?: boolean; isError?: boolean; content?: Array<{ text?: string }>; structuredContent?: Record<string, unknown> };
+    expect(body.ok).toBe(false);
+    expect(body.isError).toBe(true);
+    expect(JSON.stringify(body)).toContain("Python runtime profile config invalid");
+    expect(JSON.stringify(body)).not.toContain("/private/operator/python");
+    expect(JSON.stringify(body)).not.toContain('"safe"');
   });
 
   it("aggregates repository inspection without removing legacy repo routes or generic tools", async () => {
