@@ -846,7 +846,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
     {
       title: "Get chatgpt2codex agent guide",
       description:
-        "Use this first for broad coding requests. For /goal, deep research, or long implementation prompts, call goal_intake or goal_loop immediately before thinking so ChatGPT does not stall silently.",
+        "Use this first for broad coding requests. On the Custom GPT dedicated Action surface, prefer goal_workflow for /goal, deep research, or long implementation prompts so ChatGPT does not stall silently; the underlying goal_intake and goal_loop tools remain available for compatibility.",
       annotations: READ_ONLY_ANNOTATIONS,
       _meta: chatGptToolMeta("Loading chatgpt2codex guide...", "chatgpt2codex guide loaded"),
       inputSchema: {},
@@ -857,7 +857,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
           {
             toolAvailabilityGate: TOOL_AVAILABILITY_GATE,
             codexGradeLoop: [
-              "Discover: project_status, project_rules, repo_diff_summary, and narrow code_search before choosing a change.",
+              "Discover: project_status, project_rules, repo_inspect on the Custom GPT dedicated surface, and narrow code_search before choosing a change.",
               "Plan: state one small, high-leverage hypothesis tied to repo understanding, security, UX, install, or verification.",
               "Patch: use file_read_slice plus file_apply_patch/file_create; never ask the user to paste local scripts when tools are available.",
               "Verify: run the closest typecheck, targeted test, build, native-app E2E, or screenshot proof for the changed surface.",
@@ -899,8 +899,8 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
               "Hard gate: do not inspect, edit, test, commit, or claim local project work unless a current-turn chatgpt2codex MCP tool or GPT Action result returned ok=true. Seeing the namespace in the UI is not enough.",
               "If only image_gen, python_user_visible, browser, or a text-only answer ran, no chatgpt2codex work happened. Stop and ask the user to reselect ChatGPT To Codex, reconnect the app, or refresh the Custom GPT Action.",
               "If ChatGPT's app selector changed to Image Generation/ImageGen, finish generation there, then reselect ChatGPT To Codex or use the Custom GPT Action bridge before doing source work.",
-              "For /goal, deep research, or broad implementation prompts: call goal_loop or goal_intake immediately, then continue with project selection and inspection. Do not spend a long thinking turn before the first tool call.",
-              "For Codex-style persistence: use goal_loop, perform one small inspect/edit/verify batch, then call goal_loop again with lastResult. Repeat until done or truly blocked.",
+              "For /goal, deep research, or broad implementation prompts on the Custom GPT dedicated surface: call goal_workflow with mode=intake or mode=loop immediately, then continue with project selection and inspection. The underlying goal_intake/goal_loop tools remain available for MCP/local/generic compatibility.",
+              "For Codex-style persistence on the Custom GPT dedicated surface: use goal_workflow mode=loop, perform one small inspect/edit/verify batch, then call goal_workflow mode=loop again with lastResult. Repeat until done or truly blocked.",
               "workspace_list_projects or workspace_refresh_index",
               ctx.remote && !isRemoteWriteEnabled()
                 ? "Remote sessions start read-only. Full-write requires the local operator to set CHATGPT2CODEX_REMOTE_WRITE=1 before project_select preset=full-write can succeed."
@@ -922,7 +922,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
                   ? "Remote UI/E2E access is locally opted in. Caller-supplied arbitrary E2E command/server strings remain disabled."
                   : "Remote app opening and screenshot capture are disabled until the local operator sets CHATGPT2CODEX_REMOTE_E2E=1."
                 : "For UI/E2E proof: use e2e_start_server, then e2e_run_command for test commands; it captures a screenshot by default. Use e2e_open_target/e2e_open_url_screenshot/e2e_screenshot for manual visual proof. Return the screenshot path/markdown to the user.",
-              "repo_status/repo_diff_summary, then git_commit and git_push when explicitly requested",
+              "Use repo_inspect on the Custom GPT dedicated surface before git_commit/git_push; underlying repo_status/repo_diff_summary/show_changes remain available for MCP/local/generic compatibility.",
               ctx.remote
                 ? "For GPT Image 2 requests: generate with ChatGPT's native image surface, obtain a Share/Copy Link/content URL, then pass that URL explicitly to save_chatgpt_image, save_chatgpt_image_from_url, or save_image_from_url."
                 : "For GPT Image 2 requests: generate with ChatGPT's native image surface, then import the finished image with save_chatgpt_image, save_chatgpt_image_from_url, save_image_from_url, clipboard, download, or path.",
@@ -946,7 +946,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
                 : "one-shot E2E test-and-show, start local dev servers, run guarded E2E commands, open URLs/apps, and capture macOS screenshots",
               git: "status, diff summary, commit, push",
               loop:
-                "goal_loop keeps ChatGPT on a Codex-style local inspect/edit/verify loop. It does not call OpenAI Codex or spend Codex quota.",
+                "goal_workflow mode=loop is the preferred Custom GPT dedicated surface for Codex-style local inspect/edit/verify loops; the underlying goal_loop remains available. Neither calls OpenAI Codex or spends Codex quota.",
               imageGeneration: ctx.remote
                 ? "chatgpt2codex does not generate images. Remote sessions can import a finished ChatGPT image only from an explicit public share/content URL or supplied image bytes; local clipboard/download/path/browser helpers are disabled."
                 : "chatgpt2codex does not call Codex/OpenAI image generation or spend that quota. It can import images ChatGPT generated natively from a share/content URL from any device, or from local Mac clipboard/download/path/Chrome when the image exists on that Mac.",
@@ -982,7 +982,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
                 "Never claim the image was saved until the chatgpt2codex action result returns a saved path.",
               ],
               customGptActionScope: [
-                "Actions surface: agent guide, project selection, workspace/project status, code search, narrow file read/apply/create, allowlisted command execution, one-shot E2E proof, repo diff/status, checkpoints, git commit/push, image import/list.",
+                "Actions surface: agent guide, goal_workflow orchestration, project selection, workspace/project status, code search, narrow file read/apply/create, allowlisted command execution, one-shot E2E proof, repo_inspect, checkpoints, git commit/push, image import/list.",
                 "Generic fallback: call_tool can call any registered chatgpt2codex MCP tool by name when a dedicated action route is missing.",
               ],
             },

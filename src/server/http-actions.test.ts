@@ -218,6 +218,8 @@ describe("Custom GPT action bridge", () => {
           CallToolInput: { properties: Record<string, unknown> };
           GoalIntakeInput: Record<string, unknown>;
           GoalLoopInput: Record<string, unknown>;
+          GoalWorkflowInput: { oneOf?: Array<{ required?: string[]; additionalProperties?: boolean; properties?: Record<string, { enum?: string[] }> }>; discriminator?: { propertyName?: string } };
+          RepoInspectInput: { required?: string[]; additionalProperties?: boolean; properties?: Record<string, { enum?: string[] }> };
           E2eRunCommandInput: Record<string, unknown>;
           E2eTestAndShowScreenshotInput: Record<string, unknown>;
           E2eScreenshotInput: Record<string, unknown>;
@@ -242,7 +244,7 @@ describe("Custom GPT action bridge", () => {
     expect(body.info.description).toContain("30 operations");
     expect(body.info.description).toContain("workspace_list_projects");
     expect(body.info.description).toContain("save_chatgpt_image/save_chatgpt_image_from_url");
-    expect(Object.keys(body.paths)).toHaveLength(25);
+    expect(Object.keys(body.paths)).toHaveLength(22);
     expect(body.info["x-chatgpt2codex-tool-proof"]?.namespace).toBe("ChatGPT_To_Codex");
     expect(body.info["x-chatgpt2codex-openapi-operation-count"]).toBeLessThanOrEqual(30);
     expect(body.info["x-chatgpt2codex-tool-names"]).toContain("workspace_list_projects");
@@ -250,6 +252,13 @@ describe("Custom GPT action bridge", () => {
     expect(body.info["x-chatgpt2codex-tool-names"]).toContain("project_skill_read");
     expect(body.info["x-chatgpt2codex-tool-names"]).toContain("project_skill_write");
     expect(body.info["x-chatgpt2codex-tool-names"]).toContain("command_list");
+    expect(body.info["x-chatgpt2codex-tool-names"]).toContain("repo_inspect");
+    expect(body.info["x-chatgpt2codex-tool-names"]).toContain("goal_workflow");
+    expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("repo_status");
+    expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("repo_diff_summary");
+    expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("show_changes");
+    expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("goal_intake");
+    expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("goal_loop");
     expect(body.info["x-chatgpt2codex-tool-names"]).toContain("notebook_validate");
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("notebook_execute");
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("python_execute");
@@ -273,8 +282,15 @@ describe("Custom GPT action bridge", () => {
     expect(body.paths["/actions/command-list"]).toBeDefined();
     expect((body.paths["/actions/command-list"] as { post: { operationId: string } }).post.operationId).toBe("command_list");
     expect(body.paths["/actions/local-shell-run"]).toBeUndefined();
-    expect(body.paths["/actions/goal-intake"]).toBeDefined();
-    expect(body.paths["/actions/goal-loop"]).toBeDefined();
+    expect(body.paths["/actions/goal-workflow"]).toBeDefined();
+    expect((body.paths["/actions/goal-workflow"] as { post: { operationId: string } }).post.operationId).toBe("goal_workflow");
+    expect(body.paths["/actions/goal-intake"]).toBeUndefined();
+    expect(body.paths["/actions/goal-loop"]).toBeUndefined();
+    expect(body.paths["/actions/repo-inspect"]).toBeDefined();
+    expect((body.paths["/actions/repo-inspect"] as { post: { operationId: string } }).post.operationId).toBe("repo_inspect");
+    expect(body.paths["/actions/repo-status"]).toBeUndefined();
+    expect(body.paths["/actions/repo-diff-summary"]).toBeUndefined();
+    expect(body.paths["/actions/show-changes"]).toBeUndefined();
     expect(body.paths["/actions/e2e-start-server"]).toBeUndefined();
     expect(body.paths["/actions/e2e-run-command"]).toBeUndefined();
     expect(body.paths["/actions/command-run"]).toBeUndefined();
@@ -287,8 +303,8 @@ describe("Custom GPT action bridge", () => {
     expect(body.paths["/actions/e2e-screenshot"]).toBeUndefined();
     expect(body.paths["/actions/e2e-open-url-screenshot"]).toBeUndefined();
     expect(body.paths["/actions/code-context-pack"]).toBeUndefined();
-    expect(body.info.description).toContain("goal_intake");
-    expect(body.info.description).toContain("goal_loop");
+    expect(body.info.description).toContain("goal_workflow");
+    expect(body.info.description).toContain("repo_inspect");
     expect(body.info.description).toContain("code_search followed by narrow file_read_slice");
     expect(body.info.description).toContain("allowlisted command execution and one-shot E2E/screenshot proof");
     expect(body.info.description).toContain("Arbitrary-command tools remain blocked");
@@ -301,6 +317,13 @@ describe("Custom GPT action bridge", () => {
     expect((body.paths["/actions/project-select"] as { post: { operationId: string } }).post.operationId).toBe("project_select");
     expect(body.components.schemas.GoalIntakeInput).toBeDefined();
     expect(body.components.schemas.GoalLoopInput).toBeDefined();
+    expect(body.components.schemas.GoalWorkflowInput.oneOf).toHaveLength(2);
+    expect(body.components.schemas.GoalWorkflowInput.discriminator?.propertyName).toBe("mode");
+    expect(body.components.schemas.GoalWorkflowInput.oneOf?.[0]?.required).toEqual(["mode", "goal"]);
+    expect(body.components.schemas.GoalWorkflowInput.oneOf?.[1]?.required).toEqual(["mode"]);
+    expect(body.components.schemas.RepoInspectInput.required).toEqual(["projectId", "view"]);
+    expect(body.components.schemas.RepoInspectInput.additionalProperties).toBe(false);
+    expect(body.components.schemas.RepoInspectInput.properties?.view?.enum).toEqual(["status", "summary", "changes", "all"]);
     expect(body.components.schemas.E2eRunCommandInput).toBeDefined();
     expect(body.components.schemas.E2eTestAndShowScreenshotInput).toBeDefined();
     expect((body.components.schemas.E2eTestAndShowScreenshotInput as { properties?: Record<string, unknown> }).properties?.serverCommand).toBeUndefined();
@@ -330,6 +353,10 @@ describe("Custom GPT action bridge", () => {
     expect(body.components.schemas.ActionToolResponse.properties.toolCall).toBeDefined();
     expect(body.components.schemas.ToolCallProof).toBeDefined();
     expect(body.components.schemas.ToolAvailabilityGate).toBeDefined();
+    const operationIds = Object.values(body.paths)
+      .map((pathEntry) => (pathEntry as { post?: { operationId?: string } }).post?.operationId)
+      .filter((operationId): operationId is string => Boolean(operationId));
+    expect(new Set(operationIds).size).toBe(operationIds.length);
     expect((body.paths["/actions/import-chatgpt-image-url"] as { post: { description: string } }).post.description).toContain(
       "Device-agnostic",
     );
@@ -338,25 +365,46 @@ describe("Custom GPT action bridge", () => {
     );
   });
 
-  it("advertises remote execution and E2E actions only after local operator opt-in", async () => {
-    process.env.CHATGPT2CODEX_REMOTE_EXEC = "1";
-    process.env.CHATGPT2CODEX_REMOTE_E2E = "1";
+  it("keeps the OpenAPI operation budget exact across remote opt-in combinations", async () => {
+    const combinations = [
+      { exec: false, e2e: false, expected: 22 },
+      { exec: true, e2e: false, expected: 25 },
+      { exec: false, e2e: true, expected: 23 },
+      { exec: true, e2e: true, expected: 27 },
+    ] as const;
 
-    const server = await startApp(makeCtx(stateDir, projectRoot));
-    stop = server.stop;
+    for (const combination of combinations) {
+      if (combination.exec) process.env.CHATGPT2CODEX_REMOTE_EXEC = "1";
+      else delete process.env.CHATGPT2CODEX_REMOTE_EXEC;
+      if (combination.e2e) process.env.CHATGPT2CODEX_REMOTE_E2E = "1";
+      else delete process.env.CHATGPT2CODEX_REMOTE_E2E;
 
-    const res = await fetch(`${server.baseUrl}/actions/openapi.json`);
-    const body = (await res.json()) as { paths: Record<string, unknown> };
+      const server = await startApp(makeCtx(stateDir, projectRoot));
+      const res = await fetch(`${server.baseUrl}/actions/openapi.json`);
+      const body = (await res.json()) as { paths: Record<string, unknown> };
+      await server.stop();
 
-    expect(body.paths["/actions/command-run"]).toBeDefined();
-    expect(body.paths["/actions/notebook-validate"]).toBeDefined();
-    expect(body.paths["/actions/notebook-execute"]).toBeDefined();
-    expect(body.paths["/actions/python-execute"]).toBeDefined();
-    expect(body.paths["/actions/e2e-open-target"]).toBeDefined();
+      expect(Object.keys(body.paths), JSON.stringify(combination)).toHaveLength(combination.expected);
+      expect(combination.expected).toBeLessThanOrEqual(30);
+      const operationIds = Object.values(body.paths)
+        .map((pathEntry) => (pathEntry as { post?: { operationId?: string } }).post?.operationId)
+        .filter((operationId): operationId is string => Boolean(operationId));
+      expect(new Set(operationIds).size, JSON.stringify(combination)).toBe(operationIds.length);
+      expect(body.paths["/actions/notebook-validate"]).toBeDefined();
+      expect(body.paths["/actions/project-skill-list"]).toBeDefined();
+      expect(body.paths["/actions/project-skill-read"]).toBeDefined();
+      expect(body.paths["/actions/project-skill-write"]).toBeDefined();
+      expect(Boolean(body.paths["/actions/command-run"])).toBe(combination.exec);
+      expect(Boolean(body.paths["/actions/notebook-execute"])).toBe(combination.exec);
+      expect(Boolean(body.paths["/actions/python-execute"])).toBe(combination.exec);
+      expect(Boolean(body.paths["/actions/e2e-open-target"])).toBe(combination.e2e);
+      if (combination.exec && combination.e2e) {
     expect(body.paths["/actions/e2e-test-and-show-screenshot"]).toBeDefined();
     expect(body.paths["/actions/e2e-screenshot"]).toBeUndefined();
     expect(body.paths["/actions/e2e-open-url-screenshot"]).toBeUndefined();
-    expect(Object.keys(body.paths)).toHaveLength(30);
+        expect(Object.keys(body.paths)).toHaveLength(27);
+      }
+    }
   });
 
   it("exposes the tool-call gate on action health", async () => {
@@ -397,6 +445,143 @@ describe("Custom GPT action bridge", () => {
     expect(body.toolAvailabilityGate?.namespace).toBe("ChatGPT_To_Codex");
     expect(body.toolAvailabilityGate?.noResultMeans).toContain("No local project work happened");
     expect(body.toolAvailabilityGate?.wrongSurfaceExamples).toContain("image_gen");
+  });
+
+  it("aggregates repository inspection without removing legacy repo routes or generic tools", async () => {
+    const server = await startApp(makeCtx(stateDir, projectRoot));
+    stop = server.stop;
+
+    const selectRes = await postAction(server.baseUrl, "/actions/project-select", {
+      projectId: "proj",
+      reason: "repo inspect read-only test",
+    });
+    const selected = (await selectRes.json()) as { ok?: boolean; structuredContent?: { lease?: Lease } };
+    expect(selected.ok).toBe(true);
+    expect(selected.structuredContent?.lease?.preset).toBe("read-only");
+
+    const legacy = {} as Record<string, Record<string, unknown>>;
+    for (const [view, route] of [
+      ["status", "/actions/repo-status"],
+      ["summary", "/actions/repo-diff-summary"],
+      ["changes", "/actions/show-changes"],
+    ] as const) {
+      const oldRes = await postAction(server.baseUrl, route, { projectId: "proj" });
+      const oldBody = (await oldRes.json()) as { ok?: boolean; structuredContent?: Record<string, unknown> };
+      expect(oldBody.ok, route).toBe(true);
+      legacy[view] = oldBody.structuredContent ?? {};
+
+      const consolidatedRes = await postAction(server.baseUrl, "/actions/repo-inspect", { projectId: "proj", view });
+      const consolidated = (await consolidatedRes.json()) as { ok?: boolean; structuredContent?: Record<string, unknown> };
+      expect(consolidated.ok, view).toBe(true);
+      expect(consolidated.structuredContent, view).toEqual(oldBody.structuredContent);
+    }
+
+    const allRes = await postAction(server.baseUrl, "/actions/repo-inspect", { projectId: "proj", view: "all" });
+    const all = (await allRes.json()) as {
+      ok?: boolean;
+      structuredContent?: { status?: Record<string, unknown>; summary?: Record<string, unknown>; changes?: Record<string, unknown> };
+    };
+    expect(all.ok).toBe(true);
+    expect(all.structuredContent?.status).toEqual(legacy.status);
+    expect(all.structuredContent?.summary).toEqual(legacy.summary);
+    expect(all.structuredContent?.changes).toEqual(legacy.changes);
+
+    for (const input of [
+      { projectId: "proj", view: "invalid" },
+      { projectId: "proj", view: "status", extra: true },
+      { projectId: "outside", view: "status" },
+    ]) {
+      const invalidRes = await postAction(server.baseUrl, "/actions/repo-inspect", input);
+      const invalid = (await invalidRes.json()) as { ok?: boolean; isError?: boolean };
+      expect(invalid.ok).toBe(false);
+      expect(invalid.isError).toBe(true);
+    }
+
+    for (const toolName of ["repo_status", "repo_diff_summary", "show_changes"]) {
+      const genericRes = await postAction(server.baseUrl, "/actions/call-tool", {
+        toolName,
+        input: { projectId: "proj" },
+      });
+      const generic = (await genericRes.json()) as { ok?: boolean };
+      expect(generic.ok, toolName).toBe(true);
+    }
+  });
+
+  it("dispatches goal_workflow modes while preserving legacy goal validation and compatibility", async () => {
+    const server = await startApp(makeCtx(stateDir, projectRoot));
+    stop = server.stop;
+
+    const intakeRes = await postAction(server.baseUrl, "/actions/goal-workflow", {
+      mode: "intake",
+      goal: "consolidated intake goal",
+      projectId: "proj",
+      workMode: "review",
+      urgency: "fast",
+    });
+    const intake = (await intakeRes.json()) as { ok?: boolean; structuredContent?: { goalId?: string; nextActions?: string[] } };
+    expect(intake.ok).toBe(true);
+    expect(intake.structuredContent?.goalId).toBeTruthy();
+    expect(intake.structuredContent?.nextActions?.length).toBeGreaterThan(0);
+
+    const legacyIntakeRes = await postAction(server.baseUrl, "/actions/goal-intake", {
+      goal: "consolidated intake goal",
+      projectId: "proj",
+      mode: "review",
+      urgency: "fast",
+    });
+    const legacyIntake = (await legacyIntakeRes.json()) as { ok?: boolean; structuredContent?: { goalId?: string } };
+    expect(legacyIntake.ok).toBe(true);
+    expect(legacyIntake.structuredContent?.goalId).toMatch(/^goal-/u);
+
+    const loopRes = await postAction(server.baseUrl, "/actions/goal-workflow", {
+      mode: "loop",
+      loopId: "consolidated-loop",
+      projectId: "proj",
+      workMode: "debug",
+      maxTurns: 3,
+      lastResult: "first batch",
+    });
+    const loop = (await loopRes.json()) as {
+      ok?: boolean;
+      structuredContent?: { loopId?: string; turn?: number; remainingTurns?: number; nextActions?: string[] };
+    };
+    expect(loop.ok).toBe(true);
+    expect(loop.structuredContent?.loopId).toBe("consolidated-loop");
+    expect(loop.structuredContent?.turn).toBe(1);
+    expect(loop.structuredContent?.remainingTurns).toBe(2);
+
+    const legacyLoopRes = await postAction(server.baseUrl, "/actions/goal-loop", {
+      loopId: "legacy-loop",
+      projectId: "proj",
+      mode: "debug",
+      maxTurns: 3,
+      lastResult: "first batch",
+    });
+    const legacyLoop = (await legacyLoopRes.json()) as { ok?: boolean; structuredContent?: { turn?: number; remainingTurns?: number } };
+    expect(legacyLoop.ok).toBe(true);
+    expect(legacyLoop.structuredContent?.turn).toBe(1);
+    expect(legacyLoop.structuredContent?.remainingTurns).toBe(2);
+
+    for (const input of [
+      { mode: "invalid", goal: "x" },
+      { mode: "intake" },
+      { mode: "loop", maxTurns: 51 },
+      { mode: "loop", urgency: "fast" },
+    ]) {
+      const invalidRes = await postAction(server.baseUrl, "/actions/goal-workflow", input);
+      const invalid = (await invalidRes.json()) as { ok?: boolean; isError?: boolean };
+      expect(invalid.ok).toBe(false);
+      expect(invalid.isError).toBe(true);
+    }
+
+    for (const [toolName, input] of [
+      ["goal_intake", { goal: "generic intake" }],
+      ["goal_loop", { loopId: "generic-loop" }],
+    ] as const) {
+      const genericRes = await postAction(server.baseUrl, "/actions/call-tool", { toolName, input });
+      const generic = (await genericRes.json()) as { ok?: boolean };
+      expect(generic.ok, toolName).toBe(true);
+    }
   });
 
   it("denies arbitrary-command tools through dedicated and generic action routes", async () => {
@@ -754,8 +939,8 @@ describe("Custom GPT action bridge", () => {
     expect(guide.text).toContain("chatgpt2codex can operate");
     expect(guide.structuredContent.workflow).toContain("workspace_list_projects or workspace_refresh_index");
     expect(guide.structuredContent.workflow?.join(" ")).toContain("device-agnostic/mobile");
-    expect(guide.structuredContent.workflow?.join(" ")).toContain("goal_intake immediately");
-    expect(guide.structuredContent.workflow?.join(" ")).toContain("goal_loop");
+    expect(guide.structuredContent.workflow?.join(" ")).toContain("goal_workflow");
+    expect(guide.structuredContent.workflow?.join(" ")).toContain("underlying goal_intake/goal_loop");
     expect(guide.structuredContent.workflow?.join(" ")).toContain("Avoid broad context-pack calls");
     expect(guide.structuredContent.workflow?.join(" ")).toContain("Remote project execution is disabled");
     expect(guide.structuredContent.workflow?.join(" ")).toContain("Remote one-shot E2E is disabled");
