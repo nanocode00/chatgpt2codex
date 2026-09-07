@@ -306,6 +306,11 @@ describe("Custom GPT action bridge", () => {
     expect(body.paths["/actions/python-execute"]).toBeUndefined();
     expect(body.paths["/actions/python-runtime-list"]).toBeUndefined();
     expect((body.paths["/actions/adapter-gateway"] as { post: { operationId: string } }).post.operationId).toBe("adapter_gateway");
+    const adapterGatewayDescription = (body.paths["/actions/adapter-gateway"] as { post: { description: string } }).post.description;
+    expect(adapterGatewayDescription).toBe(
+      "ChatGPT_To_Codex tool: adapter_gateway. Catalog or invoke statically registered safe adapter operations. Uses trusted capabilities, strict validation, and static handlers only; arbitrary tool or command forwarding is prohibited.",
+    );
+    expect(adapterGatewayDescription.length).toBeLessThan(300);
     expect(body.paths["/actions/database"]).toBeUndefined();
     expect(body.paths["/actions/e2e-open-target"]).toBeUndefined();
     expect(body.paths["/actions/e2e-test-and-show-screenshot"]).toBeUndefined();

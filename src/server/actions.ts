@@ -214,7 +214,7 @@ const ACTION_ROUTES: ActionRoute[] = [
     tool: "adapter_gateway",
     operationId: "adapter_gateway",
     summary: "Catalog or invoke built-in safe adapter operations",
-    description: "Static safe adapter operation gateway. Only source-registered operations with trusted capability metadata, strict operation-specific validation, and statically imported handlers can run; this never forwards arbitrary MCP tool names, commands, executables, argv, env, or modules.",
+    description: "Catalog or invoke statically registered safe adapter operations. Uses trusted capabilities, strict validation, and static handlers only; arbitrary tool or command forwarding is prohibited.",
     schema: "AdapterGatewayInput",
   },
   {
