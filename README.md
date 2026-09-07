@@ -160,9 +160,12 @@ git_workspace(fetch)
 -> git_publish(commit)
 -> git_publish(push)
 -> git_publish(create_pr)
+-> git_pr(inspect)
+-> review
+-> git_pr(merge)
 ```
 
-`git_workspace` and `git_publish` use fixed Git/GitHub operations rather than arbitrary commands. The remote is fixed to `origin`, force push and arbitrary refspecs are not supported, and credentials are never accepted as Action inputs. GitHub PR creation is optional and requires an installed, already-authenticated GitHub CLI (`gh`).
+`git_workspace`, `git_publish`, and `git_pr` use fixed Git/GitHub operations rather than arbitrary commands. The remote is fixed to `origin`, force push and arbitrary refspecs are not supported, and credentials are never accepted as Action inputs. GitHub PR creation/inspection/merge requires an installed, already-authenticated GitHub CLI (`gh`). PR merge requires an explicit user request and the exact inspected head SHA; pending or failing checks and requested changes are rejected. Admin/force/auto-merge bypasses and automatic branch deletion are not supported.
 
 Do not expose the connector URL publicly unless you understand the tunnel and
 token model. Do not paste Owner Tokens into issues, screenshots, or shared logs.

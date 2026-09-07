@@ -55,6 +55,8 @@ import {
   gitSwitchLocalBranch,
   gitPushCurrentBranch,
   gitCreatePullRequest,
+  gitInspectPullRequest,
+  gitMergePullRequest,
 } from "../git/git.js";
 import { resolveInProject } from "../policy/paths.js";
 import { isSecretPath, redact } from "../policy/secrets.js";
@@ -889,7 +891,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
                     ...(isRemoteExecEnabled() && isRemoteE2eEnabled() ? ["e2e_test_and_show_screenshot"] : []),
                   ]
                 : ["command_list", "command_run", "local_shell_run", "e2e_test_and_show_screenshot", "e2e_start_server", "e2e_run_command", "e2e_screenshot"],
-              release: ["git_diff_summary", "git_workspace", "git_publish", "git_commit", "git_push", "checkpoint_list"],
+              release: ["git_diff_summary", "git_workspace", "git_publish", "git_pr", "git_commit", "git_push", "checkpoint_list"],
               media: ctx.remote
                 ? ["gpt_image_2_workflow", "save_chatgpt_image", "save_chatgpt_image_from_url", "save_image_from_url"]
                 : ["gpt_image_2_workflow", "save_chatgpt_image", "save_chatgpt_image_from_url", "save_image_from_url", "save_image_from_clipboard", "save_image_from_download", "save_image_from_path"],
@@ -936,6 +938,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
                   : "Remote app opening and screenshot capture are disabled until the local operator sets CHATGPT2CODEX_REMOTE_E2E=1."
                 : "For UI/E2E proof: use e2e_start_server, then e2e_run_command for test commands; it captures a screenshot by default. Use e2e_open_target/e2e_open_url_screenshot/e2e_screenshot for manual visual proof. Return the screenshot path/markdown to the user.",
               "Use repo_inspect on the Custom GPT dedicated surface before Git mutations. For fresh remote state use git_workspace mode=fetch, for feature branches use git_workspace mode=create_branch, and for commit/push/PR use git_publish. Underlying git_commit/git_push and repo_status/repo_diff_summary/show_changes remain available for MCP/local/generic compatibility.",
+              "After git_publish mode=create_pr, use git_pr mode=inspect for reviewable PR state and git_pr mode=merge only when the user explicitly authorizes merging. Merge requires the exact inspected head SHA and never uses force/admin/auto-merge or branch deletion.",
               "git_publish mode=push is only for user-authorized publishing, targets origin/current-branch, and never force-pushes.",
               ctx.remote
                 ? "For GPT Image 2 requests: generate with ChatGPT's native image surface, obtain a Share/Copy Link/content URL, then pass that URL explicitly to save_chatgpt_image, save_chatgpt_image_from_url, or save_image_from_url."
@@ -2714,6 +2717,44 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
         }
         const result = await gitCreatePullRequest(entry.root, input.baseBranch, input.title, input.body, input.draft);
         return makeResult({ ...result }, result.created ? `Created PR #${result.number}.` : `Open PR #${result.number} already exists.`);
+      });
+    },
+  );
+
+  registerTool(
+    "git_pr",
+    {
+      title: "Inspect or safely merge a GitHub PR",
+      description: "Inspect PR state read-only or merge with an exact-head concurrency guard and existing remote authorization policy.",
+      annotations: COMMAND_RUN_ANNOTATIONS,
+      _meta: chatGptToolMeta("Checking pull request...", "Pull request operation completed"),
+      inputSchema: z.discriminatedUnion("mode", [
+        z.object({
+          mode: z.literal("inspect"),
+          projectId: z.string(),
+          prNumber: z.number().int().positive(),
+        }).strict(),
+        z.object({
+          mode: z.literal("merge"),
+          projectId: z.string(),
+          prNumber: z.number().int().positive(),
+          expectedHeadSha: z.string().regex(/^[0-9a-fA-F]{40}$/),
+          mergeMethod: z.enum(["merge", "squash", "rebase"]).optional(),
+        }).strict(),
+      ]),
+    },
+    async (input) => {
+      return withErrorMapping<Record<string, unknown>>(ctx, "git_pr", input, async () => {
+        if (input.mode === "inspect") {
+          await requireProjectLease(ctx, input.projectId, "read");
+          const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
+          const result = await gitInspectPullRequest(entry.root, input.prNumber);
+          return makeResult({ ...result }, `Inspected PR #${result.number}.`);
+        }
+        await requireProjectLease(ctx, input.projectId, "remote");
+        const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
+        const result = await gitMergePullRequest(entry.root, input.prNumber, input.expectedHeadSha, input.mergeMethod);
+        return makeResult({ ...result }, result.alreadyMerged ? `PR #${result.number} was already merged.` : `Merged PR #${result.number}.`);
       });
     },
   );

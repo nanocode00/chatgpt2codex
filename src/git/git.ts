@@ -432,6 +432,210 @@ export interface GitPullRequestResult {
   draft: boolean;
 }
 
+export interface GitPrChecksSummary {
+  total: number;
+  pending: number;
+  successful: number;
+  failed: number;
+}
+
+export interface GitPrInspection {
+  number: number;
+  url: string;
+  state: string;
+  draft: boolean;
+  baseBranch: string;
+  headBranch: string;
+  headSha: string;
+  mergeable: boolean | null;
+  mergeState: string | null;
+  reviewDecision: string | null;
+  checks: GitPrChecksSummary;
+  merged: boolean;
+  mergedCommitSha: string | null;
+}
+
+function assertPrNumber(prNumber: number): void {
+  if (!Number.isInteger(prNumber) || prNumber <= 0) {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Invalid PR number");
+  }
+}
+
+function assertFullGitSha(sha: string): void {
+  if (!/^[0-9a-f]{40}$/i.test(sha)) {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Invalid expected PR head SHA");
+  }
+}
+
+function summarizeStatusChecks(value: unknown): GitPrChecksSummary {
+  const rows = Array.isArray(value) ? value : [];
+  const result: GitPrChecksSummary = { total: rows.length, pending: 0, successful: 0, failed: 0 };
+  const successful = new Set(["SUCCESS", "NEUTRAL", "SKIPPED"]);
+  const failed = new Set(["FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED"]);
+  for (const row of rows) {
+    if (!row || typeof row !== "object") {
+      result.pending += 1;
+      continue;
+    }
+    const record = row as Record<string, unknown>;
+    const raw = [record.conclusion, record.state, record.status].find((item) => typeof item === "string") as string | undefined;
+    const status = raw?.toUpperCase() ?? "UNKNOWN";
+    if (successful.has(status)) result.successful += 1;
+    else if (failed.has(status)) result.failed += 1;
+    else result.pending += 1;
+  }
+  return result;
+}
+
+function normalizeGitPrView(raw: unknown): GitPrInspection {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "GitHub PR inspection returned an unexpected response");
+  }
+  const record = raw as Record<string, unknown>;
+  const number = record.number;
+  const url = record.url;
+  const state = record.state;
+  const draft = record.isDraft;
+  const baseBranch = record.baseRefName;
+  const headBranch = record.headRefName;
+  const headSha = record.headRefOid;
+  const mergeableRaw = record.mergeable;
+  if (
+    typeof number !== "number" || !Number.isInteger(number) || number <= 0 ||
+    typeof url !== "string" || typeof state !== "string" || typeof draft !== "boolean" ||
+    typeof baseBranch !== "string" || typeof headBranch !== "string" ||
+    typeof headSha !== "string" || !/^[0-9a-f]{40}$/i.test(headSha)
+  ) {
+    throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "GitHub PR inspection returned an unexpected response");
+  }
+  const mergeCommit = record.mergeCommit;
+  const mergedCommitSha = mergeCommit && typeof mergeCommit === "object" && typeof (mergeCommit as Record<string, unknown>).oid === "string"
+    ? String((mergeCommit as Record<string, unknown>).oid)
+    : null;
+  const stateUpper = state.toUpperCase();
+  const merged = stateUpper === "MERGED" || typeof record.mergedAt === "string";
+  return {
+    number,
+    url,
+    state: stateUpper,
+    draft,
+    baseBranch,
+    headBranch,
+    headSha,
+    mergeable: mergeableRaw === "MERGEABLE" ? true : mergeableRaw === "CONFLICTING" ? false : null,
+    mergeState: typeof record.mergeStateStatus === "string" ? record.mergeStateStatus : null,
+    reviewDecision: typeof record.reviewDecision === "string" && record.reviewDecision.length > 0 ? record.reviewDecision : null,
+    checks: summarizeStatusChecks(record.statusCheckRollup),
+    merged,
+    mergedCommitSha,
+  };
+}
+
+async function githubRepositoryForRoot(root: string): Promise<string> {
+  const remoteUrl = await originUrl(root);
+  const repository = githubRepositoryFromOrigin(remoteUrl);
+  if (!repository) throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "GitHub origin is required for PR operations");
+  return repository;
+}
+
+export async function gitInspectPullRequest(
+  root: string,
+  prNumber: number,
+  ghRunner: GitProcessRunner = runGh,
+): Promise<GitPrInspection> {
+  assertPrNumber(prNumber);
+  const repository = await githubRepositoryForRoot(root);
+  try {
+    const viewed = await ghRunner(root, [
+      "pr", "view", String(prNumber), "--repo", repository,
+      "--json", "number,url,state,isDraft,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,mergedAt,mergeCommit",
+    ]);
+    return normalizeGitPrView(JSON.parse(viewed.stdout));
+  } catch (err) {
+    if (err instanceof DomainError) throw err;
+    throw sanitizedProcessError("GitHub PR inspection", err);
+  }
+}
+
+export interface GitPrMergeResult {
+  merged: true;
+  alreadyMerged: boolean;
+  number: number;
+  url: string;
+  mergeMethod: "merge" | "squash" | "rebase";
+  expectedHeadSha: string;
+  mergedCommitSha: string;
+  baseBranch: string;
+  headBranch: string;
+}
+
+export async function gitMergePullRequest(
+  root: string,
+  prNumber: number,
+  expectedHeadSha: string,
+  mergeMethod: "merge" | "squash" | "rebase" = "merge",
+  ghRunner: GitProcessRunner = runGh,
+): Promise<GitPrMergeResult> {
+  assertPrNumber(prNumber);
+  assertFullGitSha(expectedHeadSha);
+  const repository = await githubRepositoryForRoot(root);
+  const before = await gitInspectPullRequest(root, prNumber, ghRunner);
+  if (before.headSha.toLowerCase() !== expectedHeadSha.toLowerCase()) {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "PR head changed; inspect again");
+  }
+  if (before.merged) {
+    if (!before.mergedCommitSha) {
+      throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "Merged PR commit could not be verified");
+    }
+    return {
+      merged: true,
+      alreadyMerged: true,
+      number: before.number,
+      url: before.url,
+      mergeMethod,
+      expectedHeadSha,
+      mergedCommitSha: before.mergedCommitSha,
+      baseBranch: before.baseBranch,
+      headBranch: before.headBranch,
+    };
+  }
+  if (before.state !== "OPEN") throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "PR is not open");
+  if (before.draft) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Draft PR cannot be merged");
+  if (!before.baseBranch || !before.headBranch || before.baseBranch === before.headBranch) {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "PR head/base is invalid");
+  }
+  if (before.mergeable !== true) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "PR is not mergeable yet");
+  if (before.reviewDecision === "CHANGES_REQUESTED") throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "PR has requested changes");
+  if (before.checks.failed > 0) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "PR has failing checks");
+  if (before.checks.pending > 0) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "PR has pending checks");
+
+  const methodFlag = mergeMethod === "squash" ? "--squash" : mergeMethod === "rebase" ? "--rebase" : "--merge";
+  try {
+    await ghRunner(root, [
+      "pr", "merge", String(prNumber), "--repo", repository, methodFlag,
+      "--match-head-commit", expectedHeadSha,
+    ]);
+  } catch (err) {
+    if (err instanceof DomainError) throw err;
+    throw sanitizedProcessError("GitHub PR merge", err);
+  }
+  const after = await gitInspectPullRequest(root, prNumber, ghRunner);
+  if (!after.merged || !after.mergedCommitSha || after.headSha.toLowerCase() !== expectedHeadSha.toLowerCase()) {
+    throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "GitHub PR merge could not be verified");
+  }
+  return {
+    merged: true,
+    alreadyMerged: false,
+    number: after.number,
+    url: after.url,
+    mergeMethod,
+    expectedHeadSha,
+    mergedCommitSha: after.mergedCommitSha,
+    baseBranch: after.baseBranch,
+    headBranch: after.headBranch,
+  };
+}
+
 export async function gitCreatePullRequest(
   root: string,
   baseBranch: string,

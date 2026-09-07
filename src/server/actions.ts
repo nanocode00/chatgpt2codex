@@ -367,6 +367,14 @@ const ACTION_ROUTES: ActionRoute[] = [
     schema: "GitPublishInput",
   },
   {
+    path: "/actions/git-pr",
+    tool: "git_pr",
+    operationId: "git_pr",
+    summary: "Inspect or safely merge a GitHub pull request",
+    description: "Inspect PR state read-only or merge with an exact inspected head SHA and existing remote-write authorization.",
+    schema: "GitPrInput",
+  },
+  {
     path: "/actions/git-commit",
     tool: "git_commit",
     operationId: "git_commit",
@@ -435,6 +443,7 @@ const OPENAPI_ACTION_TOOL_NAMES = new Set([
   "repo_inspect",
   "git_workspace",
   "git_publish",
+  "git_pr",
   "save_chatgpt_image",
   "save_chatgpt_image_from_url",
   "list_images",
@@ -1221,6 +1230,18 @@ function openApiSpec(publicOrigin: string): Record<string, unknown> {
             title: { type: "string", minLength: 1, maxLength: 256 },
             body: { type: "string", maxLength: 65536 },
             draft: { type: "boolean" },
+          },
+        },
+        GitPrInput: {
+          type: "object",
+          additionalProperties: false,
+          required: ["mode", "projectId", "prNumber"],
+          properties: {
+            mode: { type: "string", enum: ["inspect", "merge"] },
+            projectId: { type: "string" },
+            prNumber: { type: "integer", minimum: 1 },
+            expectedHeadSha: { type: "string", pattern: "^[0-9a-fA-F]{40}$" },
+            mergeMethod: { type: "string", enum: ["merge", "squash", "rebase"] },
           },
         },
         SaveChatGptImageInput: {

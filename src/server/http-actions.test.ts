@@ -246,7 +246,7 @@ describe("Custom GPT action bridge", () => {
     expect(body.info.description).toContain("30 operations");
     expect(body.info.description).toContain("workspace_list_projects");
     expect(body.info.description).toContain("save_chatgpt_image/save_chatgpt_image_from_url");
-    expect(Object.keys(body.paths)).toHaveLength(23);
+    expect(Object.keys(body.paths)).toHaveLength(24);
     expect(body.info["x-chatgpt2codex-tool-proof"]?.namespace).toBe("ChatGPT_To_Codex");
     expect(body.info["x-chatgpt2codex-openapi-operation-count"]).toBeLessThanOrEqual(30);
     expect(body.info["x-chatgpt2codex-tool-names"]).toContain("workspace_list_projects");
@@ -375,6 +375,14 @@ describe("Custom GPT action bridge", () => {
     expect((body.components.schemas.GitPublishInput as { anyOf?: unknown }).anyOf).toBeUndefined();
     expect(body.paths["/actions/git-workspace"]).toBeDefined();
     expect(body.paths["/actions/git-publish"]).toBeDefined();
+    expect(body.paths["/actions/git-pr"]).toBeDefined();
+    expect((body.paths["/actions/git-pr"] as { post: { operationId: string } }).post.operationId).toBe("git_pr");
+    expect((body.components.schemas.GitPrInput as { type?: string }).type).toBe("object");
+    expect((body.components.schemas.GitPrInput as { required?: string[] }).required).toEqual(["mode", "projectId", "prNumber"]);
+    expect((body.components.schemas.GitPrInput as { additionalProperties?: boolean }).additionalProperties).toBe(false);
+    expect((body.components.schemas.GitPrInput as { oneOf?: unknown }).oneOf).toBeUndefined();
+    expect((body.components.schemas.GitPrInput as { anyOf?: unknown }).anyOf).toBeUndefined();
+    expect((body.components.schemas.GitPrInput as { discriminator?: unknown }).discriminator).toBeUndefined();
     expect(body.paths["/actions/git-commit"]).toBeUndefined();
     expect(body.paths["/actions/git-push"]).toBeUndefined();
     const operationIds = Object.values(body.paths)
@@ -405,10 +413,10 @@ describe("Custom GPT action bridge", () => {
 
   it("keeps the OpenAPI operation budget exact across remote opt-in combinations", async () => {
     const combinations = [
-      { exec: false, e2e: false, expected: 23 },
-      { exec: true, e2e: false, expected: 26 },
-      { exec: false, e2e: true, expected: 24 },
-      { exec: true, e2e: true, expected: 28 },
+      { exec: false, e2e: false, expected: 24 },
+      { exec: true, e2e: false, expected: 27 },
+      { exec: false, e2e: true, expected: 25 },
+      { exec: true, e2e: true, expected: 29 },
     ] as const;
 
     for (const combination of combinations) {
@@ -435,6 +443,7 @@ describe("Custom GPT action bridge", () => {
       expect(body.paths["/actions/project-skill-write"]).toBeDefined();
       expect(body.paths["/actions/git-workspace"]).toBeDefined();
       expect(body.paths["/actions/git-publish"]).toBeDefined();
+      expect(body.paths["/actions/git-pr"]).toBeDefined();
       expect(body.paths["/actions/git-commit"]).toBeUndefined();
       expect(body.paths["/actions/git-push"]).toBeUndefined();
       expect(Boolean(body.paths["/actions/command-run"])).toBe(combination.exec);
@@ -445,7 +454,7 @@ describe("Custom GPT action bridge", () => {
     expect(body.paths["/actions/e2e-test-and-show-screenshot"]).toBeDefined();
     expect(body.paths["/actions/e2e-screenshot"]).toBeUndefined();
     expect(body.paths["/actions/e2e-open-url-screenshot"]).toBeUndefined();
-        expect(Object.keys(body.paths)).toHaveLength(28);
+        expect(Object.keys(body.paths)).toHaveLength(29);
       }
     }
   });
@@ -682,6 +691,14 @@ describe("Custom GPT action bridge", () => {
       ["/actions/git-publish", { mode: "push", projectId: "proj", baseBranch: "main" }],
       ["/actions/git-publish", { mode: "commit", projectId: "proj" }],
       ["/actions/git-publish", { mode: "create_pr", projectId: "proj", baseBranch: "main", title: "x", message: "not-allowed" }],
+      ["/actions/git-pr", { mode: "inspect", projectId: "proj", prNumber: 1, expectedHeadSha: "a".repeat(40) }],
+      ["/actions/git-pr", { mode: "inspect", projectId: "proj", prNumber: 1, mergeMethod: "merge" }],
+      ["/actions/git-pr", { mode: "merge", projectId: "proj", prNumber: 1 }],
+      ["/actions/git-pr", { mode: "merge", projectId: "proj", prNumber: 1, expectedHeadSha: "a".repeat(40), unexpected: true }],
+      ["/actions/git-pr", { mode: "inspect", projectId: "proj", prNumber: 0 }],
+      ["/actions/git-pr", { mode: "inspect", projectId: "proj", prNumber: -1 }],
+      ["/actions/git-pr", { mode: "inspect", projectId: "proj", prNumber: 1.5 }],
+      ["/actions/git-pr", { mode: "inspect", projectId: "proj", prNumber: "1" }],
     ] as const) {
       const res = await postAction(server.baseUrl, path, input);
       const body = (await res.json()) as { ok?: boolean; isError?: boolean; structuredContent?: { code?: string } };

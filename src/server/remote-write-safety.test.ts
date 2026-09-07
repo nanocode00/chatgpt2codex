@@ -156,6 +156,19 @@ describe("remote write safety", () => {
     const publish = await tools?.git_publish?.handler?.({ mode: "push", projectId: "proj" });
     expect(publish?.isError).toBe(true);
     expect(publish?.structuredContent?.code).toBe("PERMISSION_DENIED");
+
+    const merge = await tools?.git_pr?.handler?.({
+      mode: "merge",
+      projectId: "proj",
+      prNumber: 1,
+      expectedHeadSha: "a".repeat(40),
+    });
+    expect(merge?.isError).toBe(true);
+    expect(merge?.structuredContent?.code).toBe("PERMISSION_DENIED");
+
+    const inspect = await tools?.git_pr?.handler?.({ mode: "inspect", projectId: "proj", prNumber: 1 });
+    expect(inspect?.isError).toBe(true);
+    expect(inspect?.structuredContent?.code).not.toBe("PERMISSION_DENIED");
   });
 
   it("keeps remote-write opt-in mandatory for git_workspace and git_publish", async () => {
@@ -173,5 +186,18 @@ describe("remote write safety", () => {
     const publish = await tools?.git_publish?.handler?.({ mode: "push", projectId: "proj" });
     expect(publish?.isError).toBe(true);
     expect(publish?.structuredContent?.code).toBe("PERMISSION_DENIED");
+
+    const merge = await tools?.git_pr?.handler?.({
+      mode: "merge",
+      projectId: "proj",
+      prNumber: 1,
+      expectedHeadSha: "a".repeat(40),
+    });
+    expect(merge?.isError).toBe(true);
+    expect(merge?.structuredContent?.code).toBe("PERMISSION_DENIED");
+
+    const inspect = await tools?.git_pr?.handler?.({ mode: "inspect", projectId: "proj", prNumber: 1 });
+    expect(inspect?.isError).toBe(true);
+    expect(inspect?.structuredContent?.code).not.toBe("PERMISSION_DENIED");
   });
 });

@@ -7,6 +7,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   gitCreateBranchFromOrigin,
   gitCreatePullRequest,
+  gitInspectPullRequest,
+  gitMergePullRequest,
   gitDiffSummary,
   gitFetchOrigin,
   githubRepositoryFromOrigin,
@@ -451,5 +453,173 @@ describe("safe git workspace/publish workflow", () => {
       throw new Error("authentication failed for secret-token");
     });
     await expect(authFailure).rejects.toMatchObject({ code: "NOT_IMPLEMENTED", message: "GitHub PR creation failed" });
+  });
+
+  it("inspects a fork PR with server-derived --repo and normalizes review/check state", async () => {
+    await execFileAsync("git", ["remote", "set-url", "origin", "https://TOKEN@github.com/nanocode00/chatgpt2codex.git"], { cwd: dir });
+    const calls: string[][] = [];
+    const headSha = "a".repeat(40);
+    const result = await gitInspectPullRequest(dir, 1, async (_cwd, args) => {
+      calls.push(args);
+      return {
+        stdout: JSON.stringify({
+          number: 1,
+          url: "https://github.com/nanocode00/chatgpt2codex/pull/1",
+          state: "OPEN",
+          isDraft: false,
+          baseRefName: "main",
+          headRefName: "fix/example",
+          headRefOid: headSha,
+          mergeable: "MERGEABLE",
+          mergeStateStatus: "CLEAN",
+          reviewDecision: "CHANGES_REQUESTED",
+          statusCheckRollup: [
+            { conclusion: "SUCCESS" },
+            { status: "IN_PROGRESS" },
+            { conclusion: "FAILURE" },
+          ],
+          mergedAt: null,
+          mergeCommit: null,
+        }),
+        stderr: "",
+      };
+    });
+    expect(result).toMatchObject({
+      number: 1,
+      state: "OPEN",
+      draft: false,
+      baseBranch: "main",
+      headBranch: "fix/example",
+      headSha,
+      mergeable: true,
+      mergeState: "CLEAN",
+      reviewDecision: "CHANGES_REQUESTED",
+      checks: { total: 3, successful: 1, pending: 1, failed: 1 },
+      merged: false,
+      mergedCommitSha: null,
+    });
+    expect(calls[0]).toEqual([
+      "pr", "view", "1", "--repo", "nanocode00/chatgpt2codex", "--json",
+      "number,url,state,isDraft,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,mergedAt,mergeCommit",
+    ]);
+    expect(JSON.stringify(calls)).not.toContain("TOKEN");
+  });
+
+  it("sanitizes malformed PR inspection responses and gh failures", async () => {
+    await execFileAsync("git", ["remote", "set-url", "origin", "https://github.com/example/repo.git"], { cwd: dir });
+    await expect(gitInspectPullRequest(dir, 1, async () => ({ stdout: "not-json", stderr: "secret" }))).rejects.toMatchObject({
+      code: "NOT_IMPLEMENTED",
+      message: "GitHub PR inspection failed",
+    });
+    await expect(gitInspectPullRequest(dir, 1, async () => {
+      throw Object.assign(new Error("secret-token"), { code: "ENOENT" });
+    })).rejects.toMatchObject({ code: "NOT_IMPLEMENTED", message: "GitHub PR inspection unavailable" });
+  });
+
+  it.each([
+    ["merge", "--merge"],
+    ["squash", "--squash"],
+    ["rebase", "--rebase"],
+  ] as const)("merges with fixed %s argv and verifies merged state", async (mergeMethod, methodFlag) => {
+    await execFileAsync("git", ["remote", "set-url", "origin", "https://github.com/nanocode00/chatgpt2codex.git"], { cwd: dir });
+    const headSha = "b".repeat(40);
+    const mergeSha = "c".repeat(40);
+    const calls: string[][] = [];
+    let inspected = 0;
+    const runner = async (_cwd: string, args: string[]) => {
+      calls.push(args);
+      if (args[1] === "merge") return { stdout: "", stderr: "" };
+      inspected += 1;
+      return {
+        stdout: JSON.stringify({
+          number: 7,
+          url: "https://github.com/nanocode00/chatgpt2codex/pull/7",
+          state: inspected === 1 ? "OPEN" : "MERGED",
+          isDraft: false,
+          baseRefName: "main",
+          headRefName: "feature/x",
+          headRefOid: headSha,
+          mergeable: "MERGEABLE",
+          mergeStateStatus: "CLEAN",
+          reviewDecision: "APPROVED",
+          statusCheckRollup: [{ conclusion: "SUCCESS" }],
+          mergedAt: inspected === 1 ? null : "2026-09-07T00:00:00Z",
+          mergeCommit: inspected === 1 ? null : { oid: mergeSha },
+        }),
+        stderr: "",
+      };
+    };
+    const result = await gitMergePullRequest(dir, 7, headSha, mergeMethod, runner);
+    expect(result).toMatchObject({ merged: true, alreadyMerged: false, number: 7, mergeMethod, expectedHeadSha: headSha, mergedCommitSha: mergeSha });
+    expect(calls[1]).toEqual([
+      "pr", "merge", "7", "--repo", "nanocode00/chatgpt2codex", methodFlag,
+      "--match-head-commit", headSha,
+    ]);
+    expect(calls[1]).not.toContain("--admin");
+    expect(calls[1]).not.toContain("--auto");
+    expect(calls[1]).not.toContain("--delete-branch");
+    expect(calls.filter((args) => args[1] === "view")).toHaveLength(2);
+  });
+
+  it("fails closed when the inspected head changes", async () => {
+    await execFileAsync("git", ["remote", "set-url", "origin", "https://github.com/example/repo.git"], { cwd: dir });
+    const actual = "d".repeat(40);
+    const expected = "e".repeat(40);
+    await expect(gitMergePullRequest(dir, 1, expected, "merge", async () => ({
+      stdout: JSON.stringify({
+        number: 1, url: "https://github.com/example/repo/pull/1", state: "OPEN", isDraft: false,
+        baseRefName: "main", headRefName: "feature/x", headRefOid: actual,
+        mergeable: "MERGEABLE", mergeStateStatus: "CLEAN", reviewDecision: "APPROVED",
+        statusCheckRollup: [], mergedAt: null, mergeCommit: null,
+      }), stderr: "",
+    }))).rejects.toMatchObject({ code: "COMMAND_NOT_ALLOWED", message: "PR head changed; inspect again" });
+  });
+
+  it.each([
+    ["draft", { isDraft: true }, "Draft PR cannot be merged"],
+    ["closed", { state: "CLOSED" }, "PR is not open"],
+    ["changes requested", { reviewDecision: "CHANGES_REQUESTED" }, "PR has requested changes"],
+    ["failing checks", { statusCheckRollup: [{ conclusion: "FAILURE" }] }, "PR has failing checks"],
+    ["pending checks", { statusCheckRollup: [{ status: "IN_PROGRESS" }] }, "PR has pending checks"],
+    ["conflict", { mergeable: "CONFLICTING" }, "PR is not mergeable yet"],
+    ["unknown mergeability", { mergeable: "UNKNOWN" }, "PR is not mergeable yet"],
+  ])("rejects unsafe merge precondition: %s", async (_label, overrides, message) => {
+    await execFileAsync("git", ["remote", "set-url", "origin", "https://github.com/example/repo.git"], { cwd: dir });
+    const headSha = "f".repeat(40);
+    const base = {
+      number: 1, url: "https://github.com/example/repo/pull/1", state: "OPEN", isDraft: false,
+      baseRefName: "main", headRefName: "feature/x", headRefOid: headSha,
+      mergeable: "MERGEABLE", mergeStateStatus: "CLEAN", reviewDecision: "APPROVED",
+      statusCheckRollup: [], mergedAt: null, mergeCommit: null,
+    };
+    await expect(gitMergePullRequest(dir, 1, headSha, "merge", async () => ({
+      stdout: JSON.stringify({ ...base, ...overrides }), stderr: "",
+    }))).rejects.toMatchObject({ code: "COMMAND_NOT_ALLOWED", message });
+  });
+
+  it("returns alreadyMerged idempotently without issuing a merge command", async () => {
+    await execFileAsync("git", ["remote", "set-url", "origin", "https://github.com/example/repo.git"], { cwd: dir });
+    const headSha = "1".repeat(40);
+    const mergeSha = "2".repeat(40);
+    const calls: string[][] = [];
+    const result = await gitMergePullRequest(dir, 1, headSha, "merge", async (_cwd, args) => {
+      calls.push(args);
+      return { stdout: JSON.stringify({
+        number: 1, url: "https://github.com/example/repo/pull/1", state: "MERGED", isDraft: false,
+        baseRefName: "main", headRefName: "feature/x", headRefOid: headSha,
+        mergeable: "UNKNOWN", mergeStateStatus: "UNKNOWN", reviewDecision: null,
+        statusCheckRollup: [], mergedAt: "2026-09-07T00:00:00Z", mergeCommit: { oid: mergeSha },
+      }), stderr: "" };
+    });
+    expect(result).toMatchObject({ merged: true, alreadyMerged: true, mergedCommitSha: mergeSha });
+    expect(calls.filter((args) => args[1] === "merge")).toHaveLength(0);
+  });
+
+  it("rejects malformed expected head SHA before merge", async () => {
+    await execFileAsync("git", ["remote", "set-url", "origin", "https://github.com/example/repo.git"], { cwd: dir });
+    await expect(gitMergePullRequest(dir, 1, "abc", "merge", async () => ({ stdout: "{}", stderr: "" }))).rejects.toMatchObject({
+      code: "COMMAND_NOT_ALLOWED",
+      message: "Invalid expected PR head SHA",
+    });
   });
 });
