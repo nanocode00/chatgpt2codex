@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import * as builtinModule from "./builtin-operations.js";
 import { builtInSafeAdapterOperationRegistry, catalogBuiltInSafeAdapterOperations } from "./builtin-operations.js";
 import { PYTHON_RUNTIME_PROFILES_ENV } from "../python/runtime-profiles.js";
 import { SQLITE_PROFILES_ENV } from "../database/sqlite-profiles.js";
@@ -15,11 +16,24 @@ afterEach(() => {
 });
 
 describe("built-in safe adapter operations", () => {
+  function registryForStrictValidatorTests() {
+    const registry = Object.values(builtinModule).find((value) => value && typeof value === "object" && "get" in value && "catalog" in value) as {
+      get(id: string): { capability: string; input: readonly unknown[]; validateInput(value: Record<string, unknown>): Record<string, unknown> };
+    } | undefined;
+    if (!registry) throw new Error("built-in adapter registry export not found");
+    return registry;
+  }
+
   it("catalogs deterministic multi-adapter operations without profile secrets or handler details", () => {
     process.env[PYTHON_RUNTIME_PROFILES_ENV] = JSON.stringify({ prod: "/very/private/super-secret/python" });
     process.env[SQLITE_PROFILES_ENV] = JSON.stringify({ prod: { path: "secret/database.db" } });
     const catalog = builtInSafeAdapterOperationRegistry.catalog();
     expect(catalog.operations.map((operation) => operation.id)).toEqual([
+      "docker.logs",
+      "docker.profiles",
+      "docker.start",
+      "docker.status",
+      "docker.stop",
       "notebook.execute",
       "notebook.validate",
       "python.execute",
@@ -28,7 +42,7 @@ describe("built-in safe adapter operations", () => {
       "sqlite.profiles",
       "sqlite.query",
     ]);
-    expect(catalog.operations.map((operation) => operation.adapter)).toEqual(["notebook", "notebook", "python", "python", "sqlite", "sqlite", "sqlite"]);
+    expect(catalog.operations.map((operation) => operation.adapter)).toEqual(["docker", "docker", "docker", "docker", "docker", "notebook", "notebook", "python", "python", "sqlite", "sqlite", "sqlite"]);
     const serialized = JSON.stringify(catalog);
     expect(serialized).not.toContain("super-secret");
     expect(serialized).not.toContain("secret/database.db");
@@ -62,6 +76,9 @@ describe("built-in safe adapter operations", () => {
     delete process.env.CHATGPT2CODEX_REMOTE_EXEC;
     const withoutExec = catalogBuiltInSafeAdapterOperations(remote).operations.map((operation) => operation.id);
     expect(withoutExec).toEqual([
+      "docker.logs",
+      "docker.profiles",
+      "docker.status",
       "notebook.validate",
       "python.profiles",
       "sqlite.inspect",
@@ -72,6 +89,11 @@ describe("built-in safe adapter operations", () => {
     process.env.CHATGPT2CODEX_REMOTE_EXEC = "1";
     const withExec = catalogBuiltInSafeAdapterOperations(remote).operations.map((operation) => operation.id);
     expect(withExec).toEqual([
+      "docker.logs",
+      "docker.profiles",
+      "docker.start",
+      "docker.status",
+      "docker.stop",
       "notebook.execute",
       "notebook.validate",
       "python.execute",
@@ -105,6 +127,45 @@ describe("built-in safe adapter operations", () => {
     expect(() => query.validateInput({ profile: "app", sql: "SELECT 1", executable: "/bin/sh" })).toThrow(/unexpected fields/);
     expect(() => query.validateInput({ profile: "app", sql: "SELECT 1", capability: "write" })).toThrow(/unexpected fields/);
     expect(() => query.validateInput({ profile: "app", sql: "SELECT 1", handler: "local_shell_run" })).toThrow(/unexpected fields/);
+  });
+
+  it("keeps Docker validators strict and registers only bounded read plus start/stop v1", () => {
+    const registry = registryForStrictValidatorTests();
+    const profiles = registry.get("docker.profiles");
+    expect(profiles.capability).toBe("read");
+    expect(profiles.input).toEqual([]);
+    expect(() => profiles.validateInput({ composeFile: "docker-compose.yml" })).toThrow(/unexpected fields/);
+
+    const status = registry.get("docker.status");
+    expect(status.capability).toBe("read");
+    expect(status.validateInput({ profile: "mallo", service: "web" })).toEqual({ profile: "mallo", service: "web" });
+    for (const extra of [
+      { dockerHost: "tcp://127.0.0.1:2375" }, { socket: "/var/run/docker.sock" }, { path: "/usr/bin/docker" },
+      { flags: ["--context", "evil"] }, { context: "remote" }, { projectDirectory: "/tmp/x" },
+    ]) expect(() => status.validateInput({ profile: "mallo", ...extra })).toThrow(/unexpected fields/);
+
+    const logs = registry.get("docker.logs");
+    expect(logs.capability).toBe("read");
+    expect(logs.validateInput({ profile: "mallo", service: "web" })).toEqual({ profile: "mallo", service: "web", lines: 100 });
+    expect(logs.validateInput({ profile: "mallo", service: "web", lines: 500 })).toEqual({ profile: "mallo", service: "web", lines: 500 });
+    expect(() => logs.validateInput({ profile: "mallo", service: "web", lines: 501 })).toThrow(/lines/);
+    expect(() => logs.validateInput({ profile: "mallo", service: "web", argv: ["--follow"] })).toThrow(/unexpected fields/);
+
+    for (const id of ["docker.start", "docker.stop"]) {
+      const operation = registry.get(id);
+      expect(operation.capability).toBe("write");
+      expect((operation as { availability?: string }).availability).toBe("remote-exec");
+      expect(operation.validateInput({ profile: "mallo", service: "web" })).toEqual({ profile: "mallo", service: "web" });
+      for (const extra of [
+        { containerId: "abc" }, { containerName: "name" }, { image: "x" }, { projectName: "evil" }, { composeFile: "evil.yml" },
+        { path: "/tmp" }, { dockerHost: "tcp://evil" }, { context: "evil" }, { args: ["up"] }, { flags: ["--force"] },
+        { env: { DOCKER_HOST: "evil" } }, { timeout: 999 }, { signal: "KILL" }, { remove: true }, { force: true },
+      ]) expect(() => operation.validateInput({ profile: "mallo", service: "web", ...extra })).toThrow(/unexpected fields/);
+    }
+
+    for (const id of ["docker.restart", "docker.up", "docker.down", "docker.build", "docker.pull", "docker.push", "docker.exec", "docker.run", "docker.rm", "docker.kill", "docker.create", "docker.compose.run", "docker.compose.up", "docker.compose.down"]) {
+      expect(() => registry.get(id)).toThrow();
+    }
   });
 
   it("cannot resolve arbitrary MCP or Git tool names through the registry", () => {

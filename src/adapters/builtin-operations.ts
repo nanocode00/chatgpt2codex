@@ -1,4 +1,5 @@
 import { inspectSQLite, listSQLiteProfiles, querySQLite, SQLITE_DEFAULT_MAX_ROWS, SQLITE_MAX_ROWS } from "../database/sqlite.js";
+import { dockerLogs, dockerStart, dockerStatus, dockerStop, listDockerProfiles, DOCKER_LOG_DEFAULT_LINES, DOCKER_LOG_MAX_LINES } from "../docker/docker.js";
 import { executeNotebook, validateNotebook } from "../notebook/notebook.js";
 import { executePythonScript } from "../python/python-execute.js";
 import { parsePythonRuntimeProfiles } from "../python/runtime-profiles.js";
@@ -23,6 +24,105 @@ function requiredString(value: unknown, name: string, maxLength = 256): string {
 }
 
 const BUILT_IN_OPERATIONS = [
+  {
+    id: "docker.profiles",
+    adapterId: "docker",
+    description: "List operator-configured Docker profile aliases without exposing compose paths or service configuration.",
+    capability: "read",
+    input: Object.freeze([]),
+    validateInput(value) {
+      strictKeys(value, []);
+      return {};
+    },
+    handler() {
+      return listDockerProfiles();
+    },
+  },
+  {
+    id: "docker.status",
+    adapterId: "docker",
+    description: "Read bounded sanitized Docker Compose service status for an operator-configured profile.",
+    capability: "read",
+    input: Object.freeze([
+      { name: "profile", type: "string", required: true, maxLength: 64 },
+      { name: "service", type: "string", required: false, maxLength: 128 },
+    ]),
+    validateInput(value) {
+      strictKeys(value, ["profile", "service"]);
+      const profile = requiredString(value.profile, "profile", 64);
+      const service = value.service === undefined ? undefined : requiredString(value.service, "service", 128);
+      return { profile, service };
+    },
+    handler(context, input) {
+      return dockerStatus(context.projectRoot, input.profile as string, input.service as string | undefined);
+    },
+  },
+  {
+    id: "docker.logs",
+    adapterId: "docker",
+    description: "Read bounded redacted Docker Compose logs for one allowlisted service.",
+    capability: "read",
+    input: Object.freeze([
+      { name: "profile", type: "string", required: true, maxLength: 64 },
+      { name: "service", type: "string", required: true, maxLength: 128 },
+      { name: "lines", type: "integer", required: false, min: 1, max: DOCKER_LOG_MAX_LINES },
+    ]),
+    validateInput(value) {
+      strictKeys(value, ["profile", "service", "lines"]);
+      const profile = requiredString(value.profile, "profile", 64);
+      const service = requiredString(value.service, "service", 128);
+      const lines = value.lines === undefined ? DOCKER_LOG_DEFAULT_LINES : value.lines;
+      if (!Number.isInteger(lines) || Number(lines) < 1 || Number(lines) > DOCKER_LOG_MAX_LINES) reject("Safe adapter operation argument lines is invalid");
+      return { profile, service, lines: Number(lines) };
+    },
+    handler(context, input) {
+      return dockerLogs(context.projectRoot, input.profile as string, input.service as string, input.lines as number);
+    },
+  },
+  {
+    id: "docker.start",
+    adapterId: "docker",
+    description: "Start one existing operator-allowlisted Docker Compose service container without creating, building, pulling, or recreating.",
+    capability: "write",
+    availability: "remote-exec",
+    input: Object.freeze([
+      { name: "profile", type: "string", required: true, maxLength: 64 },
+      { name: "service", type: "string", required: true, maxLength: 128 },
+    ]),
+    validateInput(value) {
+      strictKeys(value, ["profile", "service"]);
+      return {
+        profile: requiredString(value.profile, "profile", 64),
+        service: requiredString(value.service, "service", 128),
+      };
+    },
+    handler(context, input) {
+      assertRemoteExecAllowed(context.ctx, "docker_start");
+      return dockerStart(context.projectRoot, input.profile as string, input.service as string);
+    },
+  },
+  {
+    id: "docker.stop",
+    adapterId: "docker",
+    description: "Stop one existing operator-allowlisted Docker Compose service container with a fixed graceful timeout.",
+    capability: "write",
+    availability: "remote-exec",
+    input: Object.freeze([
+      { name: "profile", type: "string", required: true, maxLength: 64 },
+      { name: "service", type: "string", required: true, maxLength: 128 },
+    ]),
+    validateInput(value) {
+      strictKeys(value, ["profile", "service"]);
+      return {
+        profile: requiredString(value.profile, "profile", 64),
+        service: requiredString(value.service, "service", 128),
+      };
+    },
+    handler(context, input) {
+      assertRemoteExecAllowed(context.ctx, "docker_stop");
+      return dockerStop(context.projectRoot, input.profile as string, input.service as string);
+    },
+  },
   {
     id: "python.profiles",
     adapterId: "python",
