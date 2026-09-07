@@ -361,6 +361,14 @@ describe("Custom GPT action bridge", () => {
     expect(body.components.schemas.ActionToolResponse.properties.toolCall).toBeDefined();
     expect(body.components.schemas.ToolCallProof).toBeDefined();
     expect(body.components.schemas.ToolAvailabilityGate).toBeDefined();
+    expect(body.components.schemas.GitWorkspaceInput.oneOf).toHaveLength(3);
+    expect(body.components.schemas.GitWorkspaceInput.discriminator).toEqual({ propertyName: "mode" });
+    expect(body.components.schemas.GitPublishInput.oneOf).toHaveLength(3);
+    expect(body.components.schemas.GitPublishInput.discriminator).toEqual({ propertyName: "mode" });
+    expect(body.paths["/actions/git-workspace"]).toBeDefined();
+    expect(body.paths["/actions/git-publish"]).toBeDefined();
+    expect(body.paths["/actions/git-commit"]).toBeUndefined();
+    expect(body.paths["/actions/git-push"]).toBeUndefined();
     const operationIds = Object.values(body.paths)
       .map((pathEntry) => (pathEntry as { post?: { operationId?: string } }).post?.operationId)
       .filter((operationId): operationId is string => Boolean(operationId));
@@ -403,6 +411,10 @@ describe("Custom GPT action bridge", () => {
       expect(body.paths["/actions/project-skill-list"]).toBeDefined();
       expect(body.paths["/actions/project-skill-read"]).toBeDefined();
       expect(body.paths["/actions/project-skill-write"]).toBeDefined();
+      expect(body.paths["/actions/git-workspace"]).toBeDefined();
+      expect(body.paths["/actions/git-publish"]).toBeDefined();
+      expect(body.paths["/actions/git-commit"]).toBeUndefined();
+      expect(body.paths["/actions/git-push"]).toBeUndefined();
       expect(Boolean(body.paths["/actions/command-run"])).toBe(combination.exec);
       expect(Boolean(body.paths["/actions/notebook-execute"])).toBe(combination.exec);
       expect(Boolean(body.paths["/actions/python-execute"])).toBe(combination.exec);

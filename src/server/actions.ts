@@ -351,6 +351,22 @@ const ACTION_ROUTES: ActionRoute[] = [
     schema: "CheckpointShowInput",
   },
   {
+    path: "/actions/git-workspace",
+    tool: "git_workspace",
+    operationId: "git_workspace",
+    summary: "Safely fetch or switch Git workspace state",
+    description: "Fetch fixed remote origin, create a local branch from origin/<base>, or switch to an existing local branch.",
+    schema: "GitWorkspaceInput",
+  },
+  {
+    path: "/actions/git-publish",
+    tool: "git_publish",
+    operationId: "git_publish",
+    summary: "Safely commit, push, or create a GitHub PR",
+    description: "Consolidated Git publishing surface. Pushes only the current branch to origin; PR head is the current branch.",
+    schema: "GitPublishInput",
+  },
+  {
     path: "/actions/git-commit",
     tool: "git_commit",
     operationId: "git_commit",
@@ -417,8 +433,8 @@ const OPENAPI_ACTION_TOOL_NAMES = new Set([
   "e2e_open_target",
   "e2e_test_and_show_screenshot",
   "repo_inspect",
-  "git_commit",
-  "git_push",
+  "git_workspace",
+  "git_publish",
   "save_chatgpt_image",
   "save_chatgpt_image_from_url",
   "list_images",
@@ -1196,6 +1212,73 @@ function openApiSpec(publicOrigin: string): Record<string, unknown> {
             remote: { type: "string" },
             branch: { type: "string" },
           },
+        },
+        GitWorkspaceInput: {
+          oneOf: [
+            {
+              type: "object",
+              additionalProperties: false,
+              required: ["mode", "projectId"],
+              properties: { mode: { type: "string", enum: ["fetch"] }, projectId: { type: "string" } },
+            },
+            {
+              type: "object",
+              additionalProperties: false,
+              required: ["mode", "projectId", "branchName", "baseBranch"],
+              properties: {
+                mode: { type: "string", enum: ["create_branch"] },
+                projectId: { type: "string" },
+                branchName: { type: "string", maxLength: 255 },
+                baseBranch: { type: "string", maxLength: 255 },
+              },
+            },
+            {
+              type: "object",
+              additionalProperties: false,
+              required: ["mode", "projectId", "branchName"],
+              properties: {
+                mode: { type: "string", enum: ["switch_branch"] },
+                projectId: { type: "string" },
+                branchName: { type: "string", maxLength: 255 },
+              },
+            },
+          ],
+          discriminator: { propertyName: "mode" },
+        },
+        GitPublishInput: {
+          oneOf: [
+            {
+              type: "object",
+              additionalProperties: false,
+              required: ["mode", "projectId", "message"],
+              properties: {
+                mode: { type: "string", enum: ["commit"] },
+                projectId: { type: "string" },
+                message: { type: "string" },
+                paths: { type: "array", items: { type: "string" } },
+              },
+            },
+            {
+              type: "object",
+              additionalProperties: false,
+              required: ["mode", "projectId"],
+              properties: { mode: { type: "string", enum: ["push"] }, projectId: { type: "string" } },
+            },
+            {
+              type: "object",
+              additionalProperties: false,
+              required: ["mode", "projectId", "baseBranch", "title"],
+              properties: {
+                mode: { type: "string", enum: ["create_pr"] },
+                projectId: { type: "string" },
+                baseBranch: { type: "string", maxLength: 255 },
+                title: { type: "string", minLength: 1, maxLength: 256 },
+                body: { type: "string", maxLength: 65536 },
+                draft: { type: "boolean" },
+              },
+            },
+          ],
+          discriminator: { propertyName: "mode" },
         },
         SaveChatGptImageInput: {
           type: "object",

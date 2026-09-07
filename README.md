@@ -151,6 +151,19 @@ automation.
 - Secret-looking values are redacted from tool output.
 - Destructive, network, and sensitive operations remain approval-gated.
 
+Safe Git publishing uses the consolidated Custom GPT Actions surface:
+
+```text
+git_workspace(fetch)
+-> git_workspace(create_branch)
+-> edit/test
+-> git_publish(commit)
+-> git_publish(push)
+-> git_publish(create_pr)
+```
+
+`git_workspace` and `git_publish` use fixed Git/GitHub operations rather than arbitrary commands. The remote is fixed to `origin`, force push and arbitrary refspecs are not supported, and credentials are never accepted as Action inputs. GitHub PR creation is optional and requires an installed, already-authenticated GitHub CLI (`gh`).
+
 Do not expose the connector URL publicly unless you understand the tunnel and
 token model. Do not paste Owner Tokens into issues, screenshots, or shared logs.
 

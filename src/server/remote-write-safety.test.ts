@@ -9,18 +9,18 @@ import type { Lease, ToolContext } from "../types.js";
 let projectRoot: string;
 let stateDir: string;
 
-function makeFullWriteLease(): Lease {
+function makeLease(preset: Lease["preset"] = "full-write"): Lease {
   return {
     projectId: "proj",
     leaseId: "lease_remote_write_test",
     projectRoot,
-    preset: "full-write",
+    preset,
     issuedAt: Date.now(),
     expiresAt: Date.now() + 60_000,
   };
 }
 
-function makeCtx(remote: boolean): ToolContext {
+function makeCtx(remote: boolean, preset: Lease["preset"] = "full-write"): ToolContext {
   const registry = [
     {
       projectId: "proj",
@@ -33,7 +33,7 @@ function makeCtx(remote: boolean): ToolContext {
   const session = {
     activeProjectId: "proj",
     mode: "edit",
-    lease: makeFullWriteLease(),
+    lease: makeLease(preset),
   };
 
   return {
@@ -139,5 +139,39 @@ describe("remote write safety", () => {
     const lease = await requireProjectLease(ctx, "proj", "write");
 
     expect(lease.preset).toBe("full-write");
+  });
+
+  it("rejects git_workspace and git_publish mutations under a read-only lease", async () => {
+    const server = await createServer(makeCtx(false, "read-only"));
+    const tools = (
+      server as unknown as {
+        _registeredTools?: Record<string, { handler?: (input: Record<string, unknown>) => Promise<{ isError?: boolean; structuredContent?: Record<string, unknown> }> }>;
+      }
+    )._registeredTools;
+
+    const workspace = await tools?.git_workspace?.handler?.({ mode: "fetch", projectId: "proj" });
+    expect(workspace?.isError).toBe(true);
+    expect(workspace?.structuredContent?.code).toBe("PERMISSION_DENIED");
+
+    const publish = await tools?.git_publish?.handler?.({ mode: "push", projectId: "proj" });
+    expect(publish?.isError).toBe(true);
+    expect(publish?.structuredContent?.code).toBe("PERMISSION_DENIED");
+  });
+
+  it("keeps remote-write opt-in mandatory for git_workspace and git_publish", async () => {
+    const server = await createServer(makeCtx(true));
+    const tools = (
+      server as unknown as {
+        _registeredTools?: Record<string, { handler?: (input: Record<string, unknown>) => Promise<{ isError?: boolean; structuredContent?: Record<string, unknown> }> }>;
+      }
+    )._registeredTools;
+
+    const workspace = await tools?.git_workspace?.handler?.({ mode: "fetch", projectId: "proj" });
+    expect(workspace?.isError).toBe(true);
+    expect(workspace?.structuredContent?.code).toBe("PERMISSION_DENIED");
+
+    const publish = await tools?.git_publish?.handler?.({ mode: "push", projectId: "proj" });
+    expect(publish?.isError).toBe(true);
+    expect(publish?.structuredContent?.code).toBe("PERMISSION_DENIED");
   });
 });

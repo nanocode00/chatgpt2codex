@@ -44,7 +44,18 @@ import {
   startE2eServer,
   stopE2eServer,
 } from "../e2e/local-e2e.js";
-import { gitRepositoryStatus, gitStatus, gitDiffSummary, gitStageAndCommit, gitPush } from "../git/git.js";
+import {
+  gitRepositoryStatus,
+  gitStatus,
+  gitDiffSummary,
+  gitStageAndCommit,
+  gitPush,
+  gitFetchOrigin,
+  gitCreateBranchFromOrigin,
+  gitSwitchLocalBranch,
+  gitPushCurrentBranch,
+  gitCreatePullRequest,
+} from "../git/git.js";
 import { resolveInProject } from "../policy/paths.js";
 import { isSecretPath, redact } from "../policy/secrets.js";
 import {
@@ -878,7 +889,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
                     ...(isRemoteExecEnabled() && isRemoteE2eEnabled() ? ["e2e_test_and_show_screenshot"] : []),
                   ]
                 : ["command_list", "command_run", "local_shell_run", "e2e_test_and_show_screenshot", "e2e_start_server", "e2e_run_command", "e2e_screenshot"],
-              release: ["git_diff_summary", "git_commit", "git_push", "checkpoint_list"],
+              release: ["git_diff_summary", "git_workspace", "git_publish", "git_commit", "git_push", "checkpoint_list"],
               media: ctx.remote
                 ? ["gpt_image_2_workflow", "save_chatgpt_image", "save_chatgpt_image_from_url", "save_image_from_url"]
                 : ["gpt_image_2_workflow", "save_chatgpt_image", "save_chatgpt_image_from_url", "save_image_from_url", "save_image_from_clipboard", "save_image_from_download", "save_image_from_path"],
@@ -924,7 +935,8 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
                   ? "Remote UI/E2E access is locally opted in. Caller-supplied arbitrary E2E command/server strings remain disabled."
                   : "Remote app opening and screenshot capture are disabled until the local operator sets CHATGPT2CODEX_REMOTE_E2E=1."
                 : "For UI/E2E proof: use e2e_start_server, then e2e_run_command for test commands; it captures a screenshot by default. Use e2e_open_target/e2e_open_url_screenshot/e2e_screenshot for manual visual proof. Return the screenshot path/markdown to the user.",
-              "Use repo_inspect on the Custom GPT dedicated surface before git_commit/git_push; underlying repo_status/repo_diff_summary/show_changes remain available for MCP/local/generic compatibility.",
+              "Use repo_inspect on the Custom GPT dedicated surface before Git mutations. For fresh remote state use git_workspace mode=fetch, for feature branches use git_workspace mode=create_branch, and for commit/push/PR use git_publish. Underlying git_commit/git_push and repo_status/repo_diff_summary/show_changes remain available for MCP/local/generic compatibility.",
+              "git_publish mode=push is only for user-authorized publishing, targets origin/current-branch, and never force-pushes.",
               ctx.remote
                 ? "For GPT Image 2 requests: generate with ChatGPT's native image surface, obtain a Share/Copy Link/content URL, then pass that URL explicitly to save_chatgpt_image, save_chatgpt_image_from_url, or save_image_from_url."
                 : "For GPT Image 2 requests: generate with ChatGPT's native image surface, then import the finished image with save_chatgpt_image, save_chatgpt_image_from_url, save_image_from_url, clipboard, download, or path.",
@@ -2625,6 +2637,83 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
           },
           result.summary,
         );
+      });
+    },
+  );
+
+  registerTool(
+    "git_workspace",
+    {
+      title: "Manage safe Git workspace state",
+      description: "Fetch origin or create/switch local branches using fixed Git operations. Requires a full-write lease.",
+      annotations: LOCAL_WRITE_ANNOTATIONS,
+      _meta: chatGptToolMeta("Updating Git workspace...", "Git workspace updated"),
+      inputSchema: z.discriminatedUnion("mode", [
+        z.object({ mode: z.literal("fetch"), projectId: z.string() }).strict(),
+        z.object({ mode: z.literal("create_branch"), projectId: z.string(), branchName: z.string(), baseBranch: z.string() }).strict(),
+        z.object({ mode: z.literal("switch_branch"), projectId: z.string(), branchName: z.string() }).strict(),
+      ]),
+    },
+    async (input) => {
+      return withErrorMapping<Record<string, unknown>>(ctx, "git_workspace", input, async () => {
+        await requireProjectLease(ctx, input.projectId, "write");
+        const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
+        if (input.mode === "fetch") {
+          const result = await gitFetchOrigin(entry.root);
+          return makeResult({ ...result }, "Fetched origin.");
+        }
+        if (input.mode === "create_branch") {
+          const result = await gitCreateBranchFromOrigin(entry.root, input.branchName, input.baseBranch);
+          return makeResult({ ...result }, `Created and switched to ${result.branch}.`);
+        }
+        const result = await gitSwitchLocalBranch(entry.root, input.branchName);
+        return makeResult({ ...result }, `Switched to ${result.branch}.`);
+      });
+    },
+  );
+
+  registerTool(
+    "git_publish",
+    {
+      title: "Commit, push, or create a GitHub PR",
+      description: "Consolidated safe Git publishing surface. Push targets origin/current-branch only; PR head is server-determined.",
+      annotations: COMMAND_RUN_ANNOTATIONS,
+      _meta: chatGptToolMeta("Publishing Git changes...", "Git publish operation completed"),
+      inputSchema: z.discriminatedUnion("mode", [
+        z.object({ mode: z.literal("commit"), projectId: z.string(), message: z.string(), paths: z.array(z.string()).optional() }).strict(),
+        z.object({ mode: z.literal("push"), projectId: z.string() }).strict(),
+        z.object({
+          mode: z.literal("create_pr"),
+          projectId: z.string(),
+          baseBranch: z.string(),
+          title: z.string(),
+          body: z.string().optional(),
+          draft: z.boolean().optional(),
+        }).strict(),
+      ]),
+    },
+    async (input) => {
+      return withErrorMapping<Record<string, unknown>>(ctx, "git_publish", input, async () => {
+        if (input.mode === "commit") {
+          await requireProjectLease(ctx, input.projectId, "write");
+          const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
+          if (input.paths) {
+            for (const rel of input.paths) {
+              const abs = await resolveInProject(entry.root, rel, { allowSymlink: false });
+              await guardSecretPath(ctx, abs, "git_publish");
+            }
+          }
+          const result = await gitStageAndCommit(entry.root, input.message, input.paths);
+          return makeResult({ ...result }, `Committed ${result.commit} on ${result.branch}.`);
+        }
+        await requireProjectLease(ctx, input.projectId, "remote");
+        const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
+        if (input.mode === "push") {
+          const result = await gitPushCurrentBranch(entry.root);
+          return makeResult({ ...result }, `Pushed ${result.branch} to origin.`);
+        }
+        const result = await gitCreatePullRequest(entry.root, input.baseBranch, input.title, input.body, input.draft);
+        return makeResult({ ...result }, result.created ? `Created PR #${result.number}.` : `Open PR #${result.number} already exists.`);
       });
     },
   );

@@ -13,6 +13,22 @@ const EXEC_OPTS = {
   maxBuffer: 10 * 1024 * 1024,
 } as const;
 
+const NETWORK_EXEC_OPTS = {
+  windowsHide: true,
+  maxBuffer: 1024 * 1024,
+  timeout: 30_000,
+  env: {
+    ...process.env,
+    GIT_TERMINAL_PROMPT: "0",
+    GCM_INTERACTIVE: "Never",
+    GH_PROMPT_DISABLED: "1",
+  },
+} as const;
+
+const MAX_BRANCH_NAME = 255;
+const MAX_PR_TITLE = 256;
+const MAX_PR_BODY = 64 * 1024;
+
 /**
  * Run `git <args>` in `cwd` via execFile (array argv, never shell:true).
  * Returns stdout on success. Callers decide how to interpret failures.
@@ -22,6 +38,54 @@ async function runGit(
   args: string[],
 ): Promise<{ stdout: string; stderr: string }> {
   return execFileAsync("git", args, { ...EXEC_OPTS, cwd });
+}
+
+async function runGitNetwork(cwd: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+  return execFileAsync("git", args, { ...NETWORK_EXEC_OPTS, cwd });
+}
+
+async function runGh(cwd: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+  return execFileAsync("gh", args, { ...NETWORK_EXEC_OPTS, cwd });
+}
+
+function sanitizedProcessError(operation: string, err: unknown): DomainError {
+  const e = err as { code?: string | number; killed?: boolean; signal?: string } | undefined;
+  if (e?.code === "ENOENT") return new DomainError(ErrorCode.NOT_IMPLEMENTED, `${operation} unavailable`);
+  if (e?.killed || e?.signal === "SIGTERM") return new DomainError(ErrorCode.TIMEOUT, `${operation} timed out`);
+  return new DomainError(ErrorCode.NOT_IMPLEMENTED, `${operation} failed`);
+}
+
+async function validateBranchName(root: string, name: string): Promise<void> {
+  if (!name || name.length > MAX_BRANCH_NAME || name.includes("\0") || name.includes("\n") || name.includes("\r") || name.startsWith("-")) {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Invalid git branch name");
+  }
+  try {
+    await runGit(root, ["check-ref-format", "--branch", name]);
+  } catch {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Invalid git branch name");
+  }
+}
+
+async function requireCleanWorktree(root: string): Promise<void> {
+  const status = await gitStatus(root);
+  if (status.dirtyFiles.length > 0 || status.staged.length > 0) {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Working tree must be clean");
+  }
+}
+
+async function refExists(root: string, ref: string): Promise<boolean> {
+  try {
+    await runGit(root, ["show-ref", "--verify", "--quiet", ref]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function currentLocalBranch(root: string): Promise<string> {
+  const branch = (await runGit(root, ["branch", "--show-current"])).stdout.trim();
+  if (!branch) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Detached HEAD is not supported");
+  return branch;
 }
 
 /** True if `err` looks like "not a git repository" / git missing, vs a real failure. */
@@ -254,6 +318,152 @@ export async function gitPush(
     stdout: redact(result.stdout),
     stderr: redact(result.stderr),
   };
+}
+
+type GitProcessRunner = (cwd: string, args: string[]) => Promise<{ stdout: string; stderr: string }>;
+
+export async function gitFetchOrigin(
+  root: string,
+  runner: GitProcessRunner = runGitNetwork,
+): Promise<{ fetched: true; remote: "origin" }> {
+  try {
+    await runner(root, ["fetch", "origin"]);
+    return { fetched: true, remote: "origin" };
+  } catch (err) {
+    throw sanitizedProcessError("git fetch", err);
+  }
+}
+
+export async function gitCreateBranchFromOrigin(
+  root: string,
+  branchName: string,
+  baseBranch: string,
+): Promise<{ branch: string; baseBranch: string }> {
+  await validateBranchName(root, branchName);
+  await validateBranchName(root, baseBranch);
+  await requireCleanWorktree(root);
+  if (await refExists(root, `refs/heads/${branchName}`)) {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Local branch already exists");
+  }
+  const baseRef = `refs/remotes/origin/${baseBranch}`;
+  if (!(await refExists(root, baseRef))) {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Remote base branch does not exist");
+  }
+  await runGit(root, ["switch", "--no-track", "-c", branchName, baseRef]);
+  return { branch: branchName, baseBranch };
+}
+
+export async function gitSwitchLocalBranch(root: string, branchName: string): Promise<{ branch: string }> {
+  await validateBranchName(root, branchName);
+  await requireCleanWorktree(root);
+  if (!(await refExists(root, `refs/heads/${branchName}`))) {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Local branch does not exist");
+  }
+  await runGit(root, ["switch", branchName]);
+  return { branch: branchName };
+}
+
+export async function gitPushCurrentBranch(
+  root: string,
+  runner: GitProcessRunner = runGitNetwork,
+): Promise<{ remote: "origin"; branch: string; stdout: string; stderr: string }> {
+  const branch = await currentLocalBranch(root);
+  const upstream = await readGitUpstream(root);
+  if (upstream && upstream !== `origin/${branch}`) {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Current branch has an unexpected upstream");
+  }
+  try {
+    const args = upstream ? ["push", "origin", branch] : ["push", "--set-upstream", "origin", branch];
+    const result = await runner(root, args);
+    return { remote: "origin", branch, stdout: redact(result.stdout), stderr: redact(result.stderr) };
+  } catch (err) {
+    throw sanitizedProcessError("git push", err);
+  }
+}
+
+function assertTextInput(value: string, label: string, maxLength: number): void {
+  if (!value || value.length > maxLength || value.includes("\0")) {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, `Invalid ${label}`);
+  }
+}
+
+function isGithubRemoteUrl(url: string): boolean {
+  try {
+    if (/^https?:\/\//i.test(url) || /^ssh:\/\//i.test(url)) {
+      return new URL(url).hostname.toLowerCase() === "github.com";
+    }
+  } catch {
+    return false;
+  }
+  return /^[^@\s]+@github\.com:/i.test(url);
+}
+
+async function originUrl(root: string): Promise<string> {
+  try {
+    return (await runGit(root, ["remote", "get-url", "origin"])).stdout.trim();
+  } catch {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "origin remote is required");
+  }
+}
+
+export interface GitPullRequestResult {
+  created: boolean;
+  alreadyExists: boolean;
+  number: number;
+  url: string;
+  headBranch: string;
+  baseBranch: string;
+  draft: boolean;
+}
+
+export async function gitCreatePullRequest(
+  root: string,
+  baseBranch: string,
+  title: string,
+  body = "",
+  draft = false,
+  ghRunner: (cwd: string, args: string[]) => Promise<{ stdout: string; stderr: string }> = runGh,
+): Promise<GitPullRequestResult> {
+  await validateBranchName(root, baseBranch);
+  assertTextInput(title, "PR title", MAX_PR_TITLE);
+  if (body.length > MAX_PR_BODY || body.includes("\0")) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Invalid PR body");
+  const headBranch = await currentLocalBranch(root);
+  if (headBranch === baseBranch) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Head and base branch must differ");
+  if (!(await refExists(root, `refs/remotes/origin/${baseBranch}`))) {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Remote base branch does not exist");
+  }
+  if (!(await refExists(root, `refs/remotes/origin/${headBranch}`))) {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Push current branch first");
+  }
+  const upstream = await readGitUpstream(root);
+  if (upstream !== `origin/${headBranch}`) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Current branch upstream must match origin");
+  const localHead = (await runGit(root, ["rev-parse", "HEAD"])).stdout.trim();
+  const remoteHead = (await runGit(root, ["rev-parse", `refs/remotes/origin/${headBranch}`])).stdout.trim();
+  if (localHead !== remoteHead) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Push current branch first");
+  const remoteUrl = await originUrl(root);
+  if (!isGithubRemoteUrl(remoteUrl)) throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "GitHub origin is required for PR creation");
+
+  try {
+    const existing = await ghRunner(root, [
+      "pr", "list", "--state", "open", "--head", headBranch, "--base", baseBranch,
+      "--json", "number,url", "--limit", "1",
+    ]);
+    const rows = JSON.parse(existing.stdout || "[]") as Array<{ number?: number; url?: string }>;
+    const first = rows[0];
+    if (first?.number && first.url) {
+      return { created: false, alreadyExists: true, number: first.number, url: first.url, headBranch, baseBranch, draft };
+    }
+    const args = ["pr", "create", "--base", baseBranch, "--head", headBranch, "--title", title, "--body", body];
+    if (draft) args.push("--draft");
+    const created = await ghRunner(root, args);
+    const url = created.stdout.trim().split(/\s+/).find((part: string) => /^https:\/\/github\.com\/.+\/pull\/\d+$/.test(part));
+    const numberMatch = url?.match(/\/pull\/(\d+)$/);
+    if (!url || !numberMatch) throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "GitHub PR creation returned an unexpected response");
+    return { created: true, alreadyExists: false, number: Number(numberMatch[1]), url, headBranch, baseBranch, draft };
+  } catch (err) {
+    if (err instanceof DomainError) throw err;
+    throw sanitizedProcessError("GitHub PR creation", err);
+  }
 }
 
 /**
