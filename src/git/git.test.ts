@@ -672,6 +672,133 @@ describe("safe git workspace/publish workflow", () => {
   });
 
   it.each([
+    [["UNKNOWN", "MERGEABLE"], [1000]],
+    [["UNKNOWN", "UNKNOWN", "MERGEABLE"], [1000, 2000]],
+  ] as const)("retries transient mergeability until GitHub resolves it: %j", async (sequence, expectedSleeps) => {
+    await execFileAsync("git", ["remote", "set-url", "origin", "https://github.com/example/repo.git"], { cwd: dir });
+    let calls = 0;
+    const sleeps: number[] = [];
+    const result = await gitInspectPullRequest(dir, 1, async () => {
+      const mergeable = sequence[Math.min(calls, sequence.length - 1)]!;
+      calls += 1;
+      return { stdout: JSON.stringify({
+        number: 1, url: "https://github.com/example/repo/pull/1", state: "OPEN", isDraft: false,
+        baseRefName: "main", headRefName: "feature/x", headRefOid: "a".repeat(40),
+        mergeable, mergeStateStatus: mergeable === "MERGEABLE" ? "CLEAN" : "UNKNOWN",
+        reviewDecision: null, statusCheckRollup: [], mergedAt: null, mergeCommit: null,
+      }), stderr: "" };
+    }, async (ms) => { sleeps.push(ms); });
+    expect(result.mergeable).toBe(true);
+    expect(calls).toBe(sequence.length);
+    expect(sleeps).toEqual(expectedSleeps);
+  });
+
+  it("bounds UNKNOWN polling to four views and returns null when exhausted", async () => {
+    await execFileAsync("git", ["remote", "set-url", "origin", "https://github.com/example/repo.git"], { cwd: dir });
+    let calls = 0;
+    const sleeps: number[] = [];
+    const result = await gitInspectPullRequest(dir, 1, async () => {
+      calls += 1;
+      return { stdout: JSON.stringify({
+        number: 1, url: "https://github.com/example/repo/pull/1", state: "OPEN", isDraft: false,
+        baseRefName: "main", headRefName: "feature/x", headRefOid: "a".repeat(40),
+        mergeable: "UNKNOWN", mergeStateStatus: "UNKNOWN", reviewDecision: null,
+        statusCheckRollup: [], mergedAt: null, mergeCommit: null,
+      }), stderr: "" };
+    }, async (ms) => { sleeps.push(ms); });
+    expect(result).toMatchObject({ mergeable: null, mergeState: "UNKNOWN" });
+    expect(calls).toBe(4);
+    expect(sleeps).toEqual([1000, 2000, 4000]);
+  });
+
+  it.each([
+    ["MERGEABLE", "OPEN", null, true],
+    ["CONFLICTING", "OPEN", null, false],
+    ["UNKNOWN", "CLOSED", null, null],
+    ["UNKNOWN", "MERGED", "2026-09-07T00:00:00Z", null],
+  ] as const)("does not retry resolved or non-open PR state: %s/%s", async (mergeable, state, mergedAt, expected) => {
+    await execFileAsync("git", ["remote", "set-url", "origin", "https://github.com/example/repo.git"], { cwd: dir });
+    let calls = 0;
+    const sleeps: number[] = [];
+    const result = await gitInspectPullRequest(dir, 1, async () => {
+      calls += 1;
+      return { stdout: JSON.stringify({
+        number: 1, url: "https://github.com/example/repo/pull/1", state, isDraft: false,
+        baseRefName: "main", headRefName: "feature/x", headRefOid: "a".repeat(40),
+        mergeable, mergeStateStatus: "UNKNOWN", reviewDecision: null,
+        statusCheckRollup: [], mergedAt, mergeCommit: mergedAt ? { oid: "b".repeat(40) } : null,
+      }), stderr: "" };
+    }, async (ms) => { sleeps.push(ms); });
+    expect(result.mergeable).toBe(expected);
+    expect(calls).toBe(1);
+    expect(sleeps).toEqual([]);
+  });
+
+  it("recovers transient UNKNOWN before merge and executes the merge command once", async () => {
+    await execFileAsync("git", ["remote", "set-url", "origin", "https://github.com/example/repo.git"], { cwd: dir });
+    const headSha = "c".repeat(40);
+    const mergeSha = "d".repeat(40);
+    const sleeps: number[] = [];
+    let views = 0;
+    let merges = 0;
+    const runner = async (_cwd: string, args: string[]) => {
+      if (args[1] === "merge") {
+        merges += 1;
+        return { stdout: "", stderr: "" };
+      }
+      views += 1;
+      const phase = views === 1 ? "UNKNOWN" : "MERGEABLE";
+      const merged = views >= 3;
+      return { stdout: JSON.stringify({
+        number: 1, url: "https://github.com/example/repo/pull/1", state: merged ? "MERGED" : "OPEN", isDraft: false,
+        baseRefName: "main", headRefName: "feature/x", headRefOid: headSha,
+        mergeable: phase, mergeStateStatus: phase === "MERGEABLE" ? "CLEAN" : "UNKNOWN",
+        reviewDecision: "APPROVED", statusCheckRollup: [],
+        mergedAt: merged ? "2026-09-07T00:00:00Z" : null, mergeCommit: merged ? { oid: mergeSha } : null,
+      }), stderr: "" };
+    };
+    const result = await gitMergePullRequest(dir, 1, headSha, "merge", runner, async (ms) => { sleeps.push(ms); });
+    expect(result).toMatchObject({ merged: true, mergedCommitSha: mergeSha });
+    expect(merges).toBe(1);
+    expect(sleeps).toEqual([1000]);
+  });
+
+  it("does not issue merge after UNKNOWN retry exhaustion", async () => {
+    await execFileAsync("git", ["remote", "set-url", "origin", "https://github.com/example/repo.git"], { cwd: dir });
+    const headSha = "e".repeat(40);
+    let merges = 0;
+    await expect(gitMergePullRequest(dir, 1, headSha, "merge", async (_cwd, args) => {
+      if (args[1] === "merge") merges += 1;
+      return { stdout: JSON.stringify({
+        number: 1, url: "https://github.com/example/repo/pull/1", state: "OPEN", isDraft: false,
+        baseRefName: "main", headRefName: "feature/x", headRefOid: headSha,
+        mergeable: "UNKNOWN", mergeStateStatus: "UNKNOWN", reviewDecision: null,
+        statusCheckRollup: [], mergedAt: null, mergeCommit: null,
+      }), stderr: "" };
+    }, async () => undefined)).rejects.toMatchObject({ code: "COMMAND_NOT_ALLOWED", message: "PR is not mergeable yet" });
+    expect(merges).toBe(0);
+  });
+
+  it("never retries a failed merge command", async () => {
+    await execFileAsync("git", ["remote", "set-url", "origin", "https://github.com/example/repo.git"], { cwd: dir });
+    const headSha = "f".repeat(40);
+    let merges = 0;
+    await expect(gitMergePullRequest(dir, 1, headSha, "merge", async (_cwd, args) => {
+      if (args[1] === "merge") {
+        merges += 1;
+        throw new Error("merge rejected");
+      }
+      return { stdout: JSON.stringify({
+        number: 1, url: "https://github.com/example/repo/pull/1", state: "OPEN", isDraft: false,
+        baseRefName: "main", headRefName: "feature/x", headRefOid: headSha,
+        mergeable: "MERGEABLE", mergeStateStatus: "CLEAN", reviewDecision: "APPROVED",
+        statusCheckRollup: [], mergedAt: null, mergeCommit: null,
+      }), stderr: "" };
+    }, async () => undefined)).rejects.toMatchObject({ code: "NOT_IMPLEMENTED", message: "GitHub PR merge failed" });
+    expect(merges).toBe(1);
+  });
+
+  it.each([
     ["merge", "--merge"],
     ["squash", "--squash"],
     ["rebase", "--rebase"],

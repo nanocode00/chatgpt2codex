@@ -15,6 +15,7 @@ describe("makeLease", () => {
     expect(lease.projectId).toBe("alpha-app");
     expect(lease.projectRoot).toBe(alpha.root);
     expect(lease.preset).toBe("read-only");
+    expect(lease.selectionSource).toBe("explicit");
     expect(lease.leaseId).toMatch(/^lease_/);
     expect(lease.expiresAt).toBeGreaterThan(lease.issuedAt);
   });

@@ -51,6 +51,8 @@ export interface Lease {
   leaseId: string;
   projectRoot: string;
   preset: LeasePreset;
+  /** Undefined on legacy leases; legacy is intentionally treated as explicit. */
+  selectionSource?: "explicit" | "auto";
   issuedAt: number; // epoch ms
   expiresAt: number; // epoch ms
 }
