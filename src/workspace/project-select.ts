@@ -14,13 +14,18 @@ const DEFAULT_LEASE_TTL_MS = 30 * 60 * 1000; // 30 minutes
  * Issue a new active project Lease (PRD §7 Project Lease / §8.2
  * project_select) for the given registry entry and preset.
  */
-export function makeLease(entry: ProjectRegistryEntry, preset: LeasePreset): Lease {
+export function makeLease(
+  entry: ProjectRegistryEntry,
+  preset: LeasePreset,
+  selectionSource: "explicit" | "auto" = "explicit",
+): Lease {
   const issuedAt = Date.now();
   return {
     projectId: entry.projectId,
     leaseId: `lease_${randomUUID()}`,
     projectRoot: entry.root,
     preset,
+    selectionSource,
     issuedAt,
     expiresAt: issuedAt + DEFAULT_LEASE_TTL_MS,
   };
