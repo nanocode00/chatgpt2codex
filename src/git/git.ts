@@ -561,6 +561,10 @@ export interface GitPrInspection {
   mergedCommitSha: string | null;
 }
 
+type SleepFn = (ms: number) => Promise<void>;
+const sleep: SleepFn = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const PR_MERGEABILITY_RETRY_DELAYS_MS = [1000, 2000, 4000] as const;
+
 function assertPrNumber(prNumber: number): void {
   if (!Number.isInteger(prNumber) || prNumber <= 0) {
     throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Invalid PR number");
@@ -648,19 +652,30 @@ export async function gitInspectPullRequest(
   root: string,
   prNumber: number,
   ghRunner: GitProcessRunner = runGh,
+  sleepFn: SleepFn = sleep,
 ): Promise<GitPrInspection> {
   assertPrNumber(prNumber);
   const repository = await githubRepositoryForRoot(root);
-  try {
-    const viewed = await ghRunner(root, [
-      "pr", "view", String(prNumber), "--repo", repository,
-      "--json", "number,url,state,isDraft,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,mergedAt,mergeCommit",
-    ]);
-    return normalizeGitPrView(JSON.parse(viewed.stdout));
-  } catch (err) {
-    if (err instanceof DomainError) throw err;
-    throw sanitizedProcessError("GitHub PR inspection", err);
+  for (let attempt = 0; attempt <= PR_MERGEABILITY_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      const viewed = await ghRunner(root, [
+        "pr", "view", String(prNumber), "--repo", repository,
+        "--json", "number,url,state,isDraft,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,mergedAt,mergeCommit",
+      ]);
+      const inspection = normalizeGitPrView(JSON.parse(viewed.stdout));
+      const transientUnknown =
+        inspection.state === "OPEN" &&
+        !inspection.merged &&
+        inspection.mergeable === null &&
+        (inspection.mergeState === null || inspection.mergeState === "UNKNOWN");
+      if (!transientUnknown || attempt === PR_MERGEABILITY_RETRY_DELAYS_MS.length) return inspection;
+      await sleepFn(PR_MERGEABILITY_RETRY_DELAYS_MS[attempt]!);
+    } catch (err) {
+      if (err instanceof DomainError) throw err;
+      throw sanitizedProcessError("GitHub PR inspection", err);
+    }
   }
+  throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "GitHub PR inspection retry state was invalid");
 }
 
 export interface GitPrMergeResult {
@@ -681,11 +696,12 @@ export async function gitMergePullRequest(
   expectedHeadSha: string,
   mergeMethod: "merge" | "squash" | "rebase" = "merge",
   ghRunner: GitProcessRunner = runGh,
+  sleepFn: SleepFn = sleep,
 ): Promise<GitPrMergeResult> {
   assertPrNumber(prNumber);
   assertFullGitSha(expectedHeadSha);
   const repository = await githubRepositoryForRoot(root);
-  const before = await gitInspectPullRequest(root, prNumber, ghRunner);
+  const before = await gitInspectPullRequest(root, prNumber, ghRunner, sleepFn);
   if (before.headSha.toLowerCase() !== expectedHeadSha.toLowerCase()) {
     throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "PR head changed; inspect again");
   }
@@ -725,7 +741,7 @@ export async function gitMergePullRequest(
     if (err instanceof DomainError) throw err;
     throw sanitizedProcessError("GitHub PR merge", err);
   }
-  const after = await gitInspectPullRequest(root, prNumber, ghRunner);
+  const after = await gitInspectPullRequest(root, prNumber, ghRunner, sleepFn);
   if (!after.merged || !after.mergedCommitSha || after.headSha.toLowerCase() !== expectedHeadSha.toLowerCase()) {
     throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "GitHub PR merge could not be verified");
   }
