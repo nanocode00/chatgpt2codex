@@ -10,8 +10,7 @@ export async function invokeSafeAdapterOperation(
   argumentsValue: Record<string, unknown>,
 ): Promise<{ operation: string; result: unknown }> {
   const operation = registry.get(operationId);
-  const projects = await ctx.store.loadProjects();
-  const entry = projects.find((project) => project.projectId === projectId);
+  const entry = ctx.registry.find((project) => project.projectId === projectId);
   if (!entry) throw new DomainError(ErrorCode.PROJECT_NOT_FOUND, "Project not found");
 
   let input: Record<string, unknown>;

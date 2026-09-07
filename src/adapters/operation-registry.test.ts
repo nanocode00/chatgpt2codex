@@ -50,13 +50,14 @@ describe("SafeAdapterOperationRegistry", () => {
     });
   });
 
-  it("fails closed for duplicates, malformed ids, mismatched adapters, unknown ids, and control", () => {
+  it("fails closed for duplicates, malformed ids, mismatched adapters, unknown ids, control, and unknown capabilities", () => {
     expect(() => new SafeAdapterOperationRegistry([operation("docker.inspect"), operation("docker.inspect")])).toThrow(/duplicate operation id/);
     expect(() => new SafeAdapterOperationRegistry([operation("Docker.inspect")])).toThrow(/invalid operation id/);
     expect(() => new SafeAdapterOperationRegistry([{ ...operation("docker.inspect"), adapterId: "sqlite" }])).toThrow(/adapter id mismatch/);
     expect(() => new SafeAdapterOperationRegistry([]).get("local_shell_run")).toThrow(/operation id is invalid/);
     expect(() => new SafeAdapterOperationRegistry([]).get("git.push")).toThrow(/Unknown safe adapter operation/);
     expect(() => new SafeAdapterOperationRegistry([{ ...operation("docker.inspect"), capability: "control" } as never])).toThrow(/Control capability/);
+    expect(() => new SafeAdapterOperationRegistry([{ ...operation("docker.inspect"), capability: "shell" } as never])).toThrow(/invalid capability/);
   });
 
   it("has no runtime register/load/execute forwarding API", () => {

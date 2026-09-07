@@ -68,6 +68,28 @@ describe("safe adapter operation invocation", () => {
     expect(session.lease?.selectionSource).toBe("auto");
   });
 
+  it("uses ctx.registry as the authoritative project root even when store projects disagree", async () => {
+    const trustedRoot = "/tmp/trusted-registry-root";
+    const untrustedStoreRoot = "/tmp/untrusted-store-root";
+    const ctx = makeCtx();
+    ctx.registry = [{ ...project, root: trustedRoot }];
+    ctx.store.loadProjects = vi.fn(async () => [{ ...project, root: untrustedStoreRoot }]);
+    const handler = vi.fn((context: { projectRoot: string }) => ({ projectRoot: context.projectRoot }));
+    const registry = new SafeAdapterOperationRegistry([
+      {
+        ...definition(),
+        handler: handler as SafeAdapterOperationDefinition["handler"],
+      },
+    ]);
+
+    await expect(invokeSafeAdapterOperation(ctx, registry, "proj", "fake.inspect", {})).resolves.toEqual({
+      operation: "fake.inspect",
+      result: { projectRoot: trustedRoot },
+    });
+    expect(handler).toHaveBeenCalledWith(expect.objectContaining({ projectRoot: trustedRoot }), {});
+    expect(handler).not.toHaveBeenCalledWith(expect.objectContaining({ projectRoot: untrustedStoreRoot }), expect.anything());
+  });
+
   it("preserves an explicit read-only lease ceiling for a write operation", async () => {
     const explicitLease: Lease = {
       projectId: "proj",

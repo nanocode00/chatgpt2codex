@@ -29,6 +29,21 @@ function makeCtx(): ToolContext {
 }
 
 describe("tool catalog", () => {
+  it("does not advertise adapter_gateway as statically read-only", async () => {
+    const server = await createServer(makeCtx());
+    const tools = (
+      server as unknown as {
+        _registeredTools?: Record<string, { annotations?: Record<string, unknown> }>;
+      }
+    )._registeredTools;
+
+    expect(tools?.adapter_gateway?.annotations).toEqual({
+      readOnlyHint: false,
+      destructiveHint: true,
+      openWorldHint: true,
+    });
+  });
+
   it("keeps the one-shot E2E tool out of destructive/open-world routing", async () => {
     const server = await createServer(makeCtx());
     const tools = (

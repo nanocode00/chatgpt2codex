@@ -2,6 +2,7 @@ import { DomainError, ErrorCode } from "../types.js";
 import type { SafeAdapterCatalogOperation, SafeAdapterOperationDefinition } from "./operation-types.js";
 
 const OPERATION_ID_RE = /^[a-z][a-z0-9-]{0,31}\.[a-z][a-z0-9_-]{0,63}$/;
+const SUPPORTED_CAPABILITIES = new Set(["read", "verify", "write", "image", "remote"]);
 
 export class SafeAdapterOperationRegistry {
   readonly #definitions: ReadonlyMap<string, SafeAdapterOperationDefinition>;
@@ -17,8 +18,12 @@ export class SafeAdapterOperationRegistry {
       if (adapterId !== definition.adapterId) {
         throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Safe adapter operation registry contains an adapter id mismatch");
       }
-      if ((definition.capability as string) === "control") {
+      const capability = definition.capability as string;
+      if (capability === "control") {
         throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Control capability is not supported by adapter_gateway");
+      }
+      if (!SUPPORTED_CAPABILITIES.has(capability)) {
+        throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Safe adapter operation registry contains an invalid capability");
       }
       if (map.has(definition.id)) {
         throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Safe adapter operation registry contains a duplicate operation id");

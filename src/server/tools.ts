@@ -215,6 +215,12 @@ const LOCAL_WRITE_ANNOTATIONS = {
   openWorldHint: false,
 } as const;
 
+const ADAPTER_GATEWAY_ANNOTATIONS = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  openWorldHint: true,
+} as const;
+
 const COMMAND_RUN_ANNOTATIONS = {
   readOnlyHint: false,
   destructiveHint: true,
@@ -2037,7 +2043,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
     {
       title: "Invoke built-in safe adapter operation",
       description: "Catalog or invoke statically registered built-in adapter operations. This does not forward arbitrary MCP tool names, commands, executables, argv, env, modules, or caller-provided capabilities.",
-      annotations: READ_ONLY_ANNOTATIONS,
+      annotations: ADAPTER_GATEWAY_ANNOTATIONS,
       _meta: chatGptToolMeta("Using safe adapter gateway...", "Safe adapter operation finished"),
       inputSchema: {
         mode: z.enum(["catalog", "invoke"]),
