@@ -428,9 +428,52 @@ describe("notebook validation", () => {
 });
 
 describe("notebook execution", () => {
+  it("reproduces the execution-boundary list/string mismatch", async () => {
+    if (process.platform === "win32") return;
+    const fake = path.join(root, "string-only-notebook-python");
+    await executableFile(fake, `#!${process.execPath}\nlet input='';process.stdin.setEncoding('utf8');process.stdin.on('data',d=>input+=d);process.stdin.on('end',()=>{if(!input){process.exit(0)}const payload=JSON.parse(input);const source=payload.notebook.cells[0].source;if(Array.isArray(source)){console.log(JSON.stringify({kind:'runtime',type:'AttributeError',message:\"'list' object has no attribute 'strip'\"}));process.exit(4)}console.log(JSON.stringify({kind:'ok'}));});\n`);
+    const p = path.join(root, "list-source.ipynb");
+    const original = nb([
+      { cell_type: "code", source: ["x = 1\n", "print(x)\n"] },
+    ]);
+    await fs.writeFile(p, original);
+    const previous = process.env.CHATGPT2CODEX_NOTEBOOK_PYTHON;
+    process.env.CHATGPT2CODEX_NOTEBOOK_PYTHON = fake;
+    try {
+      const result = await executeNotebook(root, "list-source.ipynb");
+      expect(result.executed).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env.CHATGPT2CODEX_NOTEBOOK_PYTHON;
+      else process.env.CHATGPT2CODEX_NOTEBOOK_PYTHON = previous;
+    }
+    expect(await fs.readFile(p, "utf8")).toBe(original);
+  });
+
+  it("executes mixed string/list sources with exact fragment concatenation without rewriting the notebook", async () => {
+    const p = path.join(root, "mixed-sources.ipynb");
+    const original = nb([
+      { cell_type: "code", source: "x = 1\nprint(x)\n" },
+      { cell_type: "code", source: ["value = 'hel", "lo'\n", "assert value == 'hello'\n"] },
+      { cell_type: "markdown", source: ["# heading\n", "body\n"] },
+      { cell_type: "raw", source: ["raw ", "content"] },
+      { cell_type: "code", source: "" },
+      { cell_type: "code", source: [] },
+    ]);
+    await fs.writeFile(p, original);
+    try {
+      const result = await executeNotebook(root, "mixed-sources.ipynb");
+      expect(result.executed).toBe(true);
+      expect(result.codeCellCount).toBe(4);
+    } catch (e) {
+      if (e instanceof DomainError && e.code === ErrorCode.NOT_IMPLEMENTED) return;
+      throw e;
+    }
+    expect(await fs.readFile(p, "utf8")).toBe(original);
+  });
+
   it("treats runtimeProfile=auto like omitted auto discovery even with malformed profile config", async () => {
     process.env.CHATGPT2CODEX_PYTHON_RUNTIME_PROFILES = "not-json";
-    await fs.writeFile(path.join(root, "auto.ipynb"), nb([{ cell_type: "code", source: "x=1\n" }]));
+    await fs.writeFile(path.join(root, "auto.ipynb"), nb([{ cell_type: "code", source: ["x=", "1\n"] }]));
     try {
       const omitted = await executeNotebook(root, "auto.ipynb");
       const auto = await executeNotebook(root, "auto.ipynb", { runtimeProfile: "auto" });
@@ -447,7 +490,7 @@ describe("notebook execution", () => {
     if (!runtime) return;
     process.env.CHATGPT2CODEX_PYTHON_RUNTIME_PROFILES = JSON.stringify({ chosen: runtime.interpreter });
     process.env.CHATGPT2CODEX_NOTEBOOK_PYTHON = path.join(root, "ignored-operator-python");
-    await fs.writeFile(path.join(root, "profile.ipynb"), nb([{ cell_type: "code", source: "x=2\n" }], {
+    await fs.writeFile(path.join(root, "profile.ipynb"), nb([{ cell_type: "code", source: ["x=", "2\n"] }], {
       metadata: { kernelspec: { name: "attacker-controlled", argv: ["/tmp/evil"] } },
     }));
     const result = await executeNotebook(root, "profile.ipynb", { runtimeProfile: "chosen" });

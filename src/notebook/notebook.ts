@@ -49,6 +49,17 @@ export type NotebookRuntimeSource =
 type NotebookCell = Record<string, unknown> & { cell_type: string; source: string | string[]; metadata: Record<string, unknown> };
 type NotebookDoc = Record<string, unknown> & { nbformat: number; nbformat_minor: number; metadata: Record<string, unknown>; cells: NotebookCell[] };
 
+function cellSourceText(source: string | string[]): string {
+  return Array.isArray(source) ? source.join("") : source;
+}
+
+function notebookForExecution(doc: NotebookDoc): NotebookDoc {
+  return {
+    ...doc,
+    cells: doc.cells.map((cell) => ({ ...cell, source: cellSourceText(cell.source) })),
+  };
+}
+
 function validateInputPath(rel: string): void {
   if (path.isAbsolute(rel) || rel.split(/[\\/]+/).includes("..")) {
     throw new DomainError(ErrorCode.PATH_OUTSIDE_PROJECT, "notebook path must be project-relative and must not contain '..'", { rel });
@@ -303,7 +314,7 @@ export async function validateNotebook(root: string, rel: string): Promise<Noteb
   const runtime = await discoverNotebookPython(root, { requireNotebookRuntime: false });
   if (runtime && codeCells.length) {
     try {
-      const r = await runPython(runtime.interpreter, SYNTAX_HELPER, JSON.stringify(codeCells.map(({ c, i }) => ({ index: i, source: Array.isArray(c.source) ? c.source.join("") : c.source }))), 15_000);
+      const r = await runPython(runtime.interpreter, SYNTAX_HELPER, JSON.stringify(codeCells.map(({ c, i }) => ({ index: i, source: cellSourceText(c.source) }))), 15_000);
       if (!r.timedOut && r.code === 0) syntaxErrors = JSON.parse(r.stdout) as NotebookSyntaxError[];
     } catch {
       // Static syntax checking is best-effort; structural validation remains authoritative.
@@ -364,7 +375,7 @@ export async function executeNotebook(
   if (requestedProfile && requestedProfile !== "auto" && !(await defaultRuntimeProbe(runtime.interpreter))) {
     throw new DomainError(ErrorCode.NOT_IMPLEMENTED, `Python runtime profile '${requestedProfile}' is unavailable for notebook execution`);
   }
-  const payload = { notebook: doc, timeout: internalOptions?.cellTimeoutSec ?? 30, cwd: path.dirname(abs) };
+  const payload = { notebook: notebookForExecution(doc), timeout: internalOptions?.cellTimeoutSec ?? 30, cwd: path.dirname(abs) };
   let r;
   try {
     r = await runPython(runtime.interpreter, EXEC_HELPER, JSON.stringify(payload), internalOptions?.overallTimeoutMs ?? EXEC_TIMEOUT_MS);
