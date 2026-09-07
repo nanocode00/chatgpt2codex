@@ -11,6 +11,7 @@ import {
   gitMergePullRequest,
   gitDiffSummary,
   gitFetchOrigin,
+  gitFastForwardCurrentBranch,
   githubRepositoryFromOrigin,
   gitPushCurrentBranch,
   gitRepositoryStatus,
@@ -237,6 +238,24 @@ describe("safe git workspace/publish workflow", () => {
   let dir: string;
   let remoteDir: string;
 
+  async function advanceOrigin(commitCount = 1): Promise<string> {
+    const peer = await mkdtemp(join(tmpdir(), "chatgpt2codex-safe-peer-"));
+    try {
+      await execFileAsync("git", ["clone", "-q", "--branch", "main", remoteDir, peer]);
+      await execFileAsync("git", ["config", "user.email", "peer@example.com"], { cwd: peer });
+      await execFileAsync("git", ["config", "user.name", "Peer"], { cwd: peer });
+      for (let i = 0; i < commitCount; i += 1) {
+        await writeFile(join(peer, `remote-${i}.txt`), `remote-${i}\n`);
+        await execFileAsync("git", ["add", `remote-${i}.txt`], { cwd: peer });
+        await execFileAsync("git", ["commit", "-q", "-m", `remote ${i}`], { cwd: peer });
+      }
+      await execFileAsync("git", ["push", "-q", "origin", "main"], { cwd: peer });
+      return (await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: peer })).stdout.trim();
+    } finally {
+      await rm(peer, { recursive: true, force: true });
+    }
+  }
+
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), "chatgpt2codex-safe-git-"));
     remoteDir = await mkdtemp(join(tmpdir(), "chatgpt2codex-safe-origin-"));
@@ -306,6 +325,142 @@ describe("safe git workspace/publish workflow", () => {
     expect(await gitSwitchLocalBranch(dir, "local-only")).toEqual({ branch: "local-only" });
     await writeFile(join(dir, "dirty.txt"), "dirty\n");
     await expect(gitSwitchLocalBranch(dir, "main")).rejects.toMatchObject({ code: "COMMAND_NOT_ALLOWED" });
+  });
+
+  it("fast-forwards a clean purely-behind branch to its exact origin tracking commit", async () => {
+    const beforeSha = (await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: dir })).stdout.trim();
+    const targetSha = await advanceOrigin(2);
+    await gitFetchOrigin(dir);
+    const result = await gitFastForwardCurrentBranch(dir);
+    expect(result).toEqual({
+      branch: "main",
+      updated: true,
+      alreadyUpToDate: false,
+      beforeSha,
+      afterSha: targetSha,
+      advancedBy: 2,
+    });
+    expect((await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: dir })).stdout.trim()).toBe(targetSha);
+    const status = await gitRepositoryStatus(dir);
+    expect(status).toMatchObject({ branch: "main", upstream: "origin/main", ahead: 0, behind: 0, syncState: "up-to-date" });
+  });
+
+  it("returns a no-op when the current branch is already up to date", async () => {
+    const head = (await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: dir })).stdout.trim();
+    const calls: string[][] = [];
+    const result = await gitFastForwardCurrentBranch(dir, async (_cwd, args) => {
+      calls.push(args);
+      return { stdout: "", stderr: "" };
+    });
+    expect(result).toEqual({ branch: "main", updated: false, alreadyUpToDate: true, beforeSha: head, afterSha: head, advancedBy: 0 });
+    expect(calls).toEqual([]);
+  });
+
+  it.each(["unstaged", "staged", "untracked"])("rejects a %s dirty worktree before fast-forward", async (kind) => {
+    await advanceOrigin();
+    await gitFetchOrigin(dir);
+    if (kind === "unstaged") await writeFile(join(dir, "base.txt"), "changed\n");
+    else {
+      await writeFile(join(dir, "dirty.txt"), "dirty\n");
+      if (kind === "staged") await execFileAsync("git", ["add", "dirty.txt"], { cwd: dir });
+    }
+    const calls: string[][] = [];
+    await expect(gitFastForwardCurrentBranch(dir, async (_cwd, args) => {
+      calls.push(args);
+      return { stdout: "", stderr: "" };
+    })).rejects.toMatchObject({ code: "COMMAND_NOT_ALLOWED", message: "Working tree must be clean" });
+    expect(calls).toEqual([]);
+  });
+
+  it("rejects missing, wrong-remote, and mismatched upstreams", async () => {
+    await execFileAsync("git", ["branch", "--unset-upstream"], { cwd: dir });
+    await expect(gitFastForwardCurrentBranch(dir)).rejects.toMatchObject({ code: "COMMAND_NOT_ALLOWED" });
+
+    await execFileAsync("git", ["remote", "add", "other", remoteDir], { cwd: dir });
+    await execFileAsync("git", ["fetch", "-q", "other", "main"], { cwd: dir });
+    await execFileAsync("git", ["branch", "--set-upstream-to=other/main", "main"], { cwd: dir });
+    await expect(gitFastForwardCurrentBranch(dir)).rejects.toMatchObject({ code: "COMMAND_NOT_ALLOWED" });
+
+    await execFileAsync("git", ["branch", "develop"], { cwd: dir });
+    await execFileAsync("git", ["push", "-q", "origin", "develop"], { cwd: dir });
+    await execFileAsync("git", ["branch", "--set-upstream-to=origin/develop", "main"], { cwd: dir });
+    await expect(gitFastForwardCurrentBranch(dir)).rejects.toMatchObject({ code: "COMMAND_NOT_ALLOWED" });
+  });
+
+  it("rejects ahead-only and diverged branches", async () => {
+    await writeFile(join(dir, "local.txt"), "local\n");
+    await execFileAsync("git", ["add", "local.txt"], { cwd: dir });
+    await execFileAsync("git", ["commit", "-q", "-m", "local"], { cwd: dir });
+    await expect(gitFastForwardCurrentBranch(dir)).rejects.toMatchObject({ code: "COMMAND_NOT_ALLOWED", message: "Current branch has local commits" });
+
+    await advanceOrigin();
+    await gitFetchOrigin(dir);
+    await expect(gitFastForwardCurrentBranch(dir)).rejects.toMatchObject({ code: "COMMAND_NOT_ALLOWED", message: "Current branch has diverged from origin" });
+  });
+
+  it("rejects detached HEAD and a missing origin tracking ref", async () => {
+    await execFileAsync("git", ["checkout", "--detach", "HEAD"], { cwd: dir });
+    await expect(gitFastForwardCurrentBranch(dir)).rejects.toMatchObject({ code: "COMMAND_NOT_ALLOWED", message: "Detached HEAD is not supported" });
+    await execFileAsync("git", ["switch", "main"], { cwd: dir });
+    await execFileAsync("git", ["update-ref", "-d", "refs/remotes/origin/main"], { cwd: dir });
+    await expect(gitFastForwardCurrentBranch(dir)).rejects.toMatchObject({ code: "COMMAND_NOT_ALLOWED" });
+  });
+
+  it("uses exactly git merge --ff-only with the server-captured target SHA", async () => {
+    const targetSha = await advanceOrigin();
+    await gitFetchOrigin(dir);
+    const calls: string[][] = [];
+    await gitFastForwardCurrentBranch(dir, async (cwd, args) => {
+      calls.push(args);
+      const result = await execFileAsync("git", args, { cwd });
+      return { stdout: result.stdout, stderr: result.stderr };
+    });
+    expect(calls).toEqual([["merge", "--ff-only", targetSha]]);
+    expect(calls.flat()).not.toContain("reset");
+    expect(calls.flat()).not.toContain("rebase");
+    expect(calls.flat()).not.toContain("pull");
+    expect(calls.flat()).not.toContain("--force");
+  });
+
+  it("fails closed when a reported-success mutation does not reach the captured target", async () => {
+    await advanceOrigin();
+    await gitFetchOrigin(dir);
+    await expect(gitFastForwardCurrentBranch(dir, async () => ({ stdout: "", stderr: "" }))).rejects.toMatchObject({
+      code: "NOT_IMPLEMENTED",
+      message: "Git fast-forward postcondition verification failed",
+    });
+  });
+
+  it("fails closed if the branch changes after the fast-forward command", async () => {
+    const targetSha = await advanceOrigin();
+    await gitFetchOrigin(dir);
+    await execFileAsync("git", ["branch", "other"], { cwd: dir });
+    await expect(gitFastForwardCurrentBranch(dir, async (cwd, args) => {
+      await execFileAsync("git", args, { cwd });
+      await execFileAsync("git", ["switch", "other"], { cwd });
+      return { stdout: targetSha, stderr: "" };
+    })).rejects.toMatchObject({ code: "NOT_IMPLEMENTED", message: "Git fast-forward postcondition verification failed" });
+  });
+
+  it("fails closed if the worktree becomes dirty after the fast-forward command", async () => {
+    await advanceOrigin();
+    await gitFetchOrigin(dir);
+    await expect(gitFastForwardCurrentBranch(dir, async (cwd, args) => {
+      const result = await execFileAsync("git", args, { cwd });
+      await writeFile(join(cwd, "post-dirty.txt"), "dirty\n");
+      return { stdout: result.stdout, stderr: result.stderr };
+    })).rejects.toMatchObject({ code: "COMMAND_NOT_ALLOWED", message: "Working tree must be clean" });
+  });
+
+  it("fails closed if the origin tracking ref changes after target capture", async () => {
+    const beforeSha = (await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: dir })).stdout.trim();
+    await advanceOrigin();
+    await gitFetchOrigin(dir);
+    await expect(gitFastForwardCurrentBranch(dir, async (cwd, args) => {
+      const result = await execFileAsync("git", args, { cwd });
+      await execFileAsync("git", ["update-ref", "refs/remotes/origin/main", beforeSha], { cwd });
+      return { stdout: result.stdout, stderr: result.stderr };
+    })).rejects.toMatchObject({ code: "NOT_IMPLEMENTED", message: "Git fast-forward postcondition verification failed" });
   });
 
   it("first-pushes only the current feature branch and sets origin/<same-name> upstream", async () => {

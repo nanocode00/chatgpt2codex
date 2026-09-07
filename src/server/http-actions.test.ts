@@ -368,6 +368,12 @@ describe("Custom GPT action bridge", () => {
     expect((body.components.schemas.GitWorkspaceInput as { additionalProperties?: boolean }).additionalProperties).toBe(false);
     expect((body.components.schemas.GitWorkspaceInput as { oneOf?: unknown }).oneOf).toBeUndefined();
     expect((body.components.schemas.GitWorkspaceInput as { anyOf?: unknown }).anyOf).toBeUndefined();
+    expect((body.components.schemas.GitWorkspaceInput as { properties?: { mode?: { enum?: string[] } } }).properties?.mode?.enum).toEqual([
+      "fetch",
+      "fast_forward",
+      "create_branch",
+      "switch_branch",
+    ]);
     expect((body.components.schemas.GitPublishInput as { type?: string }).type).toBe("object");
     expect((body.components.schemas.GitPublishInput as { required?: string[] }).required).toEqual(["mode", "projectId"]);
     expect((body.components.schemas.GitPublishInput as { additionalProperties?: boolean }).additionalProperties).toBe(false);
@@ -686,6 +692,8 @@ describe("Custom GPT action bridge", () => {
 
     for (const [path, input] of [
       ["/actions/git-workspace", { mode: "fetch", projectId: "proj", branchName: "not-allowed" }],
+      ["/actions/git-workspace", { mode: "fast_forward", projectId: "proj", branchName: "not-allowed" }],
+      ["/actions/git-workspace", { mode: "fast_forward", projectId: "proj", baseBranch: "main" }],
       ["/actions/git-workspace", { mode: "create_branch", projectId: "proj", branchName: "feature/x" }],
       ["/actions/git-workspace", { mode: "switch_branch", projectId: "proj", branchName: "main", baseBranch: "main" }],
       ["/actions/git-publish", { mode: "push", projectId: "proj", baseBranch: "main" }],
@@ -706,6 +714,14 @@ describe("Custom GPT action bridge", () => {
       expect(body.isError, `${path} ${input.mode}`).toBe(true);
       expect(body.structuredContent?.code, `${path} ${input.mode}`).toBe("INVALID_INPUT");
     }
+  });
+
+  it("accepts the strict fast_forward workspace shape without exposing target fields", async () => {
+    const server = await startApp(makeCtx(stateDir, projectRoot));
+    stop = server.stop;
+    const res = await postAction(server.baseUrl, "/actions/git-workspace", { mode: "fast_forward", projectId: "proj" });
+    const body = (await res.json()) as { structuredContent?: { code?: string } };
+    expect(body.structuredContent?.code).not.toBe("INVALID_INPUT");
   });
 
   it("denies arbitrary-command tools through dedicated and generic action routes", async () => {
