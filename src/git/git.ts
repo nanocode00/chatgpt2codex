@@ -387,15 +387,31 @@ function assertTextInput(value: string, label: string, maxLength: number): void 
   }
 }
 
-function isGithubRemoteUrl(url: string): boolean {
+export function githubRepositoryFromOrigin(url: string): string | null {
+  if (!url || url.includes("\0") || url.includes("\n") || url.includes("\r")) return null;
+
+  let pathname: string | null = null;
   try {
     if (/^https?:\/\//i.test(url) || /^ssh:\/\//i.test(url)) {
-      return new URL(url).hostname.toLowerCase() === "github.com";
+      const parsed = new URL(url);
+      if (parsed.hostname.toLowerCase() !== "github.com") return null;
+      pathname = parsed.pathname;
+    } else {
+      const scpLike = url.match(/^[^@\s]+@github\.com:(.+)$/i);
+      if (!scpLike) return null;
+      pathname = scpLike[1] ?? null;
     }
   } catch {
-    return false;
+    return null;
   }
-  return /^[^@\s]+@github\.com:/i.test(url);
+
+  if (!pathname) return null;
+  const parts = pathname.replace(/^\/+|\/+$/g, "").split("/");
+  if (parts.length !== 2) return null;
+  const owner = parts[0] ?? "";
+  const repo = (parts[1] ?? "").replace(/\.git$/i, "");
+  if (!owner || !repo) return null;
+  return `${owner}/${repo}`;
 }
 
 async function originUrl(root: string): Promise<string> {
@@ -441,11 +457,12 @@ export async function gitCreatePullRequest(
   const remoteHead = (await runGit(root, ["rev-parse", `refs/remotes/origin/${headBranch}`])).stdout.trim();
   if (localHead !== remoteHead) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Push current branch first");
   const remoteUrl = await originUrl(root);
-  if (!isGithubRemoteUrl(remoteUrl)) throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "GitHub origin is required for PR creation");
+  const repository = githubRepositoryFromOrigin(remoteUrl);
+  if (!repository) throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "GitHub origin is required for PR creation");
 
   try {
     const existing = await ghRunner(root, [
-      "pr", "list", "--state", "open", "--head", headBranch, "--base", baseBranch,
+      "pr", "list", "--repo", repository, "--state", "open", "--head", headBranch, "--base", baseBranch,
       "--json", "number,url", "--limit", "1",
     ]);
     const rows = JSON.parse(existing.stdout || "[]") as Array<{ number?: number; url?: string }>;
@@ -453,7 +470,7 @@ export async function gitCreatePullRequest(
     if (first?.number && first.url) {
       return { created: false, alreadyExists: true, number: first.number, url: first.url, headBranch, baseBranch, draft };
     }
-    const args = ["pr", "create", "--base", baseBranch, "--head", headBranch, "--title", title, "--body", body];
+    const args = ["pr", "create", "--repo", repository, "--base", baseBranch, "--head", headBranch, "--title", title, "--body", body];
     if (draft) args.push("--draft");
     const created = await ghRunner(root, args);
     const url = created.stdout.trim().split(/\s+/).find((part: string) => /^https:\/\/github\.com\/.+\/pull\/\d+$/.test(part));

@@ -9,6 +9,7 @@ import {
   gitCreatePullRequest,
   gitDiffSummary,
   gitFetchOrigin,
+  githubRepositoryFromOrigin,
   gitPushCurrentBranch,
   gitRepositoryStatus,
   gitStatus,
@@ -17,6 +18,30 @@ import {
 } from "./git.js";
 
 const execFileAsync = promisify(execFile);
+
+describe("githubRepositoryFromOrigin", () => {
+  it.each([
+    ["https://github.com/nanocode00/chatgpt2codex.git", "nanocode00/chatgpt2codex"],
+    ["git@github.com:nanocode00/chatgpt2codex.git", "nanocode00/chatgpt2codex"],
+    ["ssh://git@github.com/nanocode00/chatgpt2codex.git", "nanocode00/chatgpt2codex"],
+    ["https://TOKEN@github.com/nanocode00/chatgpt2codex.git", "nanocode00/chatgpt2codex"],
+  ])("derives only owner/repo from %s", (remoteUrl, expected) => {
+    expect(githubRepositoryFromOrigin(remoteUrl)).toBe(expected);
+  });
+
+  it.each([
+    "https://example.com/nanocode00/chatgpt2codex.git",
+    "https://github.com/nanocode00/chatgpt2codex/extra",
+    "git@example.com:nanocode00/chatgpt2codex.git",
+    "https://github.com//chatgpt2codex.git",
+    "https://github.com/nanocode00/",
+    "https://github.com/nanocode00/chatgpt2codex.git\nhttps://evil.example/repo",
+    "https://github.com/nanocode00/chatgpt2codex.git\0suffix",
+    "not a url",
+  ])("rejects malformed or unsafe origin %s", (remoteUrl) => {
+    expect(githubRepositoryFromOrigin(remoteUrl)).toBeNull();
+  });
+});
 
 describe("parseNumstat", () => {
   it("parses a simple numstat block into {path, added, removed}", () => {
@@ -305,7 +330,7 @@ describe("safe git workspace/publish workflow", () => {
     expect(calls[0]).not.toContain("--force");
   });
 
-  it("creates PRs from server-determined current branch and handles duplicates idempotently", async () => {
+  it("targets the configured origin repository explicitly for fork PRs and handles duplicates idempotently", async () => {
     await gitCreateBranchFromOrigin(dir, "feature/pr", "main");
     await writeFile(join(dir, "feature.txt"), "feature\n");
     await execFileAsync("git", ["add", "feature.txt"], { cwd: dir });
@@ -320,8 +345,12 @@ describe("safe git workspace/publish workflow", () => {
       return { stdout: "https://github.com/example/repo/pull/42\n", stderr: "" };
     });
     expect(result).toMatchObject({ created: true, number: 42, headBranch: "feature/pr", baseBranch: "main", draft: true });
+    expect(calls[0]).toEqual([
+      "pr", "list", "--repo", "example/repo", "--state", "open", "--head", "feature/pr", "--base", "main",
+      "--json", "number,url", "--limit", "1",
+    ]);
     expect(calls[1]).toEqual([
-      "pr", "create", "--base", "main", "--head", "feature/pr", "--title", "Title", "--body", "line1\nline2", "--draft",
+      "pr", "create", "--repo", "example/repo", "--base", "main", "--head", "feature/pr", "--title", "Title", "--body", "line1\nline2", "--draft",
     ]);
 
     const duplicate = await gitCreatePullRequest(dir, "main", "Title", "", false, async () => ({
@@ -329,6 +358,49 @@ describe("safe git workspace/publish workflow", () => {
       stderr: "",
     }));
     expect(duplicate).toMatchObject({ created: false, alreadyExists: true, number: 7 });
+  });
+
+  it.each([
+    ["https origin", "https://github.com/nanocode00/chatgpt2codex.git"],
+    ["scp-like ssh origin", "git@github.com:nanocode00/chatgpt2codex.git"],
+    ["ssh URL origin", "ssh://git@github.com/nanocode00/chatgpt2codex.git"],
+    ["credential-bearing https origin", "https://TOKEN@github.com/nanocode00/chatgpt2codex.git"],
+  ])("derives the PR repository from %s without exposing credentials", async (_label, remoteUrl) => {
+    await gitCreateBranchFromOrigin(dir, "feature/repo-target", "main");
+    await writeFile(join(dir, "feature.txt"), "feature\n");
+    await execFileAsync("git", ["add", "feature.txt"], { cwd: dir });
+    await execFileAsync("git", ["commit", "-q", "-m", "feature"], { cwd: dir });
+    await gitPushCurrentBranch(dir);
+    await execFileAsync("git", ["remote", "set-url", "origin", remoteUrl], { cwd: dir });
+
+    const calls: string[][] = [];
+    const duplicate = await gitCreatePullRequest(dir, "main", "Title", "", false, async (_cwd, args) => {
+      calls.push(args);
+      return { stdout: '[{"number":7,"url":"https://github.com/nanocode00/chatgpt2codex/pull/7"}]', stderr: "" };
+    });
+    expect(duplicate).toMatchObject({ created: false, alreadyExists: true, number: 7 });
+    expect(calls).toEqual([[
+      "pr", "list", "--repo", "nanocode00/chatgpt2codex", "--state", "open", "--head", "feature/repo-target", "--base", "main",
+      "--json", "number,url", "--limit", "1",
+    ]]);
+    expect(JSON.stringify(calls)).not.toContain("TOKEN");
+  });
+
+  it.each([
+    ["non-GitHub host", "https://example.com/nanocode00/chatgpt2codex.git"],
+    ["extra GitHub path component", "https://github.com/nanocode00/chatgpt2codex/extra"],
+    ["non-GitHub scp host", "git@example.com:nanocode00/chatgpt2codex.git"],
+  ])("rejects %s when deriving the PR repository", async (_label, remoteUrl) => {
+    await gitCreateBranchFromOrigin(dir, "feature/invalid-repo", "main");
+    await writeFile(join(dir, "feature.txt"), "feature\n");
+    await execFileAsync("git", ["add", "feature.txt"], { cwd: dir });
+    await execFileAsync("git", ["commit", "-q", "-m", "feature"], { cwd: dir });
+    await gitPushCurrentBranch(dir);
+    await execFileAsync("git", ["remote", "set-url", "origin", remoteUrl], { cwd: dir });
+    await expect(gitCreatePullRequest(dir, "main", "Title")).rejects.toMatchObject({
+      code: "NOT_IMPLEMENTED",
+      message: "GitHub origin is required for PR creation",
+    });
   });
 
   it("rejects PR creation when the current branch is not pushed or origin is not GitHub", async () => {
