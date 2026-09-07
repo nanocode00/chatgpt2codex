@@ -219,7 +219,7 @@ describe("Custom GPT action bridge", () => {
           CallToolInput: { properties: Record<string, unknown> };
           GoalIntakeInput: Record<string, unknown>;
           GoalLoopInput: Record<string, unknown>;
-          GoalWorkflowInput: { oneOf?: Array<{ required?: string[]; additionalProperties?: boolean; properties?: Record<string, { enum?: string[] }> }>; discriminator?: { propertyName?: string } };
+          GoalWorkflowInput: { type?: string; required?: string[]; additionalProperties?: boolean; properties?: Record<string, { enum?: string[] }> ; oneOf?: unknown; anyOf?: unknown };
           RepoInspectInput: { required?: string[]; additionalProperties?: boolean; properties?: Record<string, { enum?: string[] }> };
           E2eRunCommandInput: Record<string, unknown>;
           E2eTestAndShowScreenshotInput: Record<string, unknown>;
@@ -322,10 +322,12 @@ describe("Custom GPT action bridge", () => {
     expect((body.paths["/actions/project-select"] as { post: { operationId: string } }).post.operationId).toBe("project_select");
     expect(body.components.schemas.GoalIntakeInput).toBeDefined();
     expect(body.components.schemas.GoalLoopInput).toBeDefined();
-    expect(body.components.schemas.GoalWorkflowInput.oneOf).toHaveLength(2);
-    expect(body.components.schemas.GoalWorkflowInput.discriminator?.propertyName).toBe("mode");
-    expect(body.components.schemas.GoalWorkflowInput.oneOf?.[0]?.required).toEqual(["mode", "goal"]);
-    expect(body.components.schemas.GoalWorkflowInput.oneOf?.[1]?.required).toEqual(["mode"]);
+    expect(body.components.schemas.GoalWorkflowInput.type).toBe("object");
+    expect(body.components.schemas.GoalWorkflowInput.required).toEqual(["mode"]);
+    expect(body.components.schemas.GoalWorkflowInput.additionalProperties).toBe(false);
+    expect(body.components.schemas.GoalWorkflowInput.properties?.mode?.enum).toEqual(["intake", "loop"]);
+    expect(body.components.schemas.GoalWorkflowInput.oneOf).toBeUndefined();
+    expect(body.components.schemas.GoalWorkflowInput.anyOf).toBeUndefined();
     expect(body.components.schemas.RepoInspectInput.required).toEqual(["projectId", "view"]);
     expect(body.components.schemas.RepoInspectInput.additionalProperties).toBe(false);
     expect(body.components.schemas.RepoInspectInput.properties?.view?.enum).toEqual(["status", "summary", "changes", "all"]);
@@ -361,10 +363,16 @@ describe("Custom GPT action bridge", () => {
     expect(body.components.schemas.ActionToolResponse.properties.toolCall).toBeDefined();
     expect(body.components.schemas.ToolCallProof).toBeDefined();
     expect(body.components.schemas.ToolAvailabilityGate).toBeDefined();
-    expect(body.components.schemas.GitWorkspaceInput.oneOf).toHaveLength(3);
-    expect(body.components.schemas.GitWorkspaceInput.discriminator).toEqual({ propertyName: "mode" });
-    expect(body.components.schemas.GitPublishInput.oneOf).toHaveLength(3);
-    expect(body.components.schemas.GitPublishInput.discriminator).toEqual({ propertyName: "mode" });
+    expect((body.components.schemas.GitWorkspaceInput as { type?: string }).type).toBe("object");
+    expect((body.components.schemas.GitWorkspaceInput as { required?: string[] }).required).toEqual(["mode", "projectId"]);
+    expect((body.components.schemas.GitWorkspaceInput as { additionalProperties?: boolean }).additionalProperties).toBe(false);
+    expect((body.components.schemas.GitWorkspaceInput as { oneOf?: unknown }).oneOf).toBeUndefined();
+    expect((body.components.schemas.GitWorkspaceInput as { anyOf?: unknown }).anyOf).toBeUndefined();
+    expect((body.components.schemas.GitPublishInput as { type?: string }).type).toBe("object");
+    expect((body.components.schemas.GitPublishInput as { required?: string[] }).required).toEqual(["mode", "projectId"]);
+    expect((body.components.schemas.GitPublishInput as { additionalProperties?: boolean }).additionalProperties).toBe(false);
+    expect((body.components.schemas.GitPublishInput as { oneOf?: unknown }).oneOf).toBeUndefined();
+    expect((body.components.schemas.GitPublishInput as { anyOf?: unknown }).anyOf).toBeUndefined();
     expect(body.paths["/actions/git-workspace"]).toBeDefined();
     expect(body.paths["/actions/git-publish"]).toBeDefined();
     expect(body.paths["/actions/git-commit"]).toBeUndefined();
@@ -373,6 +381,20 @@ describe("Custom GPT action bridge", () => {
       .map((pathEntry) => (pathEntry as { post?: { operationId?: string } }).post?.operationId)
       .filter((operationId): operationId is string => Boolean(operationId));
     expect(new Set(operationIds).size).toBe(operationIds.length);
+    for (const [path, pathEntry] of Object.entries(body.paths)) {
+      const post = (pathEntry as {
+        post?: { requestBody?: { content?: { "application/json"?: { schema?: { $ref?: string } } } } };
+      }).post;
+      const ref = post?.requestBody?.content?.["application/json"]?.schema?.$ref;
+      if (!ref) continue;
+      const schemaName = ref.replace("#/components/schemas/", "");
+      const schema = (body.components.schemas as Record<string, { type?: string; additionalProperties?: boolean; oneOf?: unknown; anyOf?: unknown; discriminator?: unknown }>)[schemaName];
+      expect(schema?.type, `${path} request body must resolve to a top-level object schema`).toBe("object");
+      expect(schema?.additionalProperties, `${path} request body must reject undeclared top-level fields`).toBe(false);
+      expect(schema?.oneOf, `${path} request body must not use top-level oneOf`).toBeUndefined();
+      expect(schema?.anyOf, `${path} request body must not use top-level anyOf`).toBeUndefined();
+      expect(schema?.discriminator, `${path} request body must not use top-level discriminator`).toBeUndefined();
+    }
     expect((body.paths["/actions/import-chatgpt-image-url"] as { post: { description: string } }).post.description).toContain(
       "Device-agnostic",
     );
@@ -629,6 +651,7 @@ describe("Custom GPT action bridge", () => {
     for (const input of [
       { mode: "invalid", goal: "x" },
       { mode: "intake" },
+      { mode: "intake", goal: "x", loopId: "not-allowed" },
       { mode: "loop", maxTurns: 51 },
       { mode: "loop", urgency: "fast" },
     ]) {
@@ -645,6 +668,26 @@ describe("Custom GPT action bridge", () => {
       const genericRes = await postAction(server.baseUrl, "/actions/call-tool", { toolName, input });
       const generic = (await genericRes.json()) as { ok?: boolean };
       expect(generic.ok, toolName).toBe(true);
+    }
+  });
+
+  it("keeps mode-specific strict validation behind flat OpenAPI workflow schemas", async () => {
+    const server = await startApp(makeCtx(stateDir, projectRoot));
+    stop = server.stop;
+
+    for (const [path, input] of [
+      ["/actions/git-workspace", { mode: "fetch", projectId: "proj", branchName: "not-allowed" }],
+      ["/actions/git-workspace", { mode: "create_branch", projectId: "proj", branchName: "feature/x" }],
+      ["/actions/git-workspace", { mode: "switch_branch", projectId: "proj", branchName: "main", baseBranch: "main" }],
+      ["/actions/git-publish", { mode: "push", projectId: "proj", baseBranch: "main" }],
+      ["/actions/git-publish", { mode: "commit", projectId: "proj" }],
+      ["/actions/git-publish", { mode: "create_pr", projectId: "proj", baseBranch: "main", title: "x", message: "not-allowed" }],
+    ] as const) {
+      const res = await postAction(server.baseUrl, path, input);
+      const body = (await res.json()) as { ok?: boolean; isError?: boolean; structuredContent?: { code?: string } };
+      expect(body.ok, `${path} ${input.mode}`).toBe(false);
+      expect(body.isError, `${path} ${input.mode}`).toBe(true);
+      expect(body.structuredContent?.code, `${path} ${input.mode}`).toBe("INVALID_INPUT");
     }
   });
 
