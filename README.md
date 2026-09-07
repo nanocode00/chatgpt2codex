@@ -170,6 +170,12 @@ git_workspace(fetch)
 
 Project leases can be auto-selected from each tool's internal capability requirement for ordinary explicit-project calls: `read -> read-only`, `verify -> tests-only`, `image -> image-only`, and `write`/`remote -> full-write`. This does not create a public `auto` preset or capability input. An explicit `project_select` lease remains a permission ceiling and is never auto-upgraded; legacy leases without source metadata are treated as explicit. Auto-selected leases may upgrade only for the same project when a later tool requires a stronger capability, and operator ceilings such as `CHATGPT2CODEX_REMOTE_WRITE` and `CHATGPT2CODEX_REMOTE_EXEC` remain authoritative. Control leases are never auto-selected and still require an explicit local `project_select(preset=control)` grant.
 
+### Safe adapter/profile framework
+
+Internal adapters are built into the source tree and registered statically. Operator profiles configure adapter data only; they cannot select modules, packages, executables for a generic runner, arbitrary commands, environment variables, filesystem roots, or implementation code. Profile payloads remain server-side, and model-facing profile discovery exposes aliases only by default. The shared profile layer handles fail-closed JSON/object parsing, conservative aliases, deterministic ordering, and sanitized adapter-specific validation failures while leaving path, DSN, URL, filesystem, and connectivity semantics to each adapter.
+
+Adapter operation capabilities are declarative metadata only. They do not dispatch operations and do not replace the existing lease, remote-write, remote-exec, or other safety gates. There is intentionally no generic adapter execution API. The existing Python runtime profile is the first consumer; future built-in adapters such as SQLite or PostgreSQL can reuse the profile framework without turning it into a dynamic extension system.
+
 Do not expose the connector URL publicly unless you understand the tunnel and
 token model. Do not paste Owner Tokens into issues, screenshots, or shared logs.
 

@@ -1,9 +1,10 @@
 import { constants as fsConstants, promises as fs } from "node:fs";
 import path from "node:path";
+import { invalidProfileValue, parseOperatorProfiles, validateProfileAlias } from "../adapters/profile.js";
+import type { OperatorProfileSpec, SafeAdapterDefinition } from "../adapters/types.js";
 import { DomainError, ErrorCode } from "../types.js";
 
 export const PYTHON_RUNTIME_PROFILES_ENV = "CHATGPT2CODEX_PYTHON_RUNTIME_PROFILES";
-const ALIAS_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 
 export interface PythonRuntimeProfiles {
   aliases: string[];
@@ -14,24 +15,30 @@ function configError(message: string): DomainError {
   return new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, `Python runtime profile config invalid: ${message}`);
 }
 
+export const PYTHON_RUNTIME_PROFILE_SPEC: OperatorProfileSpec<string> = Object.freeze({
+  envName: PYTHON_RUNTIME_PROFILES_ENV,
+  reservedAliases: ["auto"],
+  parseValue(value: unknown): string {
+    if (typeof value !== "string") invalidProfileValue("profile values must be executable path strings");
+    if (!path.isAbsolute(value)) invalidProfileValue("profile executable paths must be absolute");
+    return value;
+  },
+  configError,
+});
+
+export const PYTHON_SAFE_ADAPTER: SafeAdapterDefinition<string> = Object.freeze({
+  id: "python",
+  description: "Built-in Python runtime adapter",
+  profiles: PYTHON_RUNTIME_PROFILE_SPEC,
+  operations: Object.freeze({
+    execute: Object.freeze({ capabilities: ["write"] as const }),
+    notebookExecute: Object.freeze({ capabilities: ["write"] as const }),
+  }),
+});
+
 export function parsePythonRuntimeProfiles(env: NodeJS.ProcessEnv = process.env): PythonRuntimeProfiles {
-  const raw = env[PYTHON_RUNTIME_PROFILES_ENV];
-  if (!raw?.trim()) return { aliases: [], paths: new Map() };
-  let value: unknown;
-  try {
-    value = JSON.parse(raw);
-  } catch {
-    throw configError("expected a JSON object");
-  }
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw configError("expected a JSON object");
-  const paths = new Map<string, string>();
-  for (const [alias, executable] of Object.entries(value as Record<string, unknown>)) {
-    if (!ALIAS_RE.test(alias) || alias === "auto" || alias.includes("..")) throw configError("contains an invalid profile alias");
-    if (typeof executable !== "string") throw configError("profile values must be executable path strings");
-    if (!path.isAbsolute(executable)) throw configError("profile executable paths must be absolute");
-    paths.set(alias, executable);
-  }
-  return { aliases: [...paths.keys()].sort(), paths };
+  const parsed = parseOperatorProfiles({ env, spec: PYTHON_RUNTIME_PROFILE_SPEC });
+  return { aliases: parsed.aliases, paths: parsed.profiles };
 }
 
 export async function resolvePythonRuntimeProfile(
@@ -39,7 +46,7 @@ export async function resolvePythonRuntimeProfile(
   options: { env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform } = {},
 ): Promise<string> {
   if (alias === "auto") throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "auto is not an explicit Python runtime profile");
-  if (!ALIAS_RE.test(alias) || alias.includes("..")) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Python runtime profile alias is invalid");
+  if (!validateProfileAlias(alias)) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Python runtime profile alias is invalid");
   const profiles = parsePythonRuntimeProfiles(options.env);
   const executable = profiles.paths.get(alias);
   if (!executable) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, `Python runtime profile '${alias}' is not configured`);
