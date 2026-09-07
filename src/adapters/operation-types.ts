@@ -1,6 +1,7 @@
 import type { ToolContext } from "../types.js";
 
 export type SafeAdapterOperationCapability = "read" | "verify" | "write" | "image" | "remote";
+export type SafeAdapterOperationAvailability = "always" | "remote-exec";
 
 export interface SafeAdapterCatalogField {
   name: string;
@@ -22,6 +23,7 @@ export interface SafeAdapterOperationDefinition<TInput extends Record<string, un
   adapterId: string;
   description: string;
   capability: SafeAdapterOperationCapability;
+  availability?: SafeAdapterOperationAvailability;
   input: readonly SafeAdapterCatalogField[];
   validateInput(argumentsValue: Record<string, unknown>): TInput;
   handler(context: SafeAdapterOperationContext, input: TInput): Promise<unknown> | unknown;
@@ -31,6 +33,7 @@ export interface SafeAdapterCatalogOperation {
   id: string;
   adapter: string;
   capability: SafeAdapterOperationCapability;
+  availability: SafeAdapterOperationAvailability;
   description: string;
   input: readonly SafeAdapterCatalogField[];
 }

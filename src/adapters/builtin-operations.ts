@@ -1,7 +1,10 @@
 import { inspectSQLite, listSQLiteProfiles, querySQLite, SQLITE_DEFAULT_MAX_ROWS, SQLITE_MAX_ROWS } from "../database/sqlite.js";
+import { executeNotebook, validateNotebook } from "../notebook/notebook.js";
+import { executePythonScript } from "../python/python-execute.js";
 import { parsePythonRuntimeProfiles } from "../python/runtime-profiles.js";
+import { assertRemoteExecAllowed } from "../server/remote-safety.js";
 import { DomainError, ErrorCode, type ToolContext } from "../types.js";
-import { invokeSafeAdapterOperation } from "./operation-invoke.js";
+import { catalogSafeAdapterOperations, invokeSafeAdapterOperation } from "./operation-invoke.js";
 import { SafeAdapterOperationRegistry } from "./operation-registry.js";
 import type { SafeAdapterOperationDefinition } from "./operation-types.js";
 
@@ -32,6 +35,63 @@ const BUILT_IN_OPERATIONS = [
     },
     handler() {
       return { profiles: parsePythonRuntimeProfiles().aliases };
+    },
+  },
+  {
+    id: "python.execute",
+    adapterId: "python",
+    description: "Execute a project-confined Python script with trusted runtime discovery or an operator runtime profile alias.",
+    capability: "write",
+    availability: "remote-exec",
+    input: Object.freeze([
+      { name: "path", type: "string", required: true, maxLength: 4096 },
+      { name: "runtimeProfile", type: "string", required: false, maxLength: 64 },
+    ]),
+    validateInput(value) {
+      strictKeys(value, ["path", "runtimeProfile"]);
+      const path = requiredString(value.path, "path", 4096);
+      const runtimeProfile = value.runtimeProfile === undefined ? undefined : requiredString(value.runtimeProfile, "runtimeProfile", 64);
+      return { path, runtimeProfile };
+    },
+    handler(context, input) {
+      assertRemoteExecAllowed(context.ctx, "python_execute");
+      return executePythonScript(context.projectRoot, input.path as string, input.runtimeProfile as string | undefined);
+    },
+  },
+  {
+    id: "notebook.validate",
+    adapterId: "notebook",
+    description: "Statically validate a project-confined Jupyter notebook without executing cells.",
+    capability: "read",
+    availability: "always",
+    input: Object.freeze([{ name: "path", type: "string", required: true, maxLength: 4096 }]),
+    validateInput(value) {
+      strictKeys(value, ["path"]);
+      return { path: requiredString(value.path, "path", 4096) };
+    },
+    handler(context, input) {
+      return validateNotebook(context.projectRoot, input.path as string);
+    },
+  },
+  {
+    id: "notebook.execute",
+    adapterId: "notebook",
+    description: "Execute a project-confined Jupyter notebook with trusted runtime discovery or an operator runtime profile alias.",
+    capability: "write",
+    availability: "remote-exec",
+    input: Object.freeze([
+      { name: "path", type: "string", required: true, maxLength: 4096 },
+      { name: "runtimeProfile", type: "string", required: false, maxLength: 64 },
+    ]),
+    validateInput(value) {
+      strictKeys(value, ["path", "runtimeProfile"]);
+      const path = requiredString(value.path, "path", 4096);
+      const runtimeProfile = value.runtimeProfile === undefined ? undefined : requiredString(value.runtimeProfile, "runtimeProfile", 64);
+      return { path, runtimeProfile };
+    },
+    handler(context, input) {
+      assertRemoteExecAllowed(context.ctx, "notebook_execute");
+      return executeNotebook(context.projectRoot, input.path as string, { runtimeProfile: input.runtimeProfile as string | undefined });
     },
   },
   {
@@ -96,4 +156,8 @@ export async function invokeBuiltInSafeAdapterOperation(
   argumentsValue: Record<string, unknown>,
 ): Promise<{ operation: string; result: unknown }> {
   return invokeSafeAdapterOperation(ctx, builtInSafeAdapterOperationRegistry, projectId, operationId, argumentsValue);
+}
+
+export function catalogBuiltInSafeAdapterOperations(ctx: ToolContext) {
+  return catalogSafeAdapterOperations(ctx, builtInSafeAdapterOperationRegistry);
 }

@@ -29,6 +29,15 @@ function makeCtx(): ToolContext {
 }
 
 describe("tool catalog", () => {
+  it("keeps Python and notebook MCP compatibility tools registered", async () => {
+    const server = await createServer(makeCtx());
+    const tools = (server as unknown as { _registeredTools?: Record<string, unknown> })._registeredTools;
+
+    for (const name of ["python_runtime_list", "python_execute", "notebook_validate", "notebook_execute"]) {
+      expect(tools?.[name], name).toBeDefined();
+    }
+  });
+
   it("does not advertise adapter_gateway as statically read-only", async () => {
     const server = await createServer(makeCtx());
     const tools = (
