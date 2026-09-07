@@ -6,6 +6,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { storeOwnerToken } from "../auth/owner-token.js";
+import { SafeAdapterOperationRegistry } from "../adapters/operation-registry.js";
+import type { SafeAdapterOperationDefinition } from "../adapters/operation-types.js";
 import type { Lease, ToolContext } from "../types.js";
 import { createHttpServer, defaultHttpServerConfig } from "./http.js";
 
@@ -263,7 +265,8 @@ describe("Custom GPT action bridge", () => {
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("goal_loop");
     expect(body.info["x-chatgpt2codex-tool-names"]).toContain("notebook_validate");
     expect(body.info["x-chatgpt2codex-tool-names"]).toContain("python_runtime_list");
-    expect(body.info["x-chatgpt2codex-tool-names"]).toContain("database");
+    expect(body.info["x-chatgpt2codex-tool-names"]).toContain("adapter_gateway");
+    expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("database");
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("notebook_execute");
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("python_execute");
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("command_run");
@@ -304,7 +307,8 @@ describe("Custom GPT action bridge", () => {
     expect(body.paths["/actions/python-execute"]).toBeUndefined();
     expect(body.paths["/actions/python-runtime-list"]).toBeDefined();
     expect((body.paths["/actions/python-runtime-list"] as { post: { operationId: string } }).post.operationId).toBe("python_runtime_list");
-    expect((body.paths["/actions/database"] as { post: { operationId: string } }).post.operationId).toBe("database");
+    expect((body.paths["/actions/adapter-gateway"] as { post: { operationId: string } }).post.operationId).toBe("adapter_gateway");
+    expect(body.paths["/actions/database"]).toBeUndefined();
     expect(body.paths["/actions/e2e-open-target"]).toBeUndefined();
     expect(body.paths["/actions/e2e-test-and-show-screenshot"]).toBeUndefined();
     expect(body.paths["/actions/e2e-screenshot"]).toBeUndefined();
@@ -358,16 +362,14 @@ describe("Custom GPT action bridge", () => {
     expect(body.components.schemas.PythonPathInput.required).toEqual(["projectId", "path"]);
     expect(body.components.schemas.PythonPathInput.additionalProperties).toBe(false);
     expect(Object.keys(body.components.schemas.PythonPathInput.properties)).toEqual(["projectId", "path", "runtimeProfile"]);
-    expect(body.components.schemas.DatabaseInput.required).toEqual(["mode", "projectId"]);
-    expect(body.components.schemas.DatabaseInput.additionalProperties).toBe(false);
-    expect(Object.keys(body.components.schemas.DatabaseInput.properties)).toEqual(["mode", "projectId", "profile", "sql", "maxRows"]);
-    expect(body.components.schemas.DatabaseInput.properties.mode.enum).toEqual(["list_profiles", "inspect", "query"]);
-    expect(body.components.schemas.DatabaseInput.properties.sql.maxLength).toBe(65536);
-    expect(body.components.schemas.DatabaseInput.properties.maxRows.minimum).toBe(1);
-    expect(body.components.schemas.DatabaseInput.properties.maxRows.maximum).toBe(200);
-    expect(body.components.schemas.DatabaseInput.oneOf).toBeUndefined();
-    expect(body.components.schemas.DatabaseInput.anyOf).toBeUndefined();
-    expect(body.components.schemas.DatabaseInput.discriminator).toBeUndefined();
+    expect(body.components.schemas.AdapterGatewayInput.required).toEqual(["mode"]);
+    expect(body.components.schemas.AdapterGatewayInput.additionalProperties).toBe(false);
+    expect(Object.keys(body.components.schemas.AdapterGatewayInput.properties)).toEqual(["mode", "projectId", "operation", "arguments"]);
+    expect(body.components.schemas.AdapterGatewayInput.properties.mode.enum).toEqual(["catalog", "invoke"]);
+    expect(body.components.schemas.AdapterGatewayInput.properties.arguments.type).toBe("object");
+    expect(body.components.schemas.AdapterGatewayInput.oneOf).toBeUndefined();
+    expect(body.components.schemas.AdapterGatewayInput.anyOf).toBeUndefined();
+    expect(body.components.schemas.AdapterGatewayInput.discriminator).toBeUndefined();
     expect(body.components.schemas.SaveChatGptImageInput.properties.source?.enum).toEqual(["auto", "url"]);
     expect(body.components.schemas.SaveChatGptImageInput.properties.sourcePath).toBeUndefined();
     expect(body.components.schemas.SaveChatGptImageInput.properties.maxAgeSec).toBeUndefined();
@@ -456,7 +458,8 @@ describe("Custom GPT action bridge", () => {
       expect(new Set(operationIds).size, JSON.stringify(combination)).toBe(operationIds.length);
       expect(body.paths["/actions/notebook-validate"]).toBeDefined();
       expect(body.paths["/actions/python-runtime-list"]).toBeDefined();
-      expect(body.paths["/actions/database"]).toBeDefined();
+      expect(body.paths["/actions/adapter-gateway"]).toBeDefined();
+      expect(body.paths["/actions/database"]).toBeUndefined();
       expect(body.paths["/actions/project-skill-list"]).toBeDefined();
       expect(body.paths["/actions/project-skill-read"]).toBeDefined();
       expect(body.paths["/actions/project-skill-write"]).toBeDefined();
@@ -476,6 +479,33 @@ describe("Custom GPT action bridge", () => {
         expect(Object.keys(body.paths)).toHaveLength(30);
       }
     }
+  });
+
+  it("keeps the public OpenAPI operationId set unchanged when many internal adapter operations are added", async () => {
+    const server = await startApp(makeCtx(stateDir, projectRoot));
+    stop = server.stop;
+    const beforeRes = await fetch(`${server.baseUrl}/actions/openapi.json`);
+    const before = (await beforeRes.json()) as { paths: Record<string, { post?: { operationId?: string } }> };
+    const beforeIds = Object.values(before.paths).map((entry) => entry.post?.operationId).filter(Boolean).sort();
+
+    const fakeOperations: SafeAdapterOperationDefinition[] = Array.from({ length: 20 }, (_, index) => ({
+      id: `docker.inspect_${index}`,
+      adapterId: "docker",
+      description: `future docker inspect ${index}`,
+      capability: "read",
+      input: [],
+      validateInput: () => ({}),
+      handler: () => ({ ok: true }),
+    }));
+    const fakeRegistry = new SafeAdapterOperationRegistry(fakeOperations);
+    expect(fakeRegistry.ids).toHaveLength(20);
+
+    const afterRes = await fetch(`${server.baseUrl}/actions/openapi.json`);
+    const after = (await afterRes.json()) as { paths: Record<string, { post?: { operationId?: string } }> };
+    const afterIds = Object.values(after.paths).map((entry) => entry.post?.operationId).filter(Boolean).sort();
+    expect(afterIds).toEqual(beforeIds);
+    expect(Object.keys(after.paths)).toHaveLength(Object.keys(before.paths).length);
+    expect(after.paths["/actions/adapter-gateway"]).toBeDefined();
   });
 
   it("exposes the tool-call gate on action health", async () => {
@@ -720,16 +750,16 @@ describe("Custom GPT action bridge", () => {
       ["/actions/git-pr", { mode: "inspect", projectId: "proj", prNumber: -1 }],
       ["/actions/git-pr", { mode: "inspect", projectId: "proj", prNumber: 1.5 }],
       ["/actions/git-pr", { mode: "inspect", projectId: "proj", prNumber: "1" }],
-      ["/actions/database", { mode: "list_profiles", projectId: "proj", profile: "not-allowed" }],
-      ["/actions/database", { mode: "inspect", projectId: "proj" }],
-      ["/actions/database", { mode: "inspect", projectId: "proj", profile: "app", sql: "SELECT 1" }],
-      ["/actions/database", { mode: "query", projectId: "proj", sql: "SELECT 1" }],
-      ["/actions/database", { mode: "query", projectId: "proj", profile: "app" }],
-      ["/actions/database", { mode: "query", projectId: "proj", profile: "app", sql: "SELECT 1", maxRows: 0 }],
-      ["/actions/database", { mode: "query", projectId: "proj", profile: "app", sql: "SELECT 1", maxRows: 201 }],
-      ["/actions/database", { mode: "query", projectId: "proj", profile: "app", sql: "SELECT 1", maxRows: 1.5 }],
-      ["/actions/database", { mode: "query", projectId: "proj", profile: "app", sql: "SELECT 1", path: "data/app.db" }],
-      ["/actions/database", { mode: "postgres", projectId: "proj", profile: "app", sql: "SELECT 1" }],
+      ["/actions/adapter-gateway", { mode: "catalog", operation: "sqlite.query" }],
+      ["/actions/adapter-gateway", { mode: "catalog", arguments: {} }],
+      ["/actions/adapter-gateway", { mode: "invoke", operation: "sqlite.query", arguments: {} }],
+      ["/actions/adapter-gateway", { mode: "invoke", projectId: "proj", arguments: {} }],
+      ["/actions/adapter-gateway", { mode: "invoke", projectId: "proj", operation: "sqlite.query" }],
+      ["/actions/adapter-gateway", { mode: "invoke", projectId: "proj", operation: "sqlite.query", arguments: [] }],
+      ["/actions/adapter-gateway", { mode: "invoke", projectId: "proj", operation: "sqlite.query", arguments: {}, capability: "write" }],
+      ["/actions/adapter-gateway", { mode: "invoke", projectId: "proj", operation: "sqlite.query", arguments: {}, executable: "/bin/sh" }],
+      ["/actions/adapter-gateway", { mode: "invoke", projectId: "proj", operation: "sqlite.query", arguments: {}, handler: "local_shell_run" }],
+      ["/actions/adapter-gateway", { mode: "execute", projectId: "proj", operation: "sqlite.query", arguments: {} }],
     ] as const) {
       const res = await postAction(server.baseUrl, path, input);
       const body = (await res.json()) as { ok?: boolean; isError?: boolean; structuredContent?: { code?: string } };

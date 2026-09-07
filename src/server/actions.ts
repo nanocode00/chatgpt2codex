@@ -210,12 +210,12 @@ const ACTION_ROUTES: ActionRoute[] = [
     schema: "ProjectOnlyInput",
   },
   {
-    path: "/actions/database",
-    tool: "database",
-    operationId: "database",
-    summary: "Read an operator-configured database",
-    description: "List database profiles, inspect SQLite schema, or run a bounded read-only SQLite query. Database paths and URLs are operator-controlled and never accepted from callers.",
-    schema: "DatabaseInput",
+    path: "/actions/adapter-gateway",
+    tool: "adapter_gateway",
+    operationId: "adapter_gateway",
+    summary: "Catalog or invoke built-in safe adapter operations",
+    description: "Static safe adapter operation gateway. Only source-registered operations with trusted capability metadata, strict operation-specific validation, and statically imported handlers can run; this never forwards arbitrary MCP tool names, commands, executables, argv, env, or modules.",
+    schema: "AdapterGatewayInput",
   },
   {
     path: "/actions/notebook-validate",
@@ -443,7 +443,7 @@ const OPENAPI_ACTION_TOOL_NAMES = new Set([
   "command_list",
   "command_run",
   "python_runtime_list",
-  "database",
+  "adapter_gateway",
   "notebook_validate",
   "notebook_execute",
   "python_execute",
@@ -518,30 +518,18 @@ async function callDedicatedAction(
     return callRegisteredTool(ctx, route.tool, input);
   }
 
-  if (route.tool === "database") {
-    const allowedKeys = new Set(["mode", "projectId", "profile", "sql", "maxRows"]);
+  if (route.tool === "adapter_gateway") {
+    const allowedKeys = new Set(["mode", "projectId", "operation", "arguments"]);
     const extraKeys = Object.keys(input).filter((key) => !allowedKeys.has(key));
     if (extraKeys.length > 0) return invalidActionInput(route.tool, `unexpected properties: ${extraKeys.join(", ")}`);
-    if (typeof input.projectId !== "string" || input.projectId.length === 0) return invalidActionInput(route.tool, "projectId is required");
-    if (input.mode !== "list_profiles" && input.mode !== "inspect" && input.mode !== "query") {
-      return invalidActionInput(route.tool, "mode must be one of list_profiles, inspect, query");
-    }
-    if (input.mode === "list_profiles") {
-      if (input.profile !== undefined || input.sql !== undefined || input.maxRows !== undefined) {
-        return invalidActionInput(route.tool, "list_profiles accepts only mode and projectId");
-      }
-    } else if (input.mode === "inspect") {
-      if (typeof input.profile !== "string" || input.profile.length === 0 || input.sql !== undefined || input.maxRows !== undefined) {
-        return invalidActionInput(route.tool, "inspect requires profile and does not accept sql or maxRows");
-      }
+    if (input.mode !== "catalog" && input.mode !== "invoke") return invalidActionInput(route.tool, "mode must be catalog or invoke");
+    if (input.mode === "catalog") {
+      if (input.projectId !== undefined && (typeof input.projectId !== "string" || input.projectId.length === 0)) return invalidActionInput(route.tool, "projectId must be a non-empty string when provided");
+      if (input.operation !== undefined || input.arguments !== undefined) return invalidActionInput(route.tool, "catalog does not accept operation or arguments");
     } else {
-      if (typeof input.profile !== "string" || input.profile.length === 0 || typeof input.sql !== "string" || input.sql.length === 0) {
-        return invalidActionInput(route.tool, "query requires profile and sql");
-      }
-      if (input.sql.length > 65536) return invalidActionInput(route.tool, "sql exceeds maximum length 65536");
-      if (input.maxRows !== undefined && (!Number.isInteger(input.maxRows) || Number(input.maxRows) < 1 || Number(input.maxRows) > 200)) {
-        return invalidActionInput(route.tool, "maxRows must be an integer between 1 and 200");
-      }
+      if (typeof input.projectId !== "string" || input.projectId.length === 0) return invalidActionInput(route.tool, "invoke requires projectId");
+      if (typeof input.operation !== "string" || input.operation.length === 0) return invalidActionInput(route.tool, "invoke requires operation");
+      if (!isRecord(input.arguments)) return invalidActionInput(route.tool, "invoke requires arguments as a JSON object");
     }
     return callRegisteredTool(ctx, route.tool, input);
   }
@@ -961,16 +949,15 @@ function openApiSpec(publicOrigin: string): Record<string, unknown> {
           required: ["projectId"],
           properties: { projectId: { type: "string" } },
         },
-        DatabaseInput: {
+        AdapterGatewayInput: {
           type: "object",
           additionalProperties: false,
-          required: ["mode", "projectId"],
+          required: ["mode"],
           properties: {
-            mode: { type: "string", enum: ["list_profiles", "inspect", "query"] },
+            mode: { type: "string", enum: ["catalog", "invoke"] },
             projectId: { type: "string" },
-            profile: { type: "string" },
-            sql: { type: "string", maxLength: 65536 },
-            maxRows: { type: "integer", minimum: 1, maximum: 200 },
+            operation: { type: "string" },
+            arguments: { type: "object" },
           },
         },
         ProjectSkillReadInput: {
