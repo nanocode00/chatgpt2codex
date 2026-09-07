@@ -53,6 +53,7 @@ import {
   gitFetchOrigin,
   gitCreateBranchFromOrigin,
   gitSwitchLocalBranch,
+  gitFastForwardCurrentBranch,
   gitPushCurrentBranch,
   gitCreatePullRequest,
   gitInspectPullRequest,
@@ -937,7 +938,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
                   ? "Remote UI/E2E access is locally opted in. Caller-supplied arbitrary E2E command/server strings remain disabled."
                   : "Remote app opening and screenshot capture are disabled until the local operator sets CHATGPT2CODEX_REMOTE_E2E=1."
                 : "For UI/E2E proof: use e2e_start_server, then e2e_run_command for test commands; it captures a screenshot by default. Use e2e_open_target/e2e_open_url_screenshot/e2e_screenshot for manual visual proof. Return the screenshot path/markdown to the user.",
-              "Use repo_inspect on the Custom GPT dedicated surface before Git mutations. For fresh remote state use git_workspace mode=fetch, for feature branches use git_workspace mode=create_branch, and for commit/push/PR use git_publish. Underlying git_commit/git_push and repo_status/repo_diff_summary/show_changes remain available for MCP/local/generic compatibility.",
+              "Use repo_inspect on the Custom GPT dedicated surface before Git mutations. For safe sync use git_workspace mode=fetch followed by mode=fast_forward; for feature branches use git_workspace mode=create_branch, and for commit/push/PR use git_publish. Fast-forward updates only the current clean branch to origin/<current-branch> and fails closed for ahead/diverged state. Underlying git_commit/git_push and repo_status/repo_diff_summary/show_changes remain available for MCP/local/generic compatibility.",
               "After git_publish mode=create_pr, use git_pr mode=inspect for reviewable PR state and git_pr mode=merge only when the user explicitly authorizes merging. Merge requires the exact inspected head SHA and never uses force/admin/auto-merge or branch deletion.",
               "git_publish mode=push is only for user-authorized publishing, targets origin/current-branch, and never force-pushes.",
               ctx.remote
@@ -2648,11 +2649,12 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
     "git_workspace",
     {
       title: "Manage safe Git workspace state",
-      description: "Fetch origin or create/switch local branches using fixed Git operations. Requires a full-write lease.",
+      description: "Fetch origin, fast-forward the current branch, or create/switch local branches using fixed Git operations. Requires a full-write lease.",
       annotations: LOCAL_WRITE_ANNOTATIONS,
       _meta: chatGptToolMeta("Updating Git workspace...", "Git workspace updated"),
       inputSchema: z.discriminatedUnion("mode", [
         z.object({ mode: z.literal("fetch"), projectId: z.string() }).strict(),
+        z.object({ mode: z.literal("fast_forward"), projectId: z.string() }).strict(),
         z.object({ mode: z.literal("create_branch"), projectId: z.string(), branchName: z.string(), baseBranch: z.string() }).strict(),
         z.object({ mode: z.literal("switch_branch"), projectId: z.string(), branchName: z.string() }).strict(),
       ]),
@@ -2664,6 +2666,10 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
         if (input.mode === "fetch") {
           const result = await gitFetchOrigin(entry.root);
           return makeResult({ ...result }, "Fetched origin.");
+        }
+        if (input.mode === "fast_forward") {
+          const result = await gitFastForwardCurrentBranch(entry.root);
+          return makeResult({ ...result }, result.updated ? `Fast-forwarded ${result.branch}.` : `${result.branch} is already up to date.`);
         }
         if (input.mode === "create_branch") {
           const result = await gitCreateBranchFromOrigin(entry.root, input.branchName, input.baseBranch);

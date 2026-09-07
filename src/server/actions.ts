@@ -1211,7 +1211,7 @@ function openApiSpec(publicOrigin: string): Record<string, unknown> {
           additionalProperties: false,
           required: ["mode", "projectId"],
           properties: {
-            mode: { type: "string", enum: ["fetch", "create_branch", "switch_branch"] },
+            mode: { type: "string", enum: ["fetch", "fast_forward", "create_branch", "switch_branch"] },
             projectId: { type: "string" },
             branchName: { type: "string", maxLength: 255 },
             baseBranch: { type: "string", maxLength: 255 },

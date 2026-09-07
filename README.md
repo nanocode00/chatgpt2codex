@@ -155,6 +155,7 @@ Safe Git publishing uses the consolidated Custom GPT Actions surface:
 
 ```text
 git_workspace(fetch)
+-> git_workspace(fast_forward)
 -> git_workspace(create_branch)
 -> edit/test
 -> git_publish(commit)
@@ -165,7 +166,7 @@ git_workspace(fetch)
 -> git_pr(merge)
 ```
 
-`git_workspace`, `git_publish`, and `git_pr` use fixed Git/GitHub operations rather than arbitrary commands. The remote is fixed to `origin`, force push and arbitrary refspecs are not supported, and credentials are never accepted as Action inputs. GitHub PR creation/inspection/merge requires an installed, already-authenticated GitHub CLI (`gh`). PR merge requires an explicit user request and the exact inspected head SHA; pending or failing checks and requested changes are rejected. Admin/force/auto-merge bypasses and automatic branch deletion are not supported.
+`git_workspace`, `git_publish`, and `git_pr` use fixed Git/GitHub operations rather than arbitrary commands. The remote is fixed to `origin`, force push and arbitrary refspecs are not supported, and credentials are never accepted as Action inputs. For local sync, call `git_workspace(fetch)` first and then `git_workspace(fast_forward)`: fast-forward updates only the current clean branch to exactly `origin/<current-branch>`, requires a matching upstream, and rejects ahead/diverged histories without reset, rebase, pull, or merge commits. GitHub PR creation/inspection/merge requires an installed, already-authenticated GitHub CLI (`gh`). PR merge requires an explicit user request and the exact inspected head SHA; pending or failing checks and requested changes are rejected. Admin/force/auto-merge bypasses and automatic branch deletion are not supported.
 
 Do not expose the connector URL publicly unless you understand the tunnel and
 token model. Do not paste Owner Tokens into issues, screenshots, or shared logs.

@@ -153,6 +153,10 @@ describe("remote write safety", () => {
     expect(workspace?.isError).toBe(true);
     expect(workspace?.structuredContent?.code).toBe("PERMISSION_DENIED");
 
+    const fastForward = await tools?.git_workspace?.handler?.({ mode: "fast_forward", projectId: "proj" });
+    expect(fastForward?.isError).toBe(true);
+    expect(fastForward?.structuredContent?.code).toBe("PERMISSION_DENIED");
+
     const publish = await tools?.git_publish?.handler?.({ mode: "push", projectId: "proj" });
     expect(publish?.isError).toBe(true);
     expect(publish?.structuredContent?.code).toBe("PERMISSION_DENIED");
@@ -182,6 +186,10 @@ describe("remote write safety", () => {
     const workspace = await tools?.git_workspace?.handler?.({ mode: "fetch", projectId: "proj" });
     expect(workspace?.isError).toBe(true);
     expect(workspace?.structuredContent?.code).toBe("PERMISSION_DENIED");
+
+    const fastForward = await tools?.git_workspace?.handler?.({ mode: "fast_forward", projectId: "proj" });
+    expect(fastForward?.isError).toBe(true);
+    expect(fastForward?.structuredContent?.code).toBe("PERMISSION_DENIED");
 
     const publish = await tools?.git_publish?.handler?.({ mode: "push", projectId: "proj" });
     expect(publish?.isError).toBe(true);
