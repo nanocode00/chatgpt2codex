@@ -32,6 +32,8 @@ import { executeNotebook, validateNotebook } from "../notebook/notebook.js";
 import { executePythonScript } from "../python/python-execute.js";
 import { parsePythonRuntimeProfiles } from "../python/runtime-profiles.js";
 import { inspectSQLite, listSQLiteProfiles, querySQLite, SQLITE_DEFAULT_MAX_ROWS, SQLITE_MAX_ROWS } from "../database/sqlite.js";
+import { builtInSafeAdapterOperationRegistry, invokeBuiltInSafeAdapterOperation } from "../adapters/builtin-operations.js";
+import { validateGatewayArguments } from "../adapters/gateway.js";
 import { createE2eScreenshotShare } from "../e2e/screenshot-share.js";
 import { addToolCallProof, TOOL_AVAILABILITY_GATE } from "./tool-proof.js";
 import {
@@ -211,6 +213,12 @@ const LOCAL_WRITE_ANNOTATIONS = {
   readOnlyHint: false,
   destructiveHint: true,
   openWorldHint: false,
+} as const;
+
+const ADAPTER_GATEWAY_ANNOTATIONS = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  openWorldHint: true,
 } as const;
 
 const COMMAND_RUN_ANNOTATIONS = {
@@ -917,6 +925,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
               "If ChatGPT's app selector changed to Image Generation/ImageGen, finish generation there, then reselect ChatGPT To Codex or use the Custom GPT Action bridge before doing source work.",
               "For /goal, deep research, or broad implementation prompts on the Custom GPT dedicated surface: call goal_workflow with mode=intake or mode=loop immediately, then continue with project selection and inspection. The underlying goal_intake/goal_loop tools remain available for MCP/local/generic compatibility.",
               "For Codex-style persistence on the Custom GPT dedicated surface: use goal_workflow mode=loop, perform one small inspect/edit/verify batch, then call goal_workflow mode=loop again with lastResult. Repeat until done or truly blocked.",
+              "For built-in adapter features, use adapter_gateway mode=catalog when you need to discover safe operation ids and input descriptors, then adapter_gateway mode=invoke with the exact static operation id and strict arguments object. If the operation id is already known in the current chat, invoke it directly; catalog is not required before every call. adapter_gateway never forwards arbitrary MCP tool names, handlers, commands, executables, argv, env, modules, or caller-provided capabilities.",
               "For configured Python runtimes, call python_runtime_list to see operator-approved aliases only. Use runtimeProfile only when the user requests a specific configured runtime or one is clearly required; otherwise omit it and use auto discovery. Never request, guess, or supply an interpreter path, Conda prefix, argv, or env.",
               "workspace_list_projects or workspace_refresh_index",
               ctx.remote && !isRemoteWriteEnabled()
@@ -2025,6 +2034,38 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
         }
         const result = await querySQLite(entry.root, input.profile, input.sql, input.maxRows ?? SQLITE_DEFAULT_MAX_ROWS);
         return makeResult(result, `SQLite query returned ${result.rows.length} row(s).`);
+      });
+    },
+  );
+
+  registerTool(
+    "adapter_gateway",
+    {
+      title: "Invoke built-in safe adapter operation",
+      description: "Catalog or invoke statically registered built-in adapter operations. This does not forward arbitrary MCP tool names, commands, executables, argv, env, modules, or caller-provided capabilities.",
+      annotations: ADAPTER_GATEWAY_ANNOTATIONS,
+      _meta: chatGptToolMeta("Using safe adapter gateway...", "Safe adapter operation finished"),
+      inputSchema: {
+        mode: z.enum(["catalog", "invoke"]),
+        projectId: z.string().optional(),
+        operation: z.string().optional(),
+        arguments: z.record(z.string(), z.unknown()).optional(),
+      },
+    },
+    async (input) => {
+      return withErrorMapping<Record<string, unknown>>(ctx, "adapter_gateway", input, async () => {
+        if (input.mode === "catalog") {
+          if (input.operation !== undefined || input.arguments !== undefined) {
+            throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "adapter_gateway catalog does not accept operation or arguments");
+          }
+          return makeResult(builtInSafeAdapterOperationRegistry.catalog(), "Safe adapter operation catalog returned.");
+        }
+        if (!input.projectId || !input.operation || input.arguments === undefined) {
+          throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "adapter_gateway invoke requires projectId, operation, and arguments");
+        }
+        const argumentsValue = validateGatewayArguments(input.arguments);
+        const result = await invokeBuiltInSafeAdapterOperation(ctx, input.projectId, input.operation, argumentsValue);
+        return makeResult(result, `Safe adapter operation ${input.operation} finished.`);
       });
     },
   );
