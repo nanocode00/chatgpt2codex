@@ -31,6 +31,7 @@ import { runLocalShell } from "../exec/local-shell.js";
 import { executeNotebook, validateNotebook } from "../notebook/notebook.js";
 import { executePythonScript } from "../python/python-execute.js";
 import { parsePythonRuntimeProfiles } from "../python/runtime-profiles.js";
+import { inspectSQLite, listSQLiteProfiles, querySQLite, SQLITE_DEFAULT_MAX_ROWS, SQLITE_MAX_ROWS } from "../database/sqlite.js";
 import { createE2eScreenshotShare } from "../e2e/screenshot-share.js";
 import { addToolCallProof, TOOL_AVAILABILITY_GATE } from "./tool-proof.js";
 import {
@@ -1979,6 +1980,51 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
         await resolveOrThrow(ctx, { projectId: input.projectId });
         const profiles = parsePythonRuntimeProfiles();
         return makeResult({ default: "auto", profiles: profiles.aliases }, `Configured Python runtimes: ${profiles.aliases.length}.`);
+      });
+    },
+  );
+
+  registerTool(
+    "database",
+    {
+      title: "Read configured database",
+      description: "List operator-configured database profiles, inspect SQLite schema, or run a bounded read-only SQL query. Callers cannot supply database paths or URLs.",
+      annotations: READ_ONLY_ANNOTATIONS,
+      _meta: chatGptToolMeta("Reading database...", "Database operation finished"),
+      inputSchema: {
+        mode: z.enum(["list_profiles", "inspect", "query"]),
+        projectId: z.string(),
+        profile: z.string().optional(),
+        sql: z.string().max(65536).optional(),
+        maxRows: z.number().int().min(1).max(SQLITE_MAX_ROWS).optional(),
+      },
+    },
+    async (input) => {
+      return withErrorMapping<Record<string, unknown>>(ctx, "database", input, async () => {
+        await requireProjectLease(ctx, input.projectId, "read");
+        const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
+
+        if (input.mode === "list_profiles") {
+          if (input.profile !== undefined || input.sql !== undefined || input.maxRows !== undefined) {
+            throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "list_profiles accepts only mode and projectId");
+          }
+          const result = listSQLiteProfiles();
+          return makeResult(result, `Configured SQLite profiles: ${result.profiles.length}.`);
+        }
+
+        if (input.mode === "inspect") {
+          if (!input.profile || input.sql !== undefined || input.maxRows !== undefined) {
+            throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "inspect requires profile and does not accept sql or maxRows");
+          }
+          const result = await inspectSQLite(entry.root, input.profile);
+          return makeResult(result, `Inspected SQLite profile ${input.profile}.`);
+        }
+
+        if (!input.profile || input.sql === undefined) {
+          throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "query requires profile and sql");
+        }
+        const result = await querySQLite(entry.root, input.profile, input.sql, input.maxRows ?? SQLITE_DEFAULT_MAX_ROWS);
+        return makeResult(result, `SQLite query returned ${result.rows.length} row(s).`);
       });
     },
   );

@@ -210,6 +210,14 @@ const ACTION_ROUTES: ActionRoute[] = [
     schema: "ProjectOnlyInput",
   },
   {
+    path: "/actions/database",
+    tool: "database",
+    operationId: "database",
+    summary: "Read an operator-configured database",
+    description: "List database profiles, inspect SQLite schema, or run a bounded read-only SQLite query. Database paths and URLs are operator-controlled and never accepted from callers.",
+    schema: "DatabaseInput",
+  },
+  {
     path: "/actions/notebook-validate",
     tool: "notebook_validate",
     operationId: "notebook_validate",
@@ -435,6 +443,7 @@ const OPENAPI_ACTION_TOOL_NAMES = new Set([
   "command_list",
   "command_run",
   "python_runtime_list",
+  "database",
   "notebook_validate",
   "notebook_execute",
   "python_execute",
@@ -506,6 +515,34 @@ async function callDedicatedAction(
   if (route.tool === "python_runtime_list") {
     const extraKeys = Object.keys(input).filter((key) => key !== "projectId");
     if (extraKeys.length > 0) return invalidActionInput(route.tool, `unexpected properties: ${extraKeys.join(", ")}`);
+    return callRegisteredTool(ctx, route.tool, input);
+  }
+
+  if (route.tool === "database") {
+    const allowedKeys = new Set(["mode", "projectId", "profile", "sql", "maxRows"]);
+    const extraKeys = Object.keys(input).filter((key) => !allowedKeys.has(key));
+    if (extraKeys.length > 0) return invalidActionInput(route.tool, `unexpected properties: ${extraKeys.join(", ")}`);
+    if (typeof input.projectId !== "string" || input.projectId.length === 0) return invalidActionInput(route.tool, "projectId is required");
+    if (input.mode !== "list_profiles" && input.mode !== "inspect" && input.mode !== "query") {
+      return invalidActionInput(route.tool, "mode must be one of list_profiles, inspect, query");
+    }
+    if (input.mode === "list_profiles") {
+      if (input.profile !== undefined || input.sql !== undefined || input.maxRows !== undefined) {
+        return invalidActionInput(route.tool, "list_profiles accepts only mode and projectId");
+      }
+    } else if (input.mode === "inspect") {
+      if (typeof input.profile !== "string" || input.profile.length === 0 || input.sql !== undefined || input.maxRows !== undefined) {
+        return invalidActionInput(route.tool, "inspect requires profile and does not accept sql or maxRows");
+      }
+    } else {
+      if (typeof input.profile !== "string" || input.profile.length === 0 || typeof input.sql !== "string" || input.sql.length === 0) {
+        return invalidActionInput(route.tool, "query requires profile and sql");
+      }
+      if (input.sql.length > 65536) return invalidActionInput(route.tool, "sql exceeds maximum length 65536");
+      if (input.maxRows !== undefined && (!Number.isInteger(input.maxRows) || Number(input.maxRows) < 1 || Number(input.maxRows) > 200)) {
+        return invalidActionInput(route.tool, "maxRows must be an integer between 1 and 200");
+      }
+    }
     return callRegisteredTool(ctx, route.tool, input);
   }
 
@@ -923,6 +960,18 @@ function openApiSpec(publicOrigin: string): Record<string, unknown> {
           additionalProperties: false,
           required: ["projectId"],
           properties: { projectId: { type: "string" } },
+        },
+        DatabaseInput: {
+          type: "object",
+          additionalProperties: false,
+          required: ["mode", "projectId"],
+          properties: {
+            mode: { type: "string", enum: ["list_profiles", "inspect", "query"] },
+            projectId: { type: "string" },
+            profile: { type: "string" },
+            sql: { type: "string", maxLength: 65536 },
+            maxRows: { type: "integer", minimum: 1, maximum: 200 },
+          },
         },
         ProjectSkillReadInput: {
           type: "object",
