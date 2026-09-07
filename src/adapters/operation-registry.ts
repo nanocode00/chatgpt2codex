@@ -3,6 +3,7 @@ import type { SafeAdapterCatalogOperation, SafeAdapterOperationDefinition } from
 
 const OPERATION_ID_RE = /^[a-z][a-z0-9-]{0,31}\.[a-z][a-z0-9_-]{0,63}$/;
 const SUPPORTED_CAPABILITIES = new Set(["read", "verify", "write", "image", "remote"]);
+const SUPPORTED_AVAILABILITY = new Set(["always", "remote-exec"]);
 
 export class SafeAdapterOperationRegistry {
   readonly #definitions: ReadonlyMap<string, SafeAdapterOperationDefinition>;
@@ -25,11 +26,15 @@ export class SafeAdapterOperationRegistry {
       if (!SUPPORTED_CAPABILITIES.has(capability)) {
         throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Safe adapter operation registry contains an invalid capability");
       }
+      const availability = definition.availability ?? "always";
+      if (!SUPPORTED_AVAILABILITY.has(availability)) {
+        throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Safe adapter operation registry contains an invalid availability");
+      }
       if (map.has(definition.id)) {
         throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Safe adapter operation registry contains a duplicate operation id");
       }
       const frozenInput = Object.freeze(definition.input.map((field) => Object.freeze({ ...field })));
-      map.set(definition.id, Object.freeze({ ...definition, input: frozenInput }));
+      map.set(definition.id, Object.freeze({ ...definition, availability, input: frozenInput }));
     }
     this.ids = Object.freeze([...map.keys()].sort());
     this.#definitions = map;
@@ -56,6 +61,7 @@ export class SafeAdapterOperationRegistry {
           id: definition.id,
           adapter: definition.adapterId,
           capability: definition.capability,
+          availability: definition.availability ?? "always",
           description: definition.description,
           input: definition.input,
         };

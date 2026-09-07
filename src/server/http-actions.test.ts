@@ -248,7 +248,7 @@ describe("Custom GPT action bridge", () => {
     expect(body.info.description).toContain("30 operations");
     expect(body.info.description).toContain("workspace_list_projects");
     expect(body.info.description).toContain("save_chatgpt_image/save_chatgpt_image_from_url");
-    expect(Object.keys(body.paths)).toHaveLength(25);
+    expect(Object.keys(body.paths)).toHaveLength(23);
     expect(body.info["x-chatgpt2codex-tool-proof"]?.namespace).toBe("ChatGPT_To_Codex");
     expect(body.info["x-chatgpt2codex-openapi-operation-count"]).toBeLessThanOrEqual(30);
     expect(body.info["x-chatgpt2codex-tool-names"]).toContain("workspace_list_projects");
@@ -263,8 +263,8 @@ describe("Custom GPT action bridge", () => {
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("show_changes");
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("goal_intake");
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("goal_loop");
-    expect(body.info["x-chatgpt2codex-tool-names"]).toContain("notebook_validate");
-    expect(body.info["x-chatgpt2codex-tool-names"]).toContain("python_runtime_list");
+    expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("notebook_validate");
+    expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("python_runtime_list");
     expect(body.info["x-chatgpt2codex-tool-names"]).toContain("adapter_gateway");
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("database");
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("notebook_execute");
@@ -301,12 +301,10 @@ describe("Custom GPT action bridge", () => {
     expect(body.paths["/actions/e2e-start-server"]).toBeUndefined();
     expect(body.paths["/actions/e2e-run-command"]).toBeUndefined();
     expect(body.paths["/actions/command-run"]).toBeUndefined();
-    expect(body.paths["/actions/notebook-validate"]).toBeDefined();
-    expect((body.paths["/actions/notebook-validate"] as { post: { operationId: string } }).post.operationId).toBe("notebook_validate");
+    expect(body.paths["/actions/notebook-validate"]).toBeUndefined();
     expect(body.paths["/actions/notebook-execute"]).toBeUndefined();
     expect(body.paths["/actions/python-execute"]).toBeUndefined();
-    expect(body.paths["/actions/python-runtime-list"]).toBeDefined();
-    expect((body.paths["/actions/python-runtime-list"] as { post: { operationId: string } }).post.operationId).toBe("python_runtime_list");
+    expect(body.paths["/actions/python-runtime-list"]).toBeUndefined();
     expect((body.paths["/actions/adapter-gateway"] as { post: { operationId: string } }).post.operationId).toBe("adapter_gateway");
     expect(body.paths["/actions/database"]).toBeUndefined();
     expect(body.paths["/actions/e2e-open-target"]).toBeUndefined();
@@ -317,7 +315,7 @@ describe("Custom GPT action bridge", () => {
     expect(body.info.description).toContain("goal_workflow");
     expect(body.info.description).toContain("repo_inspect");
     expect(body.info.description).toContain("code_search followed by narrow file_read_slice");
-    expect(body.info.description).toContain("allowlisted command execution and one-shot E2E/screenshot proof");
+    expect(body.info.description).toContain("allowlisted command execution, static built-in adapter operations, and one-shot E2E/screenshot proof");
     expect(body.info.description).toContain("Arbitrary-command tools remain blocked");
     expect(body.paths["/actions/save-visible-chatgpt-images"]).toBeUndefined();
     expect(body.paths["/actions/chatgpt-image-loop"]).toBeUndefined();
@@ -433,10 +431,10 @@ describe("Custom GPT action bridge", () => {
 
   it("keeps the OpenAPI operation budget exact across remote opt-in combinations", async () => {
     const combinations = [
-      { exec: false, e2e: false, expected: 25 },
-      { exec: true, e2e: false, expected: 28 },
-      { exec: false, e2e: true, expected: 26 },
-      { exec: true, e2e: true, expected: 30 },
+      { exec: false, e2e: false, expected: 23 },
+      { exec: true, e2e: false, expected: 24 },
+      { exec: false, e2e: true, expected: 24 },
+      { exec: true, e2e: true, expected: 26 },
     ] as const;
 
     for (const combination of combinations) {
@@ -456,8 +454,8 @@ describe("Custom GPT action bridge", () => {
         .map((pathEntry) => (pathEntry as { post?: { operationId?: string } }).post?.operationId)
         .filter((operationId): operationId is string => Boolean(operationId));
       expect(new Set(operationIds).size, JSON.stringify(combination)).toBe(operationIds.length);
-      expect(body.paths["/actions/notebook-validate"]).toBeDefined();
-      expect(body.paths["/actions/python-runtime-list"]).toBeDefined();
+      expect(body.paths["/actions/notebook-validate"]).toBeUndefined();
+      expect(body.paths["/actions/python-runtime-list"]).toBeUndefined();
       expect(body.paths["/actions/adapter-gateway"]).toBeDefined();
       expect(body.paths["/actions/database"]).toBeUndefined();
       expect(body.paths["/actions/project-skill-list"]).toBeDefined();
@@ -469,14 +467,14 @@ describe("Custom GPT action bridge", () => {
       expect(body.paths["/actions/git-commit"]).toBeUndefined();
       expect(body.paths["/actions/git-push"]).toBeUndefined();
       expect(Boolean(body.paths["/actions/command-run"])).toBe(combination.exec);
-      expect(Boolean(body.paths["/actions/notebook-execute"])).toBe(combination.exec);
-      expect(Boolean(body.paths["/actions/python-execute"])).toBe(combination.exec);
+      expect(body.paths["/actions/notebook-execute"]).toBeUndefined();
+      expect(body.paths["/actions/python-execute"]).toBeUndefined();
       expect(Boolean(body.paths["/actions/e2e-open-target"])).toBe(combination.e2e);
       if (combination.exec && combination.e2e) {
     expect(body.paths["/actions/e2e-test-and-show-screenshot"]).toBeDefined();
     expect(body.paths["/actions/e2e-screenshot"]).toBeUndefined();
     expect(body.paths["/actions/e2e-open-url-screenshot"]).toBeUndefined();
-        expect(Object.keys(body.paths)).toHaveLength(30);
+        expect(Object.keys(body.paths)).toHaveLength(26);
       }
     }
   });

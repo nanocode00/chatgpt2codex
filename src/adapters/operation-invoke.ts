@@ -1,6 +1,30 @@
 import { DomainError, ErrorCode, type ToolContext } from "../types.js";
+import { isRemoteExecEnabled } from "../server/remote-safety.js";
 import { requireProjectLease } from "../workspace/lease-guard.js";
 import type { SafeAdapterOperationRegistry } from "./operation-registry.js";
+import type { SafeAdapterOperationDefinition } from "./operation-types.js";
+
+export function isSafeAdapterOperationAvailable(
+  ctx: ToolContext,
+  operation: SafeAdapterOperationDefinition,
+): boolean {
+  if ((operation.availability ?? "always") === "always") return true;
+  return !ctx.remote || isRemoteExecEnabled();
+}
+
+export function catalogSafeAdapterOperations(
+  ctx: ToolContext,
+  registry: SafeAdapterOperationRegistry,
+): ReturnType<SafeAdapterOperationRegistry["catalog"]> {
+  const catalog = registry.catalog();
+  const available = new Set(
+    registry.ids.filter((id) => isSafeAdapterOperationAvailable(ctx, registry.get(id))),
+  );
+  return {
+    version: 1,
+    operations: catalog.operations.filter((operation) => available.has(operation.id)),
+  };
+}
 
 export async function invokeSafeAdapterOperation(
   ctx: ToolContext,
@@ -10,6 +34,9 @@ export async function invokeSafeAdapterOperation(
   argumentsValue: Record<string, unknown>,
 ): Promise<{ operation: string; result: unknown }> {
   const operation = registry.get(operationId);
+  if (!isSafeAdapterOperationAvailable(ctx, operation)) {
+    throw new DomainError(ErrorCode.PERMISSION_DENIED, "Safe adapter operation is unavailable in this remote execution context");
+  }
   const entry = ctx.registry.find((project) => project.projectId === projectId);
   if (!entry) throw new DomainError(ErrorCode.PROJECT_NOT_FOUND, "Project not found");
 

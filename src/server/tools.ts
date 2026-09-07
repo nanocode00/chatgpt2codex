@@ -32,7 +32,7 @@ import { executeNotebook, validateNotebook } from "../notebook/notebook.js";
 import { executePythonScript } from "../python/python-execute.js";
 import { parsePythonRuntimeProfiles } from "../python/runtime-profiles.js";
 import { inspectSQLite, listSQLiteProfiles, querySQLite, SQLITE_DEFAULT_MAX_ROWS, SQLITE_MAX_ROWS } from "../database/sqlite.js";
-import { builtInSafeAdapterOperationRegistry, invokeBuiltInSafeAdapterOperation } from "../adapters/builtin-operations.js";
+import { catalogBuiltInSafeAdapterOperations, invokeBuiltInSafeAdapterOperation } from "../adapters/builtin-operations.js";
 import { validateGatewayArguments } from "../adapters/gateway.js";
 import { createE2eScreenshotShare } from "../e2e/screenshot-share.js";
 import { addToolCallProof, TOOL_AVAILABILITY_GATE } from "./tool-proof.js";
@@ -926,7 +926,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
               "For /goal, deep research, or broad implementation prompts on the Custom GPT dedicated surface: call goal_workflow with mode=intake or mode=loop immediately, then continue with project selection and inspection. The underlying goal_intake/goal_loop tools remain available for MCP/local/generic compatibility.",
               "For Codex-style persistence on the Custom GPT dedicated surface: use goal_workflow mode=loop, perform one small inspect/edit/verify batch, then call goal_workflow mode=loop again with lastResult. Repeat until done or truly blocked.",
               "For built-in adapter features, use adapter_gateway mode=catalog when you need to discover safe operation ids and input descriptors, then adapter_gateway mode=invoke with the exact static operation id and strict arguments object. If the operation id is already known in the current chat, invoke it directly; catalog is not required before every call. adapter_gateway never forwards arbitrary MCP tool names, handlers, commands, executables, argv, env, modules, or caller-provided capabilities.",
-              "For configured Python runtimes, call python_runtime_list to see operator-approved aliases only. Use runtimeProfile only when the user requests a specific configured runtime or one is clearly required; otherwise omit it and use auto discovery. Never request, guess, or supply an interpreter path, Conda prefix, argv, or env.",
+              "For Custom GPT adapter runtime features, use adapter_gateway. Python aliases are python.profiles; Python scripts use python.execute; notebook validation uses notebook.validate; notebook execution uses notebook.execute. The underlying MCP python_runtime_list/python_execute/notebook_validate/notebook_execute tools remain available for local/compatibility use. Use runtimeProfile only when the user requests a specific configured runtime or one is clearly required; otherwise omit it and use auto discovery. Never request, guess, or supply an interpreter path, Conda prefix, argv, env, cwd, shell, timeout, or command.",
               "workspace_list_projects or workspace_refresh_index",
               ctx.remote && !isRemoteWriteEnabled()
                 ? "Remote sessions remain write-disabled until the local operator sets CHATGPT2CODEX_REMOTE_WRITE=1; auto lease selection cannot bypass that ceiling."
@@ -2058,7 +2058,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
           if (input.operation !== undefined || input.arguments !== undefined) {
             throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "adapter_gateway catalog does not accept operation or arguments");
           }
-          return makeResult(builtInSafeAdapterOperationRegistry.catalog(), "Safe adapter operation catalog returned.");
+          return makeResult(catalogBuiltInSafeAdapterOperations(ctx), "Safe adapter operation catalog returned.");
         }
         if (!input.projectId || !input.operation || input.arguments === undefined) {
           throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "adapter_gateway invoke requires projectId, operation, and arguments");

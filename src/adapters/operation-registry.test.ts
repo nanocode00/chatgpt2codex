@@ -44,6 +44,7 @@ describe("SafeAdapterOperationRegistry", () => {
         id: "docker.inspect",
         adapter: "docker",
         capability: "read",
+        availability: "always",
         description: "safe docker.inspect",
         input: [{ name: "name", type: "string", required: true }],
       }],
@@ -58,6 +59,7 @@ describe("SafeAdapterOperationRegistry", () => {
     expect(() => new SafeAdapterOperationRegistry([]).get("git.push")).toThrow(/Unknown safe adapter operation/);
     expect(() => new SafeAdapterOperationRegistry([{ ...operation("docker.inspect"), capability: "control" } as never])).toThrow(/Control capability/);
     expect(() => new SafeAdapterOperationRegistry([{ ...operation("docker.inspect"), capability: "shell" } as never])).toThrow(/invalid capability/);
+    expect(() => new SafeAdapterOperationRegistry([{ ...operation("docker.inspect"), availability: "shell" } as never])).toThrow(/invalid availability/);
   });
 
   it("has no runtime register/load/execute forwarding API", () => {

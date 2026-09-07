@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Lease, ToolContext } from "../types.js";
 import { SafeAdapterOperationRegistry } from "./operation-registry.js";
-import { invokeSafeAdapterOperation } from "./operation-invoke.js";
+import { catalogSafeAdapterOperations, invokeSafeAdapterOperation } from "./operation-invoke.js";
 import type { SafeAdapterOperationDefinition } from "./operation-types.js";
 
 const project = { projectId: "proj", name: "proj", root: "/tmp/proj", aliases: [] };
@@ -38,12 +38,14 @@ function definition(options: {
   capability?: "read" | "write" | "remote";
   validate?: (value: Record<string, unknown>) => Record<string, unknown>;
   handler?: () => unknown;
+  availability?: "always" | "remote-exec";
 } = {}): SafeAdapterOperationDefinition {
   return {
     id: options.id ?? "fake.inspect",
     adapterId: (options.id ?? "fake.inspect").split(".")[0]!,
     description: "fake static operation",
     capability: options.capability ?? "read",
+    availability: options.availability ?? "always",
     input: [],
     validateInput: options.validate ?? ((value) => value),
     handler: options.handler ?? (() => ({ ok: true })),
@@ -115,6 +117,8 @@ describe("safe adapter operation invocation", () => {
     const registry = new SafeAdapterOperationRegistry([definition({ id: "fake.write", capability: "write", handler })]);
     await expect(invokeSafeAdapterOperation(ctx, registry, "proj", "fake.write", {})).rejects.toThrow();
     expect(handler).not.toHaveBeenCalled();
+    const session = ctx.readSession() as { lease?: Lease };
+    expect(session.lease).toBeUndefined();
   });
 
   it("does not implicitly enable REMOTE_EXEC for read operations", async () => {
@@ -123,6 +127,38 @@ describe("safe adapter operation invocation", () => {
     const registry = new SafeAdapterOperationRegistry([definition()]);
     delete process.env.CHATGPT2CODEX_REMOTE_EXEC;
     await expect(invokeSafeAdapterOperation(ctx, registry, "proj", "fake.inspect", {})).resolves.toMatchObject({ operation: "fake.inspect" });
+  });
+
+  it("filters remote-exec operations from remote catalog unless REMOTE_EXEC is enabled", () => {
+    const registry = new SafeAdapterOperationRegistry([
+      definition({ id: "fake.inspect" }),
+      definition({ id: "fake.execute", capability: "write", availability: "remote-exec" }),
+    ]);
+    const local = makeCtx();
+    expect(catalogSafeAdapterOperations(local, registry).operations.map((op) => op.id)).toEqual(["fake.execute", "fake.inspect"]);
+
+    const remote = makeCtx();
+    remote.remote = true;
+    delete process.env.CHATGPT2CODEX_REMOTE_EXEC;
+    expect(catalogSafeAdapterOperations(remote, registry).operations.map((op) => op.id)).toEqual(["fake.inspect"]);
+
+    process.env.CHATGPT2CODEX_REMOTE_EXEC = "1";
+    expect(catalogSafeAdapterOperations(remote, registry).operations.map((op) => op.id)).toEqual(["fake.execute", "fake.inspect"]);
+  });
+
+  it("blocks direct invoke of remote-exec operation before validation and handler when REMOTE_EXEC is disabled", async () => {
+    const validate = vi.fn((value: Record<string, unknown>) => value);
+    const handler = vi.fn(() => ({ executed: true }));
+    const registry = new SafeAdapterOperationRegistry([
+      definition({ id: "fake.execute", capability: "write", availability: "remote-exec", validate, handler }),
+    ]);
+    const ctx = makeCtx();
+    ctx.remote = true;
+    process.env.CHATGPT2CODEX_REMOTE_WRITE = "1";
+    delete process.env.CHATGPT2CODEX_REMOTE_EXEC;
+    await expect(invokeSafeAdapterOperation(ctx, registry, "proj", "fake.execute", {})).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+    expect(validate).not.toHaveBeenCalled();
+    expect(handler).not.toHaveBeenCalled();
   });
 
   it("sanitizes unexpected validator and handler errors", async () => {
