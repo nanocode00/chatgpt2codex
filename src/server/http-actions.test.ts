@@ -246,7 +246,7 @@ describe("Custom GPT action bridge", () => {
     expect(body.info.description).toContain("30 operations");
     expect(body.info.description).toContain("workspace_list_projects");
     expect(body.info.description).toContain("save_chatgpt_image/save_chatgpt_image_from_url");
-    expect(Object.keys(body.paths)).toHaveLength(24);
+    expect(Object.keys(body.paths)).toHaveLength(25);
     expect(body.info["x-chatgpt2codex-tool-proof"]?.namespace).toBe("ChatGPT_To_Codex");
     expect(body.info["x-chatgpt2codex-openapi-operation-count"]).toBeLessThanOrEqual(30);
     expect(body.info["x-chatgpt2codex-tool-names"]).toContain("workspace_list_projects");
@@ -263,6 +263,7 @@ describe("Custom GPT action bridge", () => {
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("goal_loop");
     expect(body.info["x-chatgpt2codex-tool-names"]).toContain("notebook_validate");
     expect(body.info["x-chatgpt2codex-tool-names"]).toContain("python_runtime_list");
+    expect(body.info["x-chatgpt2codex-tool-names"]).toContain("database");
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("notebook_execute");
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("python_execute");
     expect(body.info["x-chatgpt2codex-tool-names"]).not.toContain("command_run");
@@ -303,6 +304,7 @@ describe("Custom GPT action bridge", () => {
     expect(body.paths["/actions/python-execute"]).toBeUndefined();
     expect(body.paths["/actions/python-runtime-list"]).toBeDefined();
     expect((body.paths["/actions/python-runtime-list"] as { post: { operationId: string } }).post.operationId).toBe("python_runtime_list");
+    expect((body.paths["/actions/database"] as { post: { operationId: string } }).post.operationId).toBe("database");
     expect(body.paths["/actions/e2e-open-target"]).toBeUndefined();
     expect(body.paths["/actions/e2e-test-and-show-screenshot"]).toBeUndefined();
     expect(body.paths["/actions/e2e-screenshot"]).toBeUndefined();
@@ -356,6 +358,16 @@ describe("Custom GPT action bridge", () => {
     expect(body.components.schemas.PythonPathInput.required).toEqual(["projectId", "path"]);
     expect(body.components.schemas.PythonPathInput.additionalProperties).toBe(false);
     expect(Object.keys(body.components.schemas.PythonPathInput.properties)).toEqual(["projectId", "path", "runtimeProfile"]);
+    expect(body.components.schemas.DatabaseInput.required).toEqual(["mode", "projectId"]);
+    expect(body.components.schemas.DatabaseInput.additionalProperties).toBe(false);
+    expect(Object.keys(body.components.schemas.DatabaseInput.properties)).toEqual(["mode", "projectId", "profile", "sql", "maxRows"]);
+    expect(body.components.schemas.DatabaseInput.properties.mode.enum).toEqual(["list_profiles", "inspect", "query"]);
+    expect(body.components.schemas.DatabaseInput.properties.sql.maxLength).toBe(65536);
+    expect(body.components.schemas.DatabaseInput.properties.maxRows.minimum).toBe(1);
+    expect(body.components.schemas.DatabaseInput.properties.maxRows.maximum).toBe(200);
+    expect(body.components.schemas.DatabaseInput.oneOf).toBeUndefined();
+    expect(body.components.schemas.DatabaseInput.anyOf).toBeUndefined();
+    expect(body.components.schemas.DatabaseInput.discriminator).toBeUndefined();
     expect(body.components.schemas.SaveChatGptImageInput.properties.source?.enum).toEqual(["auto", "url"]);
     expect(body.components.schemas.SaveChatGptImageInput.properties.sourcePath).toBeUndefined();
     expect(body.components.schemas.SaveChatGptImageInput.properties.maxAgeSec).toBeUndefined();
@@ -419,10 +431,10 @@ describe("Custom GPT action bridge", () => {
 
   it("keeps the OpenAPI operation budget exact across remote opt-in combinations", async () => {
     const combinations = [
-      { exec: false, e2e: false, expected: 24 },
-      { exec: true, e2e: false, expected: 27 },
-      { exec: false, e2e: true, expected: 25 },
-      { exec: true, e2e: true, expected: 29 },
+      { exec: false, e2e: false, expected: 25 },
+      { exec: true, e2e: false, expected: 28 },
+      { exec: false, e2e: true, expected: 26 },
+      { exec: true, e2e: true, expected: 30 },
     ] as const;
 
     for (const combination of combinations) {
@@ -444,6 +456,7 @@ describe("Custom GPT action bridge", () => {
       expect(new Set(operationIds).size, JSON.stringify(combination)).toBe(operationIds.length);
       expect(body.paths["/actions/notebook-validate"]).toBeDefined();
       expect(body.paths["/actions/python-runtime-list"]).toBeDefined();
+      expect(body.paths["/actions/database"]).toBeDefined();
       expect(body.paths["/actions/project-skill-list"]).toBeDefined();
       expect(body.paths["/actions/project-skill-read"]).toBeDefined();
       expect(body.paths["/actions/project-skill-write"]).toBeDefined();
@@ -460,7 +473,7 @@ describe("Custom GPT action bridge", () => {
     expect(body.paths["/actions/e2e-test-and-show-screenshot"]).toBeDefined();
     expect(body.paths["/actions/e2e-screenshot"]).toBeUndefined();
     expect(body.paths["/actions/e2e-open-url-screenshot"]).toBeUndefined();
-        expect(Object.keys(body.paths)).toHaveLength(29);
+        expect(Object.keys(body.paths)).toHaveLength(30);
       }
     }
   });
@@ -707,6 +720,16 @@ describe("Custom GPT action bridge", () => {
       ["/actions/git-pr", { mode: "inspect", projectId: "proj", prNumber: -1 }],
       ["/actions/git-pr", { mode: "inspect", projectId: "proj", prNumber: 1.5 }],
       ["/actions/git-pr", { mode: "inspect", projectId: "proj", prNumber: "1" }],
+      ["/actions/database", { mode: "list_profiles", projectId: "proj", profile: "not-allowed" }],
+      ["/actions/database", { mode: "inspect", projectId: "proj" }],
+      ["/actions/database", { mode: "inspect", projectId: "proj", profile: "app", sql: "SELECT 1" }],
+      ["/actions/database", { mode: "query", projectId: "proj", sql: "SELECT 1" }],
+      ["/actions/database", { mode: "query", projectId: "proj", profile: "app" }],
+      ["/actions/database", { mode: "query", projectId: "proj", profile: "app", sql: "SELECT 1", maxRows: 0 }],
+      ["/actions/database", { mode: "query", projectId: "proj", profile: "app", sql: "SELECT 1", maxRows: 201 }],
+      ["/actions/database", { mode: "query", projectId: "proj", profile: "app", sql: "SELECT 1", maxRows: 1.5 }],
+      ["/actions/database", { mode: "query", projectId: "proj", profile: "app", sql: "SELECT 1", path: "data/app.db" }],
+      ["/actions/database", { mode: "postgres", projectId: "proj", profile: "app", sql: "SELECT 1" }],
     ] as const) {
       const res = await postAction(server.baseUrl, path, input);
       const body = (await res.json()) as { ok?: boolean; isError?: boolean; structuredContent?: { code?: string } };
