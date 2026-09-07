@@ -55,12 +55,7 @@ function presetForAutoUpgrade(current: LeasePreset | undefined, capability: Excl
   if (!current) return minimum;
   if (current === "full-write") return current;
   if (ALLOWED_CAPABILITIES[current].has(capability)) return current;
-
-  const required = new Set<LeaseCapability>([...ALLOWED_CAPABILITIES[current], capability]);
-  for (const candidate of ["read-only", "tests-only", "image-only", "full-write"] as const) {
-    if ([...required].every((item) => ALLOWED_CAPABILITIES[candidate].has(item))) return candidate;
-  }
-  return "full-write";
+  return minimum;
 }
 
 async function autoSelectLease(

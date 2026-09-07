@@ -109,12 +109,38 @@ describe("capability-based automatic project leases", () => {
     expect(result).toMatchObject({ preset: "tests-only", selectionSource: "auto" });
   });
 
-  it("preserves accumulated capabilities when an auto tests/image lease needs the other capability", async () => {
-    for (const [preset, capability] of [["tests-only", "image"], ["image-only", "verify"]] as const) {
+  it("switches auto cross-capability leases to the minimum preset for the current request", async () => {
+    for (const [preset, capability, expected] of [
+      ["tests-only", "image", "image-only"],
+      ["image-only", "verify", "tests-only"],
+    ] as const) {
       const { ctx } = makeContext({ session: { activeProjectId: "alpha", lease: autoLease(preset) } });
       const result = await requireProjectLease(ctx, "alpha", capability);
-      expect(result.preset).toBe("full-write");
+      expect(result).toMatchObject({ preset: expected, selectionSource: "auto" });
     }
+  });
+
+  it.each([
+    ["tests-only", "image", "image-only"],
+    ["image-only", "verify", "tests-only"],
+  ] as const)("allows remote %s -> %s without REMOTE_WRITE by selecting %s", async (preset, capability, expected) => {
+    const current = autoLease(preset);
+    const { ctx, getSession } = makeContext({ remote: true, session: { activeProjectId: "alpha", lease: current } });
+    const result = await requireProjectLease(ctx, "alpha", capability);
+    expect(result).toMatchObject({ preset: expected, selectionSource: "auto" });
+    expect(result.leaseId).not.toBe(current.leaseId);
+    expect((getSession().lease as Lease).preset).toBe(expected);
+  });
+
+  it.each([
+    ["tests-only", "write"],
+    ["image-only", "remote"],
+  ] as const)("still denies remote %s -> %s when REMOTE_WRITE is disabled", async (preset, capability) => {
+    const current = autoLease(preset);
+    const { ctx, getSession, saves } = makeContext({ remote: true, session: { activeProjectId: "alpha", lease: current } });
+    await expect(requireProjectLease(ctx, "alpha", capability)).rejects.toMatchObject({ code: ErrorCode.PERMISSION_DENIED });
+    expect(saves()).toBe(0);
+    expect(getSession().lease).toEqual(current);
   });
 
   it.each(["read", "verify", "image"] as const)("reuses auto full-write without downgrade or renewal for %s", async (capability) => {
