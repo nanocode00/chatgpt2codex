@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import { verifyOwnerToken } from "../auth/owner-token.js";
 import type { ToolContext } from "../types.js";
 import { createE2eScreenshotShare, readE2eScreenshotShare } from "../e2e/screenshot-share.js";
+import { validateGatewayArguments } from "../adapters/gateway.js";
 import { CONTROL_TOOL_NAMES, isControlChatGptExposed } from "../control/policy.js";
 import {
   isRemoteE2eEnabled,
@@ -503,6 +504,33 @@ function invalidActionInput(tool: string, message: string): CallToolResultLike {
   };
 }
 
+const ADAPTER_GATEWAY_ARGUMENTS_JSON_MAX_BYTES = 64 * 1024;
+
+function parseAdapterGatewayArgumentsJson(value: unknown):
+  | { ok: true; value: Record<string, unknown> }
+  | { ok: false; error: CallToolResultLike } {
+  if (typeof value !== "string" || value.length === 0) {
+    return { ok: false, error: invalidActionInput("adapter_gateway", "argumentsJson must be a non-empty JSON object string") };
+  }
+  if (Buffer.byteLength(value, "utf8") > ADAPTER_GATEWAY_ARGUMENTS_JSON_MAX_BYTES) {
+    return { ok: false, error: invalidActionInput("adapter_gateway", "argumentsJson exceeds the 64 KiB limit") };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return { ok: false, error: invalidActionInput("adapter_gateway", "argumentsJson must contain valid JSON") };
+  }
+  if (!isRecord(parsed) || Object.getPrototypeOf(parsed) !== Object.prototype) {
+    return { ok: false, error: invalidActionInput("adapter_gateway", "argumentsJson must encode a JSON object") };
+  }
+  try {
+    return { ok: true, value: validateGatewayArguments(parsed) };
+  } catch {
+    return { ok: false, error: invalidActionInput("adapter_gateway", "argumentsJson contains invalid adapter arguments") };
+  }
+}
+
 async function callDedicatedAction(
   ctx: ToolContext,
   route: ActionRoute,
@@ -515,17 +543,27 @@ async function callDedicatedAction(
   }
 
   if (route.tool === "adapter_gateway") {
-    const allowedKeys = new Set(["mode", "projectId", "operation", "arguments"]);
+    const allowedKeys = new Set(["mode", "projectId", "operation", "argumentsJson", "arguments"]);
     const extraKeys = Object.keys(input).filter((key) => !allowedKeys.has(key));
     if (extraKeys.length > 0) return invalidActionInput(route.tool, `unexpected properties: ${extraKeys.join(", ")}`);
     if (input.mode !== "catalog" && input.mode !== "invoke") return invalidActionInput(route.tool, "mode must be catalog or invoke");
     if (input.mode === "catalog") {
       if (input.projectId !== undefined && (typeof input.projectId !== "string" || input.projectId.length === 0)) return invalidActionInput(route.tool, "projectId must be a non-empty string when provided");
-      if (input.operation !== undefined || input.arguments !== undefined) return invalidActionInput(route.tool, "catalog does not accept operation or arguments");
+      if (input.operation !== undefined || input.argumentsJson !== undefined || input.arguments !== undefined) return invalidActionInput(route.tool, "catalog does not accept operation or arguments");
     } else {
       if (typeof input.projectId !== "string" || input.projectId.length === 0) return invalidActionInput(route.tool, "invoke requires projectId");
       if (typeof input.operation !== "string" || input.operation.length === 0) return invalidActionInput(route.tool, "invoke requires operation");
-      if (!isRecord(input.arguments)) return invalidActionInput(route.tool, "invoke requires arguments as a JSON object");
+      const hasArgumentsJson = input.argumentsJson !== undefined;
+      const hasLegacyArguments = input.arguments !== undefined;
+      if (hasArgumentsJson === hasLegacyArguments) return invalidActionInput(route.tool, "invoke requires exactly one of argumentsJson or arguments");
+      if (hasArgumentsJson) {
+        const parsed = parseAdapterGatewayArgumentsJson(input.argumentsJson);
+        if (!parsed.ok) return parsed.error;
+        input.arguments = parsed.value;
+        delete input.argumentsJson;
+      } else if (!isRecord(input.arguments)) {
+        return invalidActionInput(route.tool, "invoke requires arguments as a JSON object");
+      }
     }
     return callRegisteredTool(ctx, route.tool, input);
   }
@@ -953,7 +991,11 @@ function openApiSpec(publicOrigin: string): Record<string, unknown> {
             mode: { type: "string", enum: ["catalog", "invoke"] },
             projectId: { type: "string" },
             operation: { type: "string" },
-            arguments: { type: "object" },
+            argumentsJson: {
+              type: "string",
+              maxLength: 65536,
+              description: "JSON object encoded as a string containing arguments for the selected adapter operation.",
+            },
           },
         },
         ProjectSkillReadInput: {

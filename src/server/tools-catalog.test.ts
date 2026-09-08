@@ -53,6 +53,18 @@ describe("tool catalog", () => {
     });
   });
 
+  it("keeps the internal adapter_gateway MCP contract on native arguments objects", async () => {
+    const server = await createServer(makeCtx());
+    const tools = (
+      server as unknown as {
+        _registeredTools?: Record<string, { inputSchema?: { shape?: Record<string, unknown> } }>;
+      }
+    )._registeredTools;
+    const gateway = tools?.adapter_gateway;
+    expect(gateway?.inputSchema?.shape?.arguments).toBeDefined();
+    expect(gateway?.inputSchema?.shape?.argumentsJson).toBeUndefined();
+  });
+
   it("keeps the one-shot E2E tool out of destructive/open-world routing", async () => {
     const server = await createServer(makeCtx());
     const tools = (
