@@ -367,9 +367,11 @@ describe("Custom GPT action bridge", () => {
     expect(Object.keys(body.components.schemas.PythonPathInput.properties)).toEqual(["projectId", "path", "runtimeProfile"]);
     expect(body.components.schemas.AdapterGatewayInput.required).toEqual(["mode"]);
     expect(body.components.schemas.AdapterGatewayInput.additionalProperties).toBe(false);
-    expect(Object.keys(body.components.schemas.AdapterGatewayInput.properties)).toEqual(["mode", "projectId", "operation", "arguments"]);
+    expect(Object.keys(body.components.schemas.AdapterGatewayInput.properties)).toEqual(["mode", "projectId", "operation", "argumentsJson"]);
     expect(body.components.schemas.AdapterGatewayInput.properties.mode.enum).toEqual(["catalog", "invoke"]);
-    expect(body.components.schemas.AdapterGatewayInput.properties.arguments.type).toBe("object");
+    expect(body.components.schemas.AdapterGatewayInput.properties.argumentsJson.type).toBe("string");
+    expect(body.components.schemas.AdapterGatewayInput.properties.argumentsJson.maxLength).toBe(65536);
+    expect(body.components.schemas.AdapterGatewayInput.properties.arguments).toBeUndefined();
     expect(body.components.schemas.AdapterGatewayInput.oneOf).toBeUndefined();
     expect(body.components.schemas.AdapterGatewayInput.anyOf).toBeUndefined();
     expect(body.components.schemas.AdapterGatewayInput.discriminator).toBeUndefined();
@@ -755,10 +757,20 @@ describe("Custom GPT action bridge", () => {
       ["/actions/git-pr", { mode: "inspect", projectId: "proj", prNumber: "1" }],
       ["/actions/adapter-gateway", { mode: "catalog", operation: "sqlite.query" }],
       ["/actions/adapter-gateway", { mode: "catalog", arguments: {} }],
+      ["/actions/adapter-gateway", { mode: "catalog", argumentsJson: "{}" }],
       ["/actions/adapter-gateway", { mode: "invoke", operation: "sqlite.query", arguments: {} }],
       ["/actions/adapter-gateway", { mode: "invoke", projectId: "proj", arguments: {} }],
       ["/actions/adapter-gateway", { mode: "invoke", projectId: "proj", operation: "sqlite.query" }],
       ["/actions/adapter-gateway", { mode: "invoke", projectId: "proj", operation: "sqlite.query", arguments: [] }],
+      ["/actions/adapter-gateway", { mode: "invoke", projectId: "proj", operation: "sqlite.query", argumentsJson: "" }],
+      ["/actions/adapter-gateway", { mode: "invoke", projectId: "proj", operation: "sqlite.query", argumentsJson: "{" }],
+      ["/actions/adapter-gateway", { mode: "invoke", projectId: "proj", operation: "sqlite.query", argumentsJson: "null" }],
+      ["/actions/adapter-gateway", { mode: "invoke", projectId: "proj", operation: "sqlite.query", argumentsJson: "[]" }],
+      ["/actions/adapter-gateway", { mode: "invoke", projectId: "proj", operation: "sqlite.query", argumentsJson: "true" }],
+      ["/actions/adapter-gateway", { mode: "invoke", projectId: "proj", operation: "sqlite.query", argumentsJson: "123" }],
+      ["/actions/adapter-gateway", { mode: "invoke", projectId: "proj", operation: "sqlite.query", argumentsJson: "\"hello\"" }],
+      ["/actions/adapter-gateway", { mode: "invoke", projectId: "proj", operation: "sqlite.query", argumentsJson: "{}", arguments: {} }],
+      ["/actions/adapter-gateway", { mode: "invoke", projectId: "proj", operation: "sqlite.query", argumentsJson: JSON.stringify({ value: "é".repeat(40_000) }) }],
       ["/actions/adapter-gateway", { mode: "invoke", projectId: "proj", operation: "sqlite.query", arguments: {}, capability: "write" }],
       ["/actions/adapter-gateway", { mode: "invoke", projectId: "proj", operation: "sqlite.query", arguments: {}, executable: "/bin/sh" }],
       ["/actions/adapter-gateway", { mode: "invoke", projectId: "proj", operation: "sqlite.query", arguments: {}, handler: "local_shell_run" }],
@@ -770,6 +782,82 @@ describe("Custom GPT action bridge", () => {
       expect(body.isError, `${path} ${input.mode}`).toBe(true);
       expect(body.structuredContent?.code, `${path} ${input.mode}`).toBe("INVALID_INPUT");
     }
+  });
+
+  it("translates adapter_gateway argumentsJson while preserving legacy direct HTTP arguments", async () => {
+    await fs.writeFile(
+      path.join(projectRoot, "bridge.ipynb"),
+      JSON.stringify({ cells: [], metadata: {}, nbformat: 4, nbformat_minor: 5 }),
+      "utf8",
+    );
+    const server = await startApp(makeCtx(stateDir, projectRoot));
+    stop = server.stop;
+
+    for (const [operation, argumentsJson] of [
+      ["python.profiles", "{}"],
+      ["sqlite.profiles", "{}"],
+      ["docker.profiles", "{}"],
+      ["notebook.validate", JSON.stringify({ path: "bridge.ipynb" })],
+    ] as const) {
+      const res = await postAction(server.baseUrl, "/actions/adapter-gateway", {
+        mode: "invoke",
+        projectId: "proj",
+        operation,
+        argumentsJson,
+      });
+      const body = (await res.json()) as { ok?: boolean; isError?: boolean; structuredContent?: { operation?: string } };
+      expect(body.ok, operation).toBe(true);
+      expect(body.isError, operation).not.toBe(true);
+      expect(body.structuredContent?.operation, operation).toBe(operation);
+    }
+
+    const legacyRes = await postAction(server.baseUrl, "/actions/adapter-gateway", {
+      mode: "invoke",
+      projectId: "proj",
+      operation: "python.profiles",
+      arguments: {},
+    });
+    const legacyBody = (await legacyRes.json()) as { ok?: boolean };
+    expect(legacyBody.ok).toBe(true);
+  });
+
+  it("keeps dangerous argumentsJson keys behind the existing gateway validation", async () => {
+    const server = await startApp(makeCtx(stateDir, projectRoot));
+    stop = server.stop;
+    for (const argumentsJson of [
+      "{\"__proto__\":{}}",
+      "{\"constructor\":{}}",
+      "{\"prototype\":{}}",
+      "{\"nested\":{\"__proto__\":{}}}",
+    ]) {
+      const res = await postAction(server.baseUrl, "/actions/adapter-gateway", {
+        mode: "invoke",
+        projectId: "proj",
+        operation: "python.profiles",
+        argumentsJson,
+      });
+      const body = (await res.json()) as { ok?: boolean; isError?: boolean; structuredContent?: { code?: string; error?: string } };
+      expect(body.ok).toBe(false);
+      expect(body.isError).toBe(true);
+      expect(body.structuredContent?.code).toBe("INVALID_INPUT");
+      expect(body.structuredContent?.error).toBe("argumentsJson contains invalid adapter arguments");
+    }
+  });
+
+  it("accepts nested JSON at the bridge and leaves operation-specific rejection to the existing validator", async () => {
+    const server = await startApp(makeCtx(stateDir, projectRoot));
+    stop = server.stop;
+    const res = await postAction(server.baseUrl, "/actions/adapter-gateway", {
+      mode: "invoke",
+      projectId: "proj",
+      operation: "python.profiles",
+      argumentsJson: JSON.stringify({ nested: { ok: true } }),
+    });
+    const body = (await res.json()) as { ok?: boolean; isError?: boolean; structuredContent?: { code?: string; error?: string } };
+    expect(body.ok).toBe(false);
+    expect(body.isError).toBe(true);
+    expect(body.structuredContent?.code).not.toBe("INVALID_INPUT");
+    expect(body.structuredContent?.error).toMatch(/unexpected fields/);
   });
 
   it("accepts the strict fast_forward workspace shape without exposing target fields", async () => {
