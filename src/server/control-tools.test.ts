@@ -6,6 +6,8 @@ import { createServer } from "./mcp-server.js";
 import type { Lease, ToolContext } from "../types.js";
 import { enqueue } from "../control/queue.js";
 
+const IS_MACOS = process.platform === "darwin";
+
 interface RegisteredToolLike {
   handler?: (input: Record<string, unknown>) => Promise<{
     structuredContent?: Record<string, unknown>;
@@ -262,7 +264,7 @@ describe("desktop-control tool gating", () => {
     );
   });
 
-  it("computer_request_action builds a dry-run AX resolve preview with no side effect; the action stays pending", async () => {
+  it.skipIf(!IS_MACOS)("computer_request_action builds a dry-run AX resolve preview with no side effect; the action stays pending", async () => {
     process.env.CHATGPT2CODEX_CONTROL = "1";
     process.env.CHATGPT2CODEX_CONTROL_ALLOWLIST = "Chatgpt2CodexNoSuchApp";
     const { ctx } = makeCtx(stateDir, projectRoot);

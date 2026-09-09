@@ -14,6 +14,8 @@ import {
   typeText,
 } from "./mac-input.js";
 
+const IS_MACOS = process.platform === "darwin";
+
 /**
  * These synthetic-input primitives must be entirely unavailable off macOS.
  * The CI/dev box this suite runs on is darwin, so platform is stubbed per
@@ -109,7 +111,7 @@ describe("control/mac-input (non-darwin)", () => {
  * exhaust every fallback and raise a typed, catchable error rather than
  * silently doing nothing or crashing.
  */
-describe("control/mac-input AX targeting (darwin fallback path)", () => {
+describe.skipIf(!IS_MACOS)("control/mac-input AX targeting (darwin fallback path)", () => {
   it("resolveAxElement returns a found:false preview (no throw) when the target can't be resolved", async () => {
     const result = await resolveAxElement("Chatgpt2CodexNoSuchApp", { role: "button", title: "Nonexistent" });
     expect(result.found).toBe(false);

@@ -73,8 +73,11 @@ describe("computer_screenshot full-screen sensitive-app gate", () => {
   let stateDir: string;
   let projectRoot: string;
   let fakePng: string;
+  let platformDescriptor: PropertyDescriptor;
 
   beforeEach(async () => {
+    platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
     process.env.CHATGPT2CODEX_CONTROL = "1";
     stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "chatgpt2codex-control-screenshot-"));
     projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "chatgpt2codex-control-screenshot-proj-"));
@@ -90,6 +93,7 @@ describe("computer_screenshot full-screen sensitive-app gate", () => {
   });
 
   afterEach(async () => {
+    Object.defineProperty(process, "platform", platformDescriptor);
     delete process.env.CHATGPT2CODEX_CONTROL;
     delete process.env.CHATGPT2CODEX_CONTROL_CHATGPT;
     delete process.env.CHATGPT2CODEX_CONTROL_ALLOWLIST;

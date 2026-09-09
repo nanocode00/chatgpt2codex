@@ -91,8 +91,11 @@ async function registeredTools(ctx: ToolContext): Promise<Record<string, Registe
 describe("computer_request_action immediate execution (CHATGPT2CODEX_CONTROL_CHATGPT=1)", () => {
   let stateDir: string;
   let projectRoot: string;
+  let platformDescriptor: PropertyDescriptor;
 
   beforeEach(async () => {
+    platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
     stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "chatgpt2codex-control-confirm-"));
     projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "chatgpt2codex-control-confirm-project-"));
     delete process.env.CHATGPT2CODEX_CONTROL;
@@ -107,6 +110,7 @@ describe("computer_request_action immediate execution (CHATGPT2CODEX_CONTROL_CHA
   });
 
   afterEach(async () => {
+    Object.defineProperty(process, "platform", platformDescriptor);
     delete process.env.CHATGPT2CODEX_CONTROL;
     delete process.env.CHATGPT2CODEX_CONTROL_CHATGPT;
     delete process.env.CHATGPT2CODEX_CONTROL_ALLOWLIST;
