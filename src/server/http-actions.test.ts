@@ -390,9 +390,11 @@ describe("Custom GPT action bridge", () => {
     expect((body.components.schemas.GitWorkspaceInput as { properties?: { mode?: { enum?: string[] } } }).properties?.mode?.enum).toEqual([
       "fetch",
       "fast_forward",
+      "fast_forward_from",
       "create_branch",
       "switch_branch",
     ]);
+    expect((body.components.schemas.GitWorkspaceInput as { properties?: Record<string, unknown> }).properties?.expectedTargetSha).toBeDefined();
     expect((body.components.schemas.GitPublishInput as { type?: string }).type).toBe("object");
     expect((body.components.schemas.GitPublishInput as { required?: string[] }).required).toEqual(["mode", "projectId"]);
     expect((body.components.schemas.GitPublishInput as { additionalProperties?: boolean }).additionalProperties).toBe(false);
@@ -742,6 +744,11 @@ describe("Custom GPT action bridge", () => {
       ["/actions/git-workspace", { mode: "fetch", projectId: "proj", branchName: "not-allowed" }],
       ["/actions/git-workspace", { mode: "fast_forward", projectId: "proj", branchName: "not-allowed" }],
       ["/actions/git-workspace", { mode: "fast_forward", projectId: "proj", baseBranch: "main" }],
+      ["/actions/git-workspace", { mode: "fast_forward_from", projectId: "proj", baseBranch: "main" }],
+      ["/actions/git-workspace", { mode: "fast_forward_from", projectId: "proj", expectedTargetSha: "a".repeat(40) }],
+      ["/actions/git-workspace", { mode: "fast_forward_from", projectId: "proj", baseBranch: "main", expectedTargetSha: "bad" }],
+      ["/actions/git-workspace", { mode: "fast_forward_from", projectId: "proj", baseBranch: "main", expectedTargetSha: "a".repeat(40), branchName: "not-allowed" }],
+      ["/actions/git-workspace", { mode: "fetch", projectId: "proj", expectedTargetSha: "a".repeat(40) }],
       ["/actions/git-workspace", { mode: "create_branch", projectId: "proj", branchName: "feature/x" }],
       ["/actions/git-workspace", { mode: "switch_branch", projectId: "proj", branchName: "main", baseBranch: "main" }],
       ["/actions/git-publish", { mode: "push", projectId: "proj", baseBranch: "main" }],
@@ -870,6 +877,19 @@ describe("Custom GPT action bridge", () => {
     const server = await startApp(makeCtx(stateDir, projectRoot));
     stop = server.stop;
     const res = await postAction(server.baseUrl, "/actions/git-workspace", { mode: "fast_forward", projectId: "proj" });
+    const body = (await res.json()) as { structuredContent?: { code?: string } };
+    expect(body.structuredContent?.code).not.toBe("INVALID_INPUT");
+  });
+
+  it("accepts only the flat strict fast_forward_from workspace shape", async () => {
+    const server = await startApp(makeCtx(stateDir, projectRoot));
+    stop = server.stop;
+    const res = await postAction(server.baseUrl, "/actions/git-workspace", {
+      mode: "fast_forward_from",
+      projectId: "proj",
+      baseBranch: "main",
+      expectedTargetSha: "a".repeat(40),
+    });
     const body = (await res.json()) as { structuredContent?: { code?: string } };
     expect(body.structuredContent?.code).not.toBe("INVALID_INPUT");
   });

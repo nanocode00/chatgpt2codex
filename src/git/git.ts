@@ -372,6 +372,11 @@ export interface GitFastForwardResult {
   advancedBy: number;
 }
 
+export interface GitCrossBranchFastForwardResult extends GitFastForwardResult {
+  baseBranch: string;
+  targetSha: string;
+}
+
 async function readAheadBehindAgainst(root: string, target: string): Promise<{ ahead: number; behind: number }> {
   const result = await runGit(root, ["rev-list", "--left-right", "--count", `HEAD...${target}`]);
   const [aheadRaw, behindRaw] = result.stdout.trim().split(/\s+/);
@@ -466,6 +471,67 @@ export async function gitFastForwardCurrentBranch(
     beforeSha,
     afterSha,
     advancedBy: relation.behind,
+  };
+}
+
+export async function gitFastForwardCurrentBranchFromOriginBranch(
+  root: string,
+  baseBranch: string,
+  expectedTargetSha: string,
+  mutationRunner: GitProcessRunner = runGit,
+): Promise<GitCrossBranchFastForwardResult> {
+  const branch = await currentLocalBranch(root);
+  await requireCleanWorktree(root);
+  await validateBranchName(root, baseBranch);
+  if (!/^[0-9a-fA-F]{40}$/.test(expectedTargetSha)) {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Invalid expected target SHA");
+  }
+
+  const upstreamBefore = await readGitUpstream(root);
+  const remoteRef = `refs/remotes/origin/${baseBranch}`;
+  if (!(await refExists(root, remoteRef))) {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Base branch remote-tracking ref does not exist");
+  }
+  const targetSha = (await runGit(root, ["rev-parse", "--verify", `${remoteRef}^{commit}`])).stdout.trim();
+  if (targetSha !== expectedTargetSha) {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Git target SHA changed");
+  }
+  const beforeSha = (await runGit(root, ["rev-parse", "HEAD"])).stdout.trim();
+  const relation = await readAheadBehindAgainst(root, targetSha);
+  if (relation.ahead > 0 && relation.behind > 0) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Current branch has diverged from base branch");
+  if (relation.ahead > 0) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Current branch has local commits");
+
+  if (beforeSha !== targetSha) {
+    try {
+      await runGit(root, ["merge-base", "--is-ancestor", "HEAD", targetSha]);
+    } catch {
+      throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Current branch is not an ancestor of base branch");
+    }
+    try {
+      await mutationRunner(root, ["merge", "--ff-only", targetSha]);
+    } catch {
+      throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "Git fast-forward failed");
+    }
+  }
+
+  const afterBranch = await currentLocalBranch(root);
+  const afterSha = (await runGit(root, ["rev-parse", "HEAD"])).stdout.trim();
+  const upstreamAfter = await readGitUpstream(root);
+  await requireCleanWorktree(root);
+  const targetAfter = (await runGit(root, ["rev-parse", "--verify", `${remoteRef}^{commit}`])).stdout.trim();
+  if (afterBranch !== branch || afterSha !== targetSha || upstreamAfter !== upstreamBefore || targetAfter !== targetSha) {
+    throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "Git cross-branch fast-forward postcondition verification failed");
+  }
+
+  return {
+    branch,
+    baseBranch,
+    updated: beforeSha !== targetSha,
+    alreadyUpToDate: beforeSha === targetSha,
+    beforeSha,
+    afterSha,
+    targetSha,
+    advancedBy: beforeSha === targetSha ? 0 : relation.behind,
   };
 }
 

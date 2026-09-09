@@ -57,6 +57,7 @@ import {
   gitCreateBranchFromOrigin,
   gitSwitchLocalBranch,
   gitFastForwardCurrentBranch,
+  gitFastForwardCurrentBranchFromOriginBranch,
   gitPushCurrentBranch,
   gitCreatePullRequest,
   gitInspectPullRequest,
@@ -2737,12 +2738,13 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
     "git_workspace",
     {
       title: "Manage safe Git workspace state",
-      description: "Fetch origin, fast-forward the current branch, or create/switch local branches using fixed Git operations. Requires a full-write lease.",
+      description: "Fetch origin, fast-forward the current branch from its matching origin branch or an exact inspected origin/base SHA, or create/switch local branches using fixed Git operations. Requires a full-write lease.",
       annotations: LOCAL_WRITE_ANNOTATIONS,
       _meta: chatGptToolMeta("Updating Git workspace...", "Git workspace updated"),
       inputSchema: z.discriminatedUnion("mode", [
         z.object({ mode: z.literal("fetch"), projectId: z.string() }).strict(),
         z.object({ mode: z.literal("fast_forward"), projectId: z.string() }).strict(),
+        z.object({ mode: z.literal("fast_forward_from"), projectId: z.string(), baseBranch: z.string(), expectedTargetSha: z.string().regex(/^[0-9a-fA-F]{40}$/) }).strict(),
         z.object({ mode: z.literal("create_branch"), projectId: z.string(), branchName: z.string(), baseBranch: z.string() }).strict(),
         z.object({ mode: z.literal("switch_branch"), projectId: z.string(), branchName: z.string() }).strict(),
       ]),
@@ -2758,6 +2760,10 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
         if (input.mode === "fast_forward") {
           const result = await gitFastForwardCurrentBranch(entry.root);
           return makeResult({ ...result }, result.updated ? `Fast-forwarded ${result.branch}.` : `${result.branch} is already up to date.`);
+        }
+        if (input.mode === "fast_forward_from") {
+          const result = await gitFastForwardCurrentBranchFromOriginBranch(entry.root, input.baseBranch, input.expectedTargetSha);
+          return makeResult({ ...result }, result.updated ? `Fast-forwarded ${result.branch} from origin/${result.baseBranch}.` : `${result.branch} is already at the requested target.`);
         }
         if (input.mode === "create_branch") {
           const result = await gitCreateBranchFromOrigin(entry.root, input.branchName, input.baseBranch);
