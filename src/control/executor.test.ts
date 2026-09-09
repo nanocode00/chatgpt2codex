@@ -79,8 +79,11 @@ describe("control/executor", () => {
   let stateDir: string;
   let events: Array<Record<string, unknown>>;
   let ctx: ToolContext;
+  let platformDescriptor: PropertyDescriptor;
 
   beforeEach(async () => {
+    platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
     stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "chatgpt2codex-control-executor-"));
     events = [];
     ctx = makeCtx(stateDir, events);
@@ -94,6 +97,7 @@ describe("control/executor", () => {
   });
 
   afterEach(async () => {
+    Object.defineProperty(process, "platform", platformDescriptor);
     delete process.env.CHATGPT2CODEX_CONTROL_ALLOWLIST;
     vi.clearAllMocks();
     await fs.rm(stateDir, { recursive: true, force: true });
