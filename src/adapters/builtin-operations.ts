@@ -1,6 +1,7 @@
 import { inspectSQLite, listSQLiteProfiles, querySQLite, SQLITE_DEFAULT_MAX_ROWS, SQLITE_MAX_ROWS } from "../database/sqlite.js";
 import { dockerLogs, dockerStart, dockerStatus, dockerStop, listDockerProfiles, DOCKER_LOG_DEFAULT_LINES, DOCKER_LOG_MAX_LINES } from "../docker/docker.js";
 import { executeNotebook, validateNotebook } from "../notebook/notebook.js";
+import { inspectNpmProject, installNpmDependencies, NPM_MAX_PACKAGE_SPEC_LENGTH, NPM_MAX_PACKAGES, removeNpmDependencies } from "../npm/npm-dependencies.js";
 import { executePythonScript } from "../python/python-execute.js";
 import { parsePythonRuntimeProfiles } from "../python/runtime-profiles.js";
 import { assertRemoteExecAllowed } from "../server/remote-safety.js";
@@ -24,6 +25,61 @@ function requiredString(value: unknown, name: string, maxLength = 256): string {
 }
 
 const BUILT_IN_OPERATIONS = [
+  {
+    id: "npm.inspect",
+    adapterId: "npm",
+    description: "Inspect bounded npm dependency metadata for the selected project without exposing scripts, paths, config, or credentials.",
+    capability: "read",
+    availability: "always",
+    input: Object.freeze([]),
+    validateInput(value) {
+      strictKeys(value, []);
+      return {};
+    },
+    handler(context) {
+      return inspectNpmProject(context.projectRoot);
+    },
+  },
+  {
+    id: "npm.install",
+    adapterId: "npm",
+    description: "Install validated npm registry dependencies in the selected project with lifecycle scripts disabled and fixed server-owned arguments.",
+    capability: "write",
+    availability: "remote-exec",
+    input: Object.freeze([
+      { name: "packages", type: "array", required: true, minItems: 1, maxItems: NPM_MAX_PACKAGES, itemType: "string", itemMaxLength: NPM_MAX_PACKAGE_SPEC_LENGTH },
+      { name: "dev", type: "boolean", required: true },
+    ]),
+    validateInput(value) {
+      strictKeys(value, ["packages", "dev"]);
+      if (typeof value.dev !== "boolean") reject("Safe adapter operation argument dev is invalid");
+      if (!Array.isArray(value.packages)) reject("Safe adapter operation argument packages is invalid");
+      return { packages: value.packages, dev: value.dev };
+    },
+    handler(context, input) {
+      assertRemoteExecAllowed(context.ctx, "npm_install");
+      return installNpmDependencies(context.projectRoot, input.packages, input.dev as boolean);
+    },
+  },
+  {
+    id: "npm.remove",
+    adapterId: "npm",
+    description: "Remove validated npm registry dependencies from the selected project with lifecycle scripts disabled and fixed server-owned arguments.",
+    capability: "write",
+    availability: "remote-exec",
+    input: Object.freeze([
+      { name: "packages", type: "array", required: true, minItems: 1, maxItems: NPM_MAX_PACKAGES, itemType: "string", itemMaxLength: NPM_MAX_PACKAGE_SPEC_LENGTH },
+    ]),
+    validateInput(value) {
+      strictKeys(value, ["packages"]);
+      if (!Array.isArray(value.packages)) reject("Safe adapter operation argument packages is invalid");
+      return { packages: value.packages };
+    },
+    handler(context, input) {
+      assertRemoteExecAllowed(context.ctx, "npm_remove");
+      return removeNpmDependencies(context.projectRoot, input.packages);
+    },
+  },
   {
     id: "docker.profiles",
     adapterId: "docker",

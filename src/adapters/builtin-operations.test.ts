@@ -36,13 +36,16 @@ describe("built-in safe adapter operations", () => {
       "docker.stop",
       "notebook.execute",
       "notebook.validate",
+      "npm.inspect",
+      "npm.install",
+      "npm.remove",
       "python.execute",
       "python.profiles",
       "sqlite.inspect",
       "sqlite.profiles",
       "sqlite.query",
     ]);
-    expect(catalog.operations.map((operation) => operation.adapter)).toEqual(["docker", "docker", "docker", "docker", "docker", "notebook", "notebook", "python", "python", "sqlite", "sqlite", "sqlite"]);
+    expect(catalog.operations.map((operation) => operation.adapter)).toEqual(["docker", "docker", "docker", "docker", "docker", "notebook", "notebook", "npm", "npm", "npm", "python", "python", "sqlite", "sqlite", "sqlite"]);
     const serialized = JSON.stringify(catalog);
     expect(serialized).not.toContain("super-secret");
     expect(serialized).not.toContain("secret/database.db");
@@ -71,6 +74,29 @@ describe("built-in safe adapter operations", () => {
     expect(() => execute.validateInput({ path: "analysis.ipynb", command: "python" })).toThrow(/unexpected fields/);
   });
 
+  it("keeps npm capabilities and validators narrow", () => {
+    const registry = registryForStrictValidatorTests();
+    const inspect = registry.get("npm.inspect");
+    expect(inspect.capability).toBe("read");
+    expect(inspect.availability).toBe("always");
+    expect(inspect.validateInput({})).toEqual({});
+    expect(() => inspect.validateInput({ cwd: "/tmp" })).toThrow(/unexpected fields/);
+
+    const install = registry.get("npm.install");
+    expect(install.capability).toBe("write");
+    expect(install.availability).toBe("remote-exec");
+    expect(install.validateInput({ packages: ["pg"], dev: false })).toEqual({ packages: ["pg"], dev: false });
+    for (const key of ["cwd", "projectRoot", "argv", "env", "flags", "registry", "prefix", "workspace", "global"]) {
+      expect(() => install.validateInput({ packages: ["pg"], dev: false, [key]: "x" })).toThrow(/unexpected fields/);
+    }
+
+    const remove = registry.get("npm.remove");
+    expect(remove.capability).toBe("write");
+    expect(remove.availability).toBe("remote-exec");
+    expect(remove.validateInput({ packages: ["pg"] })).toEqual({ packages: ["pg"] });
+    expect(() => remove.validateInput({ packages: ["pg"], path: "/tmp" })).toThrow(/unexpected fields/);
+  });
+
   it("filters the actual built-in catalog by remote-exec availability", () => {
     const remote = { remote: true } as ToolContext;
     delete process.env.CHATGPT2CODEX_REMOTE_EXEC;
@@ -80,6 +106,7 @@ describe("built-in safe adapter operations", () => {
       "docker.profiles",
       "docker.status",
       "notebook.validate",
+      "npm.inspect",
       "python.profiles",
       "sqlite.inspect",
       "sqlite.profiles",
@@ -96,6 +123,9 @@ describe("built-in safe adapter operations", () => {
       "docker.stop",
       "notebook.execute",
       "notebook.validate",
+      "npm.inspect",
+      "npm.install",
+      "npm.remove",
       "python.execute",
       "python.profiles",
       "sqlite.inspect",

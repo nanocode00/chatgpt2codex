@@ -5,11 +5,15 @@ export type SafeAdapterOperationAvailability = "always" | "remote-exec";
 
 export interface SafeAdapterCatalogField {
   name: string;
-  type: "string" | "integer" | "boolean" | "object";
+  type: "string" | "integer" | "boolean" | "object" | "array";
   required: boolean;
   min?: number;
   max?: number;
   maxLength?: number;
+  minItems?: number;
+  maxItems?: number;
+  itemType?: "string";
+  itemMaxLength?: number;
 }
 
 export interface SafeAdapterOperationContext {

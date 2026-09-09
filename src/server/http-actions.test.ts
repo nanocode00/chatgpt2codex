@@ -786,6 +786,11 @@ describe("Custom GPT action bridge", () => {
 
   it("translates adapter_gateway argumentsJson while preserving legacy direct HTTP arguments", async () => {
     await fs.writeFile(
+      path.join(projectRoot, "package.json"),
+      JSON.stringify({ name: "bridge-fixture", dependencies: { pg: "^8.16.0" }, devDependencies: {} }),
+      "utf8",
+    );
+    await fs.writeFile(
       path.join(projectRoot, "bridge.ipynb"),
       JSON.stringify({ cells: [], metadata: {}, nbformat: 4, nbformat_minor: 5 }),
       "utf8",
@@ -797,6 +802,7 @@ describe("Custom GPT action bridge", () => {
       ["python.profiles", "{}"],
       ["sqlite.profiles", "{}"],
       ["docker.profiles", "{}"],
+      ["npm.inspect", "{}"],
       ["notebook.validate", JSON.stringify({ path: "bridge.ipynb" })],
     ] as const) {
       const res = await postAction(server.baseUrl, "/actions/adapter-gateway", {
