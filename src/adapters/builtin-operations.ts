@@ -1,3 +1,4 @@
+import { inspectPostgres, listPostgresProfiles, POSTGRES_DEFAULT_MAX_ROWS, POSTGRES_MAX_ROWS, queryPostgres } from "../database/postgres.js";
 import { inspectSQLite, listSQLiteProfiles, querySQLite, SQLITE_DEFAULT_MAX_ROWS, SQLITE_MAX_ROWS } from "../database/sqlite.js";
 import { dockerLogs, dockerStart, dockerStatus, dockerStop, listDockerProfiles, DOCKER_LOG_DEFAULT_LINES, DOCKER_LOG_MAX_LINES } from "../docker/docker.js";
 import { executeNotebook, validateNotebook } from "../notebook/notebook.js";
@@ -248,6 +249,59 @@ const BUILT_IN_OPERATIONS = [
     handler(context, input) {
       assertRemoteExecAllowed(context.ctx, "notebook_execute");
       return executeNotebook(context.projectRoot, input.path as string, { runtimeProfile: input.runtimeProfile as string | undefined });
+    },
+  },
+  {
+    id: "postgres.profiles",
+    adapterId: "postgres",
+    description: "List operator-configured PostgreSQL profile aliases without exposing connection or project details.",
+    capability: "read",
+    availability: "always",
+    input: Object.freeze([]),
+    validateInput(value) {
+      strictKeys(value, []);
+      return {};
+    },
+    handler() {
+      return listPostgresProfiles();
+    },
+  },
+  {
+    id: "postgres.inspect",
+    adapterId: "postgres",
+    description: "Inspect bounded PostgreSQL table/view column metadata from allowlisted schemas.",
+    capability: "read",
+    availability: "always",
+    input: Object.freeze([{ name: "profile", type: "string", required: true, maxLength: 64 }]),
+    validateInput(value) {
+      strictKeys(value, ["profile"]);
+      return { profile: requiredString(value.profile, "profile", 64) };
+    },
+    handler(context, input) {
+      return inspectPostgres(context.projectRoot, input.profile as string);
+    },
+  },
+  {
+    id: "postgres.query",
+    adapterId: "postgres",
+    description: "Run one bounded read-only PostgreSQL query using an operator-configured profile.",
+    capability: "read",
+    availability: "always",
+    input: Object.freeze([
+      { name: "profile", type: "string", required: true, maxLength: 64 },
+      { name: "sql", type: "string", required: true, maxLength: 65536 },
+      { name: "maxRows", type: "integer", required: false, min: 1, max: POSTGRES_MAX_ROWS },
+    ]),
+    validateInput(value) {
+      strictKeys(value, ["profile", "sql", "maxRows"]);
+      const profile = requiredString(value.profile, "profile", 64);
+      const sql = requiredString(value.sql, "sql", 65536);
+      const maxRows = value.maxRows === undefined ? POSTGRES_DEFAULT_MAX_ROWS : value.maxRows;
+      if (!Number.isInteger(maxRows) || Number(maxRows) < 1 || Number(maxRows) > POSTGRES_MAX_ROWS) reject("Safe adapter operation argument maxRows is invalid");
+      return { profile, sql, maxRows: Number(maxRows) };
+    },
+    handler(context, input) {
+      return queryPostgres(context.projectRoot, input.profile as string, input.sql as string, input.maxRows as number);
     },
   },
   {

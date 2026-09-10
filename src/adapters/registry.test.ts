@@ -7,7 +7,12 @@ const fake = (id: string): SafeAdapterDefinition => Object.freeze({ id });
 
 describe("StaticAdapterRegistry", () => {
   it("contains statically registered built-in adapters with deterministic lookup", () => {
-    expect(builtInAdapterRegistry.ids).toEqual(["python", "sqlite"]);
+    expect(builtInAdapterRegistry.ids).toEqual(["postgres", "python", "sqlite"]);
+    expect(builtInAdapterRegistry.get("postgres").operations).toEqual({
+      profiles: { capabilities: ["read"] },
+      inspect: { capabilities: ["read"] },
+      query: { capabilities: ["read"] },
+    });
     expect(builtInAdapterRegistry.get("python").id).toBe("python");
     expect(builtInAdapterRegistry.get("python").profiles?.reservedAliases).toContain("auto");
     expect(builtInAdapterRegistry.get("sqlite").id).toBe("sqlite");
