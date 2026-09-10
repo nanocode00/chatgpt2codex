@@ -36,7 +36,7 @@ export const POSTGRES_PROFILE_SPEC: OperatorProfileSpec<PostgresProfile> = Objec
       invalidProfileValue("connectionStringEnv is invalid");
     }
     const schemas = record.schemas === undefined ? ["public"] : record.schemas;
-    if (!Array.isArray(schemas) || schemas.length === 0 || schemas.length > 32 || schemas.some((schema) => typeof schema !== "string" || !validSchema(schema))) {
+    if (!Array.isArray(schemas) || schemas.length === 0 || schemas.length > 16 || schemas.some((schema) => typeof schema !== "string" || !validSchema(schema))) {
       invalidProfileValue("schemas must contain only allowlisted user schema names");
     }
     if (new Set(schemas.map((schema) => schema.toLowerCase())).size !== schemas.length) invalidProfileValue("schemas must not contain duplicates");

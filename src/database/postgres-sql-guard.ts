@@ -8,9 +8,13 @@ const BANNED = new Set([
   "vacuum", "analyze", "reindex", "cluster", "refresh", "listen", "unlisten", "notify", "lock",
 ]);
 const RISKY_FUNCTIONS = new Set([
-  "nextval", "setval", "pg_notify", "pg_cancel_backend", "pg_terminate_backend", "pg_reload_conf",
+  "nextval", "setval", "set_config", "pg_notify", "pg_cancel_backend", "pg_terminate_backend", "pg_reload_conf",
   "pg_rotate_logfile", "pg_read_file", "pg_write_file", "pg_ls_dir", "lo_import", "lo_export",
 ]);
+
+function isRiskyFunction(name: string): boolean {
+  return RISKY_FUNCTIONS.has(name) || name.startsWith("pg_advisory_") || name.startsWith("pg_try_advisory_");
+}
 
 function reject(): never {
   throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "PostgreSQL query is not allowed by the read-only SQL policy");
@@ -24,6 +28,7 @@ function tokenize(sql: string): { tokens: string[]; normalized: string } {
   while (i < sql.length) {
     const ch = sql[i]!;
     const next = sql[i + 1];
+    if ((ch === "u" || ch === "U") && next === "&" && (sql[i + 2] === "'" || sql[i + 2] === '"')) reject();
     if (/\s/.test(ch)) { normalized += " "; i++; continue; }
     if (ch === "-" && next === "-") {
       i += 2;
@@ -80,7 +85,7 @@ function tokenize(sql: string): { tokens: string[]; normalized: string } {
       }
       if (!closed) reject();
       const lowerIdentifier = identifier.toLowerCase();
-      if (RISKY_FUNCTIONS.has(lowerIdentifier) || lowerIdentifier.startsWith("pg_advisory_lock") || lowerIdentifier.startsWith("pg_try_advisory_lock")) reject();
+      if (isRiskyFunction(lowerIdentifier)) reject();
       normalized += " \"identifier\" ";
       continue;
     }
@@ -134,7 +139,8 @@ export function assertSafePostgresReadOnlySql(sql: string): string {
     if (BANNED.has(token)) reject();
     if (token === "into") reject();
     if (token === "for" && ["update", "share", "no", "key"].includes(effective[i + 1] ?? "")) reject();
-    if (RISKY_FUNCTIONS.has(token) || token.startsWith("pg_advisory_lock") || token.startsWith("pg_try_advisory_lock")) reject();
+    if (token === "uescape") reject();
+    if (isRiskyFunction(token)) reject();
   }
   return sql.replace(/;\s*$/, "");
 }

@@ -58,7 +58,8 @@ async function resolveProfile(projectRoot: string, profile: string, env: NodeJS.
 
 function sanitizeValue(value: unknown, depth = 0): unknown {
   if (depth > 4) return "[truncated]";
-  if (value === null || typeof value === "boolean" || typeof value === "number") return value;
+  if (value === null || typeof value === "boolean") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value : { type: "number", value: String(value) };
   if (typeof value === "bigint") return { type: "bigint", value: value.toString() };
   if (typeof value === "string") return value.length > MAX_STRING ? `${value.slice(0, MAX_STRING)}…` : value;
   if (value instanceof Date) return value.toISOString();
@@ -72,9 +73,47 @@ function sanitizeValue(value: unknown, depth = 0): unknown {
   return String(value).slice(0, MAX_STRING);
 }
 
-function boundPayload<T>(payload: T): T {
-  const bytes = Buffer.byteLength(JSON.stringify(payload), "utf8");
-  if (bytes > MAX_OUTPUT_BYTES) reject("PostgreSQL operation result exceeded the output limit");
+function payloadBytes(payload: unknown): number {
+  return Buffer.byteLength(JSON.stringify(payload), "utf8");
+}
+
+type InspectObject = { schema: string; name: string; type: string; columns: Array<{ name: string; dataType: string; nullable: boolean }> };
+
+function boundInspectPayload(objects: InspectObject[], alreadyTruncated: boolean) {
+  const bounded: InspectObject[] = [];
+  let truncated = alreadyTruncated;
+  for (const object of objects) {
+    const next: InspectObject = { schema: object.schema, name: object.name, type: object.type, columns: [] };
+    for (const column of object.columns) {
+      next.columns.push(column);
+      const candidate = { engine: "postgres" as const, objects: [...bounded, next], truncated: alreadyTruncated };
+      if (payloadBytes(candidate) > MAX_OUTPUT_BYTES) {
+        next.columns.pop();
+        truncated = true;
+        break;
+      }
+    }
+    if (next.columns.length === 0 && object.columns.length > 0) { truncated = true; break; }
+    bounded.push(next);
+    if (next.columns.length < object.columns.length) { truncated = true; break; }
+  }
+  if (bounded.length < objects.length) truncated = true;
+  const payload = { engine: "postgres" as const, objects: bounded, truncated };
+  if (payloadBytes(payload) > MAX_OUTPUT_BYTES) reject("PostgreSQL operation result envelope exceeded the output limit");
+  return payload;
+}
+
+function boundQueryPayload(columns: string[], rows: unknown[][], maxRows: number, alreadyTruncated: boolean) {
+  const boundedRows: unknown[][] = [];
+  let truncated = alreadyTruncated;
+  for (const row of rows) {
+    const candidate = { engine: "postgres" as const, columns, rows: [...boundedRows, row], truncated: alreadyTruncated, maxRows };
+    if (payloadBytes(candidate) > MAX_OUTPUT_BYTES) { truncated = true; break; }
+    boundedRows.push(row);
+  }
+  if (boundedRows.length < rows.length) truncated = true;
+  const payload = { engine: "postgres" as const, columns, rows: boundedRows, truncated, maxRows };
+  if (payloadBytes(payload) > MAX_OUTPUT_BYTES) reject("PostgreSQL operation result envelope exceeded the output limit");
   return payload;
 }
 
@@ -112,8 +151,24 @@ async function withReadOnlyClient<T>(projectRoot: string, profileAlias: string, 
   }
 }
 
-export function listPostgresProfiles(env: NodeJS.ProcessEnv = process.env): { engine: "postgres"; profiles: string[] } {
-  return { engine: "postgres", profiles: parsePostgresProfiles(env).aliases };
+export async function listPostgresProfiles(projectRoot: string, env: NodeJS.ProcessEnv = process.env): Promise<{ engine: "postgres"; profiles: string[] }> {
+  let actualRoot: string;
+  try {
+    actualRoot = await fs.realpath(projectRoot);
+  } catch {
+    reject("PostgreSQL selected project binding is invalid");
+  }
+  const parsed = parsePostgresProfiles(env);
+  const profiles: string[] = [];
+  for (const alias of parsed.aliases) {
+    const descriptor = parsed.profiles.get(alias)!;
+    try {
+      if (await fs.realpath(descriptor.projectRoot) === actualRoot) profiles.push(alias);
+    } catch {
+      // Invalid or unavailable paths are hidden rather than exposed.
+    }
+  }
+  return { engine: "postgres", profiles };
 }
 
 export async function inspectPostgres(projectRoot: string, profile: string, options: PostgresRunOptions = {}) {
@@ -140,7 +195,7 @@ export async function inspectPostgres(projectRoot: string, profile: string, opti
       if (object.columns.length >= MAX_COLUMNS_PER_OBJECT) { truncated = true; continue; }
       object.columns.push({ name: row.column_name, dataType: row.data_type, nullable: row.is_nullable === "YES" });
     }
-    return boundPayload({ engine: "postgres" as const, objects: [...objects.values()], truncated });
+    return boundInspectPayload([...objects.values()], truncated);
   });
 }
 
@@ -153,12 +208,6 @@ export async function queryPostgres(projectRoot: string, profile: string, sql: s
     if (result.fields.length > MAX_COLUMNS) reject("PostgreSQL query returned too many columns");
     const over = result.rows.length > maxRows;
     const rows = (over ? result.rows.slice(0, maxRows) : result.rows).map((row) => row.map((value) => sanitizeValue(value)));
-    return boundPayload({
-      engine: "postgres" as const,
-      columns: result.fields.map((field) => field.name),
-      rows,
-      truncated: over,
-      maxRows,
-    });
+    return boundQueryPayload(result.fields.map((field) => field.name), rows, maxRows, over);
   });
 }

@@ -262,8 +262,8 @@ const BUILT_IN_OPERATIONS = [
       strictKeys(value, []);
       return {};
     },
-    handler() {
-      return listPostgresProfiles();
+    handler(context) {
+      return listPostgresProfiles(context.projectRoot);
     },
   },
   {

@@ -23,6 +23,7 @@ describe("PostgreSQL profiles", () => {
     { projectRoot: "/srv/app", connectionStringEnv: "APP_DB_URL", schemas: ["pg_catalog"] },
     { projectRoot: "/srv/app", connectionStringEnv: "APP_DB_URL", schemas: ["information_schema"] },
     { projectRoot: "/srv/app", connectionStringEnv: "APP_DB_URL", dsn: "postgres://secret" },
+    { projectRoot: "/srv/app", connectionStringEnv: "APP_DB_URL", schemas: Array.from({ length: 17 }, (_, i) => `s${i}`) },
   ])("rejects unsafe profile values %#", (profile) => {
     expect(() => parsePostgresProfiles(env({ app: profile }))).toThrow(/PostgreSQL profile config invalid/);
   });
