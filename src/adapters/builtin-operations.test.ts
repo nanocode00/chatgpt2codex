@@ -39,13 +39,16 @@ describe("built-in safe adapter operations", () => {
       "npm.inspect",
       "npm.install",
       "npm.remove",
+      "postgres.inspect",
+      "postgres.profiles",
+      "postgres.query",
       "python.execute",
       "python.profiles",
       "sqlite.inspect",
       "sqlite.profiles",
       "sqlite.query",
     ]);
-    expect(catalog.operations.map((operation) => operation.adapter)).toEqual(["docker", "docker", "docker", "docker", "docker", "notebook", "notebook", "npm", "npm", "npm", "python", "python", "sqlite", "sqlite", "sqlite"]);
+    expect(catalog.operations.map((operation) => operation.adapter)).toEqual(["docker", "docker", "docker", "docker", "docker", "notebook", "notebook", "npm", "npm", "npm", "postgres", "postgres", "postgres", "python", "python", "sqlite", "sqlite", "sqlite"]);
     const serialized = JSON.stringify(catalog);
     expect(serialized).not.toContain("super-secret");
     expect(serialized).not.toContain("secret/database.db");
@@ -107,6 +110,9 @@ describe("built-in safe adapter operations", () => {
       "docker.status",
       "notebook.validate",
       "npm.inspect",
+      "postgres.inspect",
+      "postgres.profiles",
+      "postgres.query",
       "python.profiles",
       "sqlite.inspect",
       "sqlite.profiles",
@@ -126,6 +132,9 @@ describe("built-in safe adapter operations", () => {
       "npm.inspect",
       "npm.install",
       "npm.remove",
+      "postgres.inspect",
+      "postgres.profiles",
+      "postgres.query",
       "python.execute",
       "python.profiles",
       "sqlite.inspect",
@@ -157,6 +166,29 @@ describe("built-in safe adapter operations", () => {
     expect(() => query.validateInput({ profile: "app", sql: "SELECT 1", executable: "/bin/sh" })).toThrow(/unexpected fields/);
     expect(() => query.validateInput({ profile: "app", sql: "SELECT 1", capability: "write" })).toThrow(/unexpected fields/);
     expect(() => query.validateInput({ profile: "app", sql: "SELECT 1", handler: "local_shell_run" })).toThrow(/unexpected fields/);
+  });
+
+  it("keeps PostgreSQL operations read-only, always available, and strict", () => {
+    const registry = registryForStrictValidatorTests();
+    const profiles = registry.get("postgres.profiles");
+    expect(profiles.capability).toBe("read");
+    expect(profiles.availability).toBe("always");
+    expect(profiles.validateInput({})).toEqual({});
+    expect(() => profiles.validateInput({ connectionString: "postgres://secret" })).toThrow(/unexpected fields/);
+
+    const inspect = registry.get("postgres.inspect");
+    expect(inspect.capability).toBe("read");
+    expect(inspect.availability).toBe("always");
+    expect(inspect.validateInput({ profile: "app" })).toEqual({ profile: "app" });
+    expect(() => inspect.validateInput({ profile: "app", schema: "public" })).toThrow(/unexpected fields/);
+
+    const query = registry.get("postgres.query");
+    expect(query.capability).toBe("read");
+    expect(query.availability).toBe("always");
+    expect(query.validateInput({ profile: "app", sql: "SELECT 1" })).toEqual({ profile: "app", sql: "SELECT 1", maxRows: 100 });
+    expect(query.validateInput({ profile: "app", sql: "SELECT 1", maxRows: 200 })).toEqual({ profile: "app", sql: "SELECT 1", maxRows: 200 });
+    expect(() => query.validateInput({ profile: "app", sql: "SELECT 1", maxRows: 201 })).toThrow(/maxRows/);
+    expect(() => query.validateInput({ profile: "app", sql: "SELECT 1", connectionString: "postgres://secret" })).toThrow(/unexpected fields/);
   });
 
   it("keeps Docker validators strict and registers only bounded read plus start/stop v1", () => {
