@@ -71,7 +71,7 @@ describe("Python runtime profile config", () => {
     await expect(resolvePythonRuntimeProfile("missing", { env })).rejects.toMatchObject({ code: ErrorCode.COMMAND_NOT_ALLOWED });
   });
 
-  it("rejects missing and symlinked executables", async () => {
+  it("rejects missing executables and accepts symlinks to executable files", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "chatgpt2codex-python-profile-"));
     tempDirs.push(dir);
     const target = path.join(dir, "python-real");
@@ -84,6 +84,25 @@ describe("Python runtime profile config", () => {
     })).rejects.toMatchObject({ code: ErrorCode.COMMAND_NOT_ALLOWED });
     await expect(resolvePythonRuntimeProfile("linked", {
       env: { [PYTHON_RUNTIME_PROFILES_ENV]: JSON.stringify({ linked: link }) },
+      platform: "linux",
+    })).resolves.toBe(link);
+  });
+
+  it("rejects broken symlinks and symlinks to non-files", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "chatgpt2codex-python-profile-"));
+    tempDirs.push(dir);
+    const broken = path.join(dir, "python-broken");
+    const directory = path.join(dir, "runtime-dir");
+    const directoryLink = path.join(dir, "python-dir-link");
+    await fs.symlink(path.join(dir, "missing-target"), broken);
+    await fs.mkdir(directory);
+    await fs.symlink(directory, directoryLink);
+    await expect(resolvePythonRuntimeProfile("broken", {
+      env: { [PYTHON_RUNTIME_PROFILES_ENV]: JSON.stringify({ broken }) },
+      platform: "linux",
+    })).rejects.toMatchObject({ code: ErrorCode.COMMAND_NOT_ALLOWED });
+    await expect(resolvePythonRuntimeProfile("directory", {
+      env: { [PYTHON_RUNTIME_PROFILES_ENV]: JSON.stringify({ directory: directoryLink }) },
       platform: "linux",
     })).rejects.toMatchObject({ code: ErrorCode.COMMAND_NOT_ALLOWED });
   });

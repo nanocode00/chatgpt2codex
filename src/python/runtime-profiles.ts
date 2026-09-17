@@ -50,11 +50,15 @@ export async function resolvePythonRuntimeProfile(
   const profiles = parsePythonRuntimeProfiles(options.env);
   const executable = profiles.paths.get(alias);
   if (!executable) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, `Python runtime profile '${alias}' is not configured`);
-  const st = await fs.lstat(executable).catch(() => null);
-  if (!st?.isFile() || st.isSymbolicLink()) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, `Python runtime profile '${alias}' is unavailable`);
+  const resolvedExecutable = await fs.realpath(executable).catch(() => null);
+  if (!resolvedExecutable) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, `Python runtime profile '${alias}' is unavailable`);
+  const st = await fs.stat(resolvedExecutable).catch(() => null);
+  if (!st?.isFile()) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, `Python runtime profile '${alias}' is unavailable`);
   if ((options.platform ?? process.platform) !== "win32") {
-    try { await fs.access(executable, fsConstants.X_OK); }
+    try { await fs.access(resolvedExecutable, fsConstants.X_OK); }
     catch { throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, `Python runtime profile '${alias}' is unavailable`); }
   }
+  // Keep the operator-configured path for spawning. venv/conda launchers are
+  // commonly symlinks, and Python uses that path to discover its environment.
   return executable;
 }
