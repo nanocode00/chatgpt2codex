@@ -745,6 +745,39 @@ export async function gitInspectPullRequest(
   throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "GitHub PR inspection retry state was invalid");
 }
 
+export interface GitPrDiffResult {
+  number: number;
+  url: string;
+  headSha: string;
+  baseBranch: string;
+  headBranch: string;
+  diff: string;
+}
+
+export async function gitReadPullRequestDiff(
+  root: string,
+  prNumber: number,
+  ghRunner: GitProcessRunner = runGh,
+): Promise<GitPrDiffResult> {
+  assertPrNumber(prNumber);
+  const repository = await githubRepositoryForRoot(root);
+  const inspection = await gitInspectPullRequest(root, prNumber, ghRunner, async () => undefined);
+  try {
+    const response = await ghRunner(root, ["pr", "diff", String(prNumber), "--repo", repository, "--patch"]);
+    return {
+      number: inspection.number,
+      url: inspection.url,
+      headSha: inspection.headSha,
+      baseBranch: inspection.baseBranch,
+      headBranch: inspection.headBranch,
+      diff: redact(response.stdout),
+    };
+  } catch (err) {
+    if (err instanceof DomainError) throw err;
+    throw sanitizedProcessError("GitHub PR diff", err);
+  }
+}
+
 export interface GitPrMergeResult {
   merged: true;
   alreadyMerged: boolean;

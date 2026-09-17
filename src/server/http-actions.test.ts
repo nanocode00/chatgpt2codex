@@ -407,6 +407,7 @@ describe("Custom GPT action bridge", () => {
     expect((body.components.schemas.GitPrInput as { type?: string }).type).toBe("object");
     expect((body.components.schemas.GitPrInput as { required?: string[] }).required).toEqual(["mode", "projectId", "prNumber"]);
     expect((body.components.schemas.GitPrInput as { additionalProperties?: boolean }).additionalProperties).toBe(false);
+    expect((((body.components.schemas.GitPrInput as { properties?: Record<string, { enum?: string[] }> }).properties?.mode?.enum) ?? [])).toContain("diff");
     expect((body.components.schemas.GitPrInput as { oneOf?: unknown }).oneOf).toBeUndefined();
     expect((body.components.schemas.GitPrInput as { anyOf?: unknown }).anyOf).toBeUndefined();
     expect((body.components.schemas.GitPrInput as { discriminator?: unknown }).discriminator).toBeUndefined();

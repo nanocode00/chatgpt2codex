@@ -379,8 +379,8 @@ const ACTION_ROUTES: ActionRoute[] = [
     path: "/actions/git-pr",
     tool: "git_pr",
     operationId: "git_pr",
-    summary: "Inspect, review, or safely merge a GitHub pull request",
-    description: "Inspect PR state read-only, approve/request changes against an exact inspected head SHA, or merge with existing remote-write authorization.",
+    summary: "Inspect, diff, review, or safely merge a GitHub pull request",
+    description: "Inspect PR state or read its remote patch without switching the local branch, approve/request changes against an exact inspected head SHA, or merge with existing remote-write authorization.",
     schema: "GitPrInput",
   },
   {
@@ -1312,7 +1312,7 @@ function openApiSpec(publicOrigin: string): Record<string, unknown> {
           additionalProperties: false,
           required: ["mode", "projectId", "prNumber"],
           properties: {
-            mode: { type: "string", enum: ["inspect", "approve", "request_changes", "merge"] },
+            mode: { type: "string", enum: ["inspect", "diff", "approve", "request_changes", "merge"] },
             projectId: { type: "string" },
             prNumber: { type: "integer", minimum: 1 },
             expectedHeadSha: { type: "string", pattern: "^[0-9a-fA-F]{40}$" },

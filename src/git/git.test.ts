@@ -8,6 +8,7 @@ import {
   gitCreateBranchFromOrigin,
   gitCreatePullRequest,
   gitInspectPullRequest,
+  gitReadPullRequestDiff,
   gitReviewPullRequest,
   gitMergePullRequest,
   gitDiffSummary,
@@ -808,6 +809,29 @@ describe("safe git workspace/publish workflow", () => {
     await expect(gitInspectPullRequest(dir, 1, async () => {
       throw Object.assign(new Error("secret-token"), { code: "ENOENT" });
     })).rejects.toMatchObject({ code: "NOT_IMPLEMENTED", message: "GitHub PR inspection unavailable" });
+  });
+
+  it("reads a PR diff remotely without switching or mutating the local worktree", async () => {
+    await execFileAsync("git", ["remote", "set-url", "origin", "https://github.com/example/repo.git"], { cwd: dir });
+    const headSha = "a".repeat(40);
+    const calls: string[][] = [];
+    const result = await gitReadPullRequestDiff(dir, 6, async (_cwd, args) => {
+      calls.push(args);
+      if (args[1] === "diff") {
+        return { stdout: "diff --git a/a.ts b/a.ts\n+const token = ghp_123456789012345678901234567890123456;\n", stderr: "" };
+      }
+      return { stdout: JSON.stringify({
+        number: 6, url: "https://github.com/example/repo/pull/6", state: "OPEN", isDraft: false,
+        baseRefName: "main", headRefName: "feature/review", headRefOid: headSha,
+        mergeable: "MERGEABLE", mergeStateStatus: "CLEAN", reviewDecision: null,
+        statusCheckRollup: [], mergedAt: null, mergeCommit: null,
+      }), stderr: "" };
+    });
+    expect(result).toMatchObject({ number: 6, headSha, baseBranch: "main", headBranch: "feature/review" });
+    expect(result.diff).toContain("diff --git");
+    expect(result.diff).not.toContain("ghp_123456789012345678901234567890123456");
+    expect(calls).toContainEqual(["pr", "diff", "6", "--repo", "example/repo", "--patch"]);
+    expect((await execFileAsync("git", ["status", "--porcelain"], { cwd: dir })).stdout).toBe("");
   });
 
   it.each([
