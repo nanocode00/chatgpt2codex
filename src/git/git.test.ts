@@ -8,6 +8,8 @@ import {
   gitCreateBranchFromOrigin,
   gitCreatePullRequest,
   gitInspectPullRequest,
+  gitReadPullRequestDiff,
+  gitReviewPullRequest,
   gitMergePullRequest,
   gitDiffSummary,
   gitFetchOrigin,
@@ -809,6 +811,29 @@ describe("safe git workspace/publish workflow", () => {
     })).rejects.toMatchObject({ code: "NOT_IMPLEMENTED", message: "GitHub PR inspection unavailable" });
   });
 
+  it("reads a PR diff remotely without switching or mutating the local worktree", async () => {
+    await execFileAsync("git", ["remote", "set-url", "origin", "https://github.com/example/repo.git"], { cwd: dir });
+    const headSha = "a".repeat(40);
+    const calls: string[][] = [];
+    const result = await gitReadPullRequestDiff(dir, 6, async (_cwd, args) => {
+      calls.push(args);
+      if (args[1] === "diff") {
+        return { stdout: "diff --git a/a.ts b/a.ts\n+const token = ghp_123456789012345678901234567890123456;\n", stderr: "" };
+      }
+      return { stdout: JSON.stringify({
+        number: 6, url: "https://github.com/example/repo/pull/6", state: "OPEN", isDraft: false,
+        baseRefName: "main", headRefName: "feature/review", headRefOid: headSha,
+        mergeable: "MERGEABLE", mergeStateStatus: "CLEAN", reviewDecision: null,
+        statusCheckRollup: [], mergedAt: null, mergeCommit: null,
+      }), stderr: "" };
+    });
+    expect(result).toMatchObject({ number: 6, headSha, baseBranch: "main", headBranch: "feature/review" });
+    expect(result.diff).toContain("diff --git");
+    expect(result.diff).not.toContain("ghp_123456789012345678901234567890123456");
+    expect(calls).toContainEqual(["pr", "diff", "6", "--repo", "example/repo", "--patch"]);
+    expect((await execFileAsync("git", ["status", "--porcelain"], { cwd: dir })).stdout).toBe("");
+  });
+
   it.each([
     [["UNKNOWN", "MERGEABLE"], [1000]],
     [["UNKNOWN", "UNKNOWN", "MERGEABLE"], [1000, 2000]],
@@ -870,6 +895,111 @@ describe("safe git workspace/publish workflow", () => {
     expect(result.mergeable).toBe(expected);
     expect(calls).toBe(1);
     expect(sleeps).toEqual([]);
+  });
+
+  it.each([
+    ["approve", "APPROVE", "APPROVED", ""],
+    ["request_changes", "REQUEST_CHANGES", "CHANGES_REQUESTED", "Please address the failing edge case."],
+  ] as const)("submits %s review against the exact inspected head commit", async (action, event, state, body) => {
+    await execFileAsync("git", ["remote", "set-url", "origin", "https://github.com/nanocode00/chatgpt2codex.git"], { cwd: dir });
+    const headSha = "a".repeat(40);
+    const calls: string[][] = [];
+    const runner = async (_cwd: string, args: string[]) => {
+      calls.push(args);
+      if (args[0] === "api") {
+        return {
+          stdout: JSON.stringify({
+            id: 42,
+            html_url: "https://github.com/nanocode00/chatgpt2codex/pull/7#pullrequestreview-42",
+            state,
+            commit_id: headSha,
+          }),
+          stderr: "",
+        };
+      }
+      return {
+        stdout: JSON.stringify({
+          number: 7,
+          url: "https://github.com/nanocode00/chatgpt2codex/pull/7",
+          state: "OPEN",
+          isDraft: false,
+          baseRefName: "main",
+          headRefName: "feature/review",
+          headRefOid: headSha,
+          mergeable: "MERGEABLE",
+          mergeStateStatus: "CLEAN",
+          reviewDecision: null,
+          statusCheckRollup: [],
+          mergedAt: null,
+          mergeCommit: null,
+        }),
+        stderr: "",
+      };
+    };
+
+    const result = await gitReviewPullRequest(dir, 7, headSha, action, body, runner);
+    expect(result).toMatchObject({
+      reviewed: true,
+      action,
+      number: 7,
+      expectedHeadSha: headSha,
+      reviewId: 42,
+      reviewState: state,
+      reviewCommitSha: headSha,
+    });
+    const expectedArgs = [
+      "api", "--method", "POST", "repos/nanocode00/chatgpt2codex/pulls/7/reviews",
+      "-f", `commit_id=${headSha}`,
+      "-f", `event=${event}`,
+    ];
+    if (body) expectedArgs.push("-f", `body=${body}`);
+    expect(calls.at(-1)).toEqual(expectedArgs);
+  });
+
+  it("fails closed before review when the PR head changed", async () => {
+    await execFileAsync("git", ["remote", "set-url", "origin", "https://github.com/example/repo.git"], { cwd: dir });
+    const actualHead = "b".repeat(40);
+    const expectedHead = "c".repeat(40);
+    const calls: string[][] = [];
+    await expect(gitReviewPullRequest(dir, 1, expectedHead, "approve", "", async (_cwd, args) => {
+      calls.push(args);
+      return { stdout: JSON.stringify({
+        number: 1, url: "https://github.com/example/repo/pull/1", state: "OPEN", isDraft: false,
+        baseRefName: "main", headRefName: "feature/x", headRefOid: actualHead,
+        mergeable: "MERGEABLE", mergeStateStatus: "CLEAN", reviewDecision: null,
+        statusCheckRollup: [], mergedAt: null, mergeCommit: null,
+      }), stderr: "" };
+    })).rejects.toMatchObject({ code: "COMMAND_NOT_ALLOWED", message: "PR head changed; inspect again" });
+    expect(calls.some((args) => args[0] === "api")).toBe(false);
+  });
+
+  it("requires a meaningful body when requesting changes", async () => {
+    await execFileAsync("git", ["remote", "set-url", "origin", "https://github.com/example/repo.git"], { cwd: dir });
+    await expect(gitReviewPullRequest(dir, 1, "d".repeat(40), "request_changes", "   ")).rejects.toMatchObject({
+      code: "COMMAND_NOT_ALLOWED",
+      message: "Request changes review requires a body",
+    });
+  });
+
+  it("verifies GitHub attached the review to the requested commit", async () => {
+    await execFileAsync("git", ["remote", "set-url", "origin", "https://github.com/example/repo.git"], { cwd: dir });
+    const headSha = "e".repeat(40);
+    await expect(gitReviewPullRequest(dir, 1, headSha, "approve", "", async (_cwd, args) => {
+      if (args[0] === "api") {
+        return { stdout: JSON.stringify({
+          id: 9,
+          html_url: "https://github.com/example/repo/pull/1#pullrequestreview-9",
+          state: "APPROVED",
+          commit_id: "f".repeat(40),
+        }), stderr: "" };
+      }
+      return { stdout: JSON.stringify({
+        number: 1, url: "https://github.com/example/repo/pull/1", state: "OPEN", isDraft: false,
+        baseRefName: "main", headRefName: "feature/x", headRefOid: headSha,
+        mergeable: "MERGEABLE", mergeStateStatus: "CLEAN", reviewDecision: null,
+        statusCheckRollup: [], mergedAt: null, mergeCommit: null,
+      }), stderr: "" };
+    })).rejects.toMatchObject({ code: "NOT_IMPLEMENTED", message: "GitHub PR review could not be verified" });
   });
 
   it("recovers transient UNKNOWN before merge and executes the merge command once", async () => {

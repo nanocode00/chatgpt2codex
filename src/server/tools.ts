@@ -61,6 +61,8 @@ import {
   gitPushCurrentBranch,
   gitCreatePullRequest,
   gitInspectPullRequest,
+  gitReadPullRequestDiff,
+  gitReviewPullRequest,
   gitMergePullRequest,
 } from "../git/git.js";
 import { resolveInProject } from "../policy/paths.js";
@@ -950,7 +952,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
                   : "Remote app opening and screenshot capture are disabled until the local operator sets CHATGPT2CODEX_REMOTE_E2E=1."
                 : "For UI/E2E proof: use e2e_start_server, then e2e_run_command for test commands; it captures a screenshot by default. Use e2e_open_target/e2e_open_url_screenshot/e2e_screenshot for manual visual proof. Return the screenshot path/markdown to the user.",
               "Use repo_inspect on the Custom GPT dedicated surface before Git mutations. For safe sync use git_workspace mode=fetch followed by mode=fast_forward; for feature branches use git_workspace mode=create_branch, and for commit/push/PR use git_publish. Fast-forward updates only the current clean branch to origin/<current-branch> and fails closed for ahead/diverged state. Underlying git_commit/git_push and repo_status/repo_diff_summary/show_changes remain available for MCP/local/generic compatibility.",
-              "After git_publish mode=create_pr, use git_pr mode=inspect for reviewable PR state and git_pr mode=merge only when the user explicitly authorizes merging. Merge requires the exact inspected head SHA and never uses force/admin/auto-merge or branch deletion.",
+              "After git_publish mode=create_pr, use git_pr mode=inspect for reviewable PR state. Use git_pr mode=diff to review the remote PR patch without switching branches or touching the local working tree; a dirty worktree is not a blocker for PR review. git_pr mode=approve and mode=request_changes require the exact inspected head SHA; request_changes also requires a review body. Use git_pr mode=merge only when the user explicitly authorizes merging. Merge requires the exact inspected head SHA and never uses force/admin/auto-merge or branch deletion.",
               "git_publish mode=push is only for user-authorized publishing, targets origin/current-branch, and never force-pushes.",
               ctx.remote
                 ? "For GPT Image 2 requests: generate with ChatGPT's native image surface, obtain a Share/Copy Link/content URL, then pass that URL explicitly to save_chatgpt_image, save_chatgpt_image_from_url, or save_image_from_url."
@@ -2824,13 +2826,18 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
   registerTool(
     "git_pr",
     {
-      title: "Inspect or safely merge a GitHub PR",
-      description: "Inspect PR state read-only or merge with an exact-head concurrency guard and existing remote authorization policy.",
+      title: "Inspect, diff, review, or safely merge a GitHub PR",
+      description: "Inspect PR state or read its remote patch without switching the local branch, submit approve/request-changes reviews against an exact inspected head SHA, or merge with an exact-head concurrency guard and existing remote authorization policy. A dirty local worktree is not a blocker for inspect/diff.",
       annotations: COMMAND_RUN_ANNOTATIONS,
       _meta: chatGptToolMeta("Checking pull request...", "Pull request operation completed"),
       inputSchema: z.discriminatedUnion("mode", [
         z.object({
           mode: z.literal("inspect"),
+          projectId: z.string(),
+          prNumber: z.number().int().positive(),
+        }).strict(),
+        z.object({
+          mode: z.literal("diff"),
           projectId: z.string(),
           prNumber: z.number().int().positive(),
         }).strict(),
@@ -2841,20 +2848,45 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
           expectedHeadSha: z.string().regex(/^[0-9a-fA-F]{40}$/),
           mergeMethod: z.enum(["merge", "squash", "rebase"]).optional(),
         }).strict(),
+        z.object({
+          mode: z.literal("approve"),
+          projectId: z.string(),
+          prNumber: z.number().int().positive(),
+          expectedHeadSha: z.string().regex(/^[0-9a-fA-F]{40}$/),
+          body: z.string().max(64 * 1024).optional(),
+        }).strict(),
+        z.object({
+          mode: z.literal("request_changes"),
+          projectId: z.string(),
+          prNumber: z.number().int().positive(),
+          expectedHeadSha: z.string().regex(/^[0-9a-fA-F]{40}$/),
+          body: z.string().min(1).max(64 * 1024),
+        }).strict(),
       ]),
     },
     async (input) => {
       return withErrorMapping<Record<string, unknown>>(ctx, "git_pr", input, async () => {
-        if (input.mode === "inspect") {
+        if (input.mode === "inspect" || input.mode === "diff") {
           await requireProjectLease(ctx, input.projectId, "read");
           const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
+          if (input.mode === "diff") {
+            const result = await gitReadPullRequestDiff(entry.root, input.prNumber);
+            return makeResult({ ...result }, `Read PR #${result.number} diff without changing the local worktree.`);
+          }
           const result = await gitInspectPullRequest(entry.root, input.prNumber);
           return makeResult({ ...result }, `Inspected PR #${result.number}.`);
         }
         await requireProjectLease(ctx, input.projectId, "remote");
         const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
-        const result = await gitMergePullRequest(entry.root, input.prNumber, input.expectedHeadSha, input.mergeMethod);
-        return makeResult({ ...result }, result.alreadyMerged ? `PR #${result.number} was already merged.` : `Merged PR #${result.number}.`);
+        if (input.mode === "merge") {
+          const result = await gitMergePullRequest(entry.root, input.prNumber, input.expectedHeadSha, input.mergeMethod);
+          return makeResult({ ...result }, result.alreadyMerged ? `PR #${result.number} was already merged.` : `Merged PR #${result.number}.`);
+        }
+        const result = await gitReviewPullRequest(entry.root, input.prNumber, input.expectedHeadSha, input.mode, input.body ?? "");
+        return makeResult(
+          { ...result },
+          input.mode === "approve" ? `Approved PR #${result.number}.` : `Requested changes on PR #${result.number}.`,
+        );
       });
     },
   );
