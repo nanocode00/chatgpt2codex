@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ToolContext } from "../types.js";
 import { registerTools } from "./tools.js";
-import { registerExtendedGitTools } from "./git-extended-tools.js";
+import { registerExtendedGitTools } from "./git-extended-tools-v2.js";
 
 /**
  * Construct and configure the MCP server (stdio transport) with all tools
