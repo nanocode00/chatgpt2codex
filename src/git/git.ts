@@ -28,6 +28,7 @@ const NETWORK_EXEC_OPTS = {
 const MAX_BRANCH_NAME = 255;
 const MAX_PR_TITLE = 256;
 const MAX_PR_BODY = 64 * 1024;
+const MAX_PR_REVIEW_BODY = 64 * 1024;
 
 /**
  * Run `git <args>` in `cwd` via execFile (array argv, never shell:true).
@@ -754,6 +755,95 @@ export interface GitPrMergeResult {
   mergedCommitSha: string;
   baseBranch: string;
   headBranch: string;
+}
+
+export type GitPrReviewAction = "approve" | "request_changes";
+
+export interface GitPrReviewResult {
+  reviewed: true;
+  action: GitPrReviewAction;
+  number: number;
+  url: string;
+  expectedHeadSha: string;
+  reviewId: number;
+  reviewUrl: string;
+  reviewState: "APPROVED" | "CHANGES_REQUESTED";
+  reviewCommitSha: string;
+}
+
+export async function gitReviewPullRequest(
+  root: string,
+  prNumber: number,
+  expectedHeadSha: string,
+  action: GitPrReviewAction,
+  body = "",
+  ghRunner: GitProcessRunner = runGh,
+): Promise<GitPrReviewResult> {
+  assertPrNumber(prNumber);
+  assertFullGitSha(expectedHeadSha);
+  if (body.length > MAX_PR_REVIEW_BODY || body.includes("\0")) {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Invalid PR review body");
+  }
+  if (action === "request_changes" && body.trim().length === 0) {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Request changes review requires a body");
+  }
+
+  const repository = await githubRepositoryForRoot(root);
+  const before = await gitInspectPullRequest(root, prNumber, ghRunner, async () => undefined);
+  if (before.headSha.toLowerCase() !== expectedHeadSha.toLowerCase()) {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "PR head changed; inspect again");
+  }
+  if (before.merged || before.state !== "OPEN") {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "PR is not open");
+  }
+
+  const event = action === "approve" ? "APPROVE" : "REQUEST_CHANGES";
+  const expectedState = action === "approve" ? "APPROVED" : "CHANGES_REQUESTED";
+  const args = [
+    "api", "--method", "POST",
+    `repos/${repository}/pulls/${prNumber}/reviews`,
+    "-f", `commit_id=${expectedHeadSha}`,
+    "-f", `event=${event}`,
+  ];
+  if (body.length > 0) args.push("-f", `body=${body}`);
+
+  let raw: unknown;
+  try {
+    const response = await ghRunner(root, args);
+    raw = JSON.parse(response.stdout);
+  } catch (err) {
+    if (err instanceof DomainError) throw err;
+    throw sanitizedProcessError("GitHub PR review", err);
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "GitHub PR review returned an unexpected response");
+  }
+  const record = raw as Record<string, unknown>;
+  const reviewId = record.id;
+  const reviewUrl = record.html_url;
+  const reviewState = typeof record.state === "string" ? record.state.toUpperCase() : "";
+  const reviewCommitSha = record.commit_id;
+  if (
+    typeof reviewId !== "number" || !Number.isInteger(reviewId) || reviewId <= 0 ||
+    typeof reviewUrl !== "string" || reviewUrl.length === 0 ||
+    reviewState !== expectedState ||
+    typeof reviewCommitSha !== "string" || !/^[0-9a-f]{40}$/i.test(reviewCommitSha) ||
+    reviewCommitSha.toLowerCase() !== expectedHeadSha.toLowerCase()
+  ) {
+    throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "GitHub PR review could not be verified");
+  }
+
+  return {
+    reviewed: true,
+    action,
+    number: before.number,
+    url: before.url,
+    expectedHeadSha,
+    reviewId,
+    reviewUrl,
+    reviewState,
+    reviewCommitSha,
+  };
 }
 
 export async function gitMergePullRequest(

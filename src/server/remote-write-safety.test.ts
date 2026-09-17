@@ -174,6 +174,25 @@ describe("remote write safety", () => {
     expect(merge?.isError).toBe(true);
     expect(merge?.structuredContent?.code).toBe("PERMISSION_DENIED");
 
+    const approve = await tools?.git_pr?.handler?.({
+      mode: "approve",
+      projectId: "proj",
+      prNumber: 1,
+      expectedHeadSha: "a".repeat(40),
+    });
+    expect(approve?.isError).toBe(true);
+    expect(approve?.structuredContent?.code).toBe("PERMISSION_DENIED");
+
+    const requestChanges = await tools?.git_pr?.handler?.({
+      mode: "request_changes",
+      projectId: "proj",
+      prNumber: 1,
+      expectedHeadSha: "a".repeat(40),
+      body: "Please revise this.",
+    });
+    expect(requestChanges?.isError).toBe(true);
+    expect(requestChanges?.structuredContent?.code).toBe("PERMISSION_DENIED");
+
     const inspect = await tools?.git_pr?.handler?.({ mode: "inspect", projectId: "proj", prNumber: 1 });
     expect(inspect?.isError).toBe(true);
     expect(inspect?.structuredContent?.code).not.toBe("PERMISSION_DENIED");
@@ -211,6 +230,25 @@ describe("remote write safety", () => {
     });
     expect(merge?.isError).toBe(true);
     expect(merge?.structuredContent?.code).toBe("PERMISSION_DENIED");
+
+    const approve = await tools?.git_pr?.handler?.({
+      mode: "approve",
+      projectId: "proj",
+      prNumber: 1,
+      expectedHeadSha: "a".repeat(40),
+    });
+    expect(approve?.isError).toBe(true);
+    expect(approve?.structuredContent?.code).toBe("PERMISSION_DENIED");
+
+    const requestChanges = await tools?.git_pr?.handler?.({
+      mode: "request_changes",
+      projectId: "proj",
+      prNumber: 1,
+      expectedHeadSha: "a".repeat(40),
+      body: "Please revise this.",
+    });
+    expect(requestChanges?.isError).toBe(true);
+    expect(requestChanges?.structuredContent?.code).toBe("PERMISSION_DENIED");
 
     const inspect = await tools?.git_pr?.handler?.({ mode: "inspect", projectId: "proj", prNumber: 1 });
     expect(inspect?.isError).toBe(true);
