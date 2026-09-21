@@ -1,4 +1,5 @@
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 export type TunnelMode = "none" | "cloudflare";
@@ -27,6 +28,14 @@ interface RuntimeSecretFile {
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
 const CONFIG_KEYS = new Set(["workspace", "repository", "host", "port", "public-hostname", "tunnel", "tunnel-name"]);
+
+export function defaultRuntimeConfigDir(
+  env: NodeJS.ProcessEnv = process.env,
+  homeDir = os.homedir(),
+): string {
+  const xdg = env.XDG_CONFIG_HOME?.trim();
+  return xdg ? path.join(xdg, "chatgpt2codex") : path.join(homeDir, ".config", "chatgpt2codex");
+}
 
 function emptyConfig(): RuntimeConfigFile {
   return { version: 1, defaults: {}, instances: {} };

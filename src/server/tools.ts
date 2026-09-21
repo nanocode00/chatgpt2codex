@@ -16,6 +16,8 @@ import {
   type ToolResult,
 } from "../types.js";
 import { scanWorkspace, findProject, inspectProjectRoot } from "../workspace/registry.js";
+import { readManagedRepositories } from "../runtime/catalog.js";
+import { defaultRuntimeConfigDir } from "../runtime/config.js";
 import { makeLease } from "../workspace/project-select.js";
 import { requireProjectLease } from "../workspace/lease-guard.js";
 import { withWorkspaceLock, type WorkspaceLockMode } from "../workspace/operation-lock.js";
@@ -1544,12 +1546,46 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
     async (input) => {
       return withErrorMapping(ctx, "workspace_refresh_index", input, async () => {
         const scanned = await scanWorkspace(ctx.workspaceRoot);
-        ctx.registry.splice(0, ctx.registry.length, ...scanned);
-        await ctx.store.saveProjects(scanned);
+        const candidates: ProjectRegistryEntry[] = [...scanned];
+
+        for (const existing of ctx.registry) {
+          try {
+            candidates.push(
+              await inspectProjectRoot(existing.root, {
+                name: existing.name,
+                projectId: existing.projectId,
+              }),
+            );
+          } catch {
+            // Drop stale remembered/worktree entries.
+          }
+        }
+
+        const managed = await readManagedRepositories(
+          ctx.config.runtimeConfigDir ?? defaultRuntimeConfigDir(),
+        );
+        for (const repository of managed.repositories) {
+          try {
+            candidates.push(
+              await inspectProjectRoot(repository.root, {
+                name: repository.name,
+                projectId: repository.id,
+              }),
+            );
+          } catch {
+            // Keep refresh resilient when a registered repository is temporarily unavailable.
+          }
+        }
+
+        const byRoot = new Map<string, ProjectRegistryEntry>();
+        for (const project of candidates) byRoot.set(path.resolve(project.root), project);
+        const refreshed = [...byRoot.values()];
+        ctx.registry.splice(0, ctx.registry.length, ...refreshed);
+        await ctx.store.saveProjects(refreshed);
         const updatedAt = Date.now();
         return makeResult(
-          { count: scanned.length, updatedAt },
-          `Refreshed workspace index: ${scanned.length} project(s).`,
+          { count: refreshed.length, updatedAt },
+          `Refreshed workspace index: ${refreshed.length} project(s).`,
         );
       });
     },

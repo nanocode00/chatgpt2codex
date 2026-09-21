@@ -67,6 +67,8 @@ export type ExecutionMode = "observe" | "read" | "edit" | "verify" | "danger";
 export interface Config {
   workspaceRoot: string;
   stateDir: string;
+  /** Persistent runtime configuration root, e.g. ~/.config/chatgpt2codex. */
+  runtimeConfigDir?: string;
   /** Optional runtime instance name used to isolate per-chat/per-server state. */
   instanceName?: string;
   /** MCP transport session id when this context belongs to one remote client. */

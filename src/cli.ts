@@ -43,6 +43,7 @@ import {
 } from "./runtime/instances.js";
 import {
   getRuntimeSecret,
+  defaultRuntimeConfigDir,
   listRuntimeSecrets,
   loadRuntimeEnvironment,
   readRuntimeConfig,
@@ -160,8 +161,7 @@ function defaultStateDir(): string {
 }
 
 function defaultConfigDir(): string {
-  const xdg = process.env.XDG_CONFIG_HOME?.trim();
-  return xdg ? path.join(xdg, "chatgpt2codex") : path.join(os.homedir(), ".config", "chatgpt2codex");
+  return defaultRuntimeConfigDir();
 }
 
 function withoutTunnelCredentials(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -198,6 +198,7 @@ function defaultConfig(workspaceRoot: string, stateDir: string, instanceName = "
   return {
     workspaceRoot,
     stateDir,
+    runtimeConfigDir: defaultConfigDir(),
     instanceName,
     maxReadBytes: 10 * 1024 * 1024,
     maxPatchBytes: 10 * 1024 * 1024,
@@ -428,12 +429,24 @@ async function cmdServeHttp(flags: Record<string, string | boolean>): Promise<vo
   const shutdown = (exitCode = 0) => {
     if (shuttingDown) return;
     shuttingDown = true;
+    closeHttpServer();
+    let finished = false;
     const finish = () => {
-      closeHttpServer();
+      if (finished) return;
+      finished = true;
       void removeRuntimeInstance(ctx.stateDir, instance).finally(() => process.exit(exitCode));
     };
-    if (httpServer) httpServer.close(finish);
-    else finish();
+    if (httpServer) {
+      httpServer.close(finish);
+      httpServer.closeIdleConnections?.();
+      const forceCloseTimer = setTimeout(() => {
+        httpServer?.closeAllConnections?.();
+        finish();
+      }, 2_000);
+      forceCloseTimer.unref();
+    } else {
+      finish();
+    }
   };
 
   const httpConfig = defaultHttpServerConfig({
@@ -1771,7 +1784,7 @@ async function cmdStop(flags: Record<string, string | boolean>): Promise<void> {
 }
 
 async function cmdRestart(flags: Record<string, string | boolean>): Promise<void> {
-  await cmdStop(flags);
+  await cmdStop({ ...flags, force: true });
   await cmdStart(flags);
 }
 

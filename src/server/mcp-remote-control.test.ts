@@ -78,8 +78,8 @@ async function startApp(ctx: ToolContext): Promise<{ baseUrl: string; stop(): Pr
   return {
     baseUrl: `http://127.0.0.1:${port}`,
     async stop() {
-      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
       running.close();
+      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
     },
   };
 }
@@ -276,5 +276,22 @@ describe("remote MCP session (/mcp, how ChatGPT connects) marks ctx.remote", () 
     } finally {
       await fs.rm(projectRoot2, { recursive: true, force: true });
     }
+  }, 20_000);
+
+  it("closes the HTTP server promptly even while an MCP client session is still connected", async () => {
+    const ctx = makeCtx(stateDir, projectRoot);
+    const app = await startApp(ctx);
+    stop = app.stop;
+
+    const token = await getMcpAccessToken(app.baseUrl);
+    client = await connectMcpClient(app.baseUrl, token);
+
+    const startedAt = Date.now();
+    await app.stop();
+    stop = undefined;
+    expect(Date.now() - startedAt).toBeLessThan(2_000);
+
+    await client.close().catch(() => undefined);
+    client = undefined;
   }, 20_000);
 });
