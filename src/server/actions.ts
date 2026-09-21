@@ -52,7 +52,7 @@ const ACTION_ROUTES: ActionRoute[] = [
     operationId: "goal_workflow",
     summary: "Start or continue a local coding workflow",
     description:
-      "Preferred Custom GPT orchestration surface. mode=intake preserves goal_intake semantics; mode=loop preserves goal_loop semantics. The underlying goal_intake and goal_loop tools/routes remain available for compatibility.",
+      "Preferred Custom GPT orchestration surface. mode=intake starts a goal, mode=loop continues a known loop, and mode=resume resumes the most recent persisted loop for this runtime instance (optionally filtered by projectId).",
     schema: "GoalWorkflowInput",
   },
   {
@@ -608,12 +608,14 @@ async function callDedicatedAction(
 
   if (route.tool === "goal_workflow") {
     const mode = input.mode;
-    if (mode !== "intake" && mode !== "loop") {
-      return invalidActionInput(route.tool, "mode must be intake or loop");
+    if (mode !== "intake" && mode !== "loop" && mode !== "resume") {
+      return invalidActionInput(route.tool, "mode must be intake, loop, or resume");
     }
     const allowedKeys = mode === "intake"
       ? new Set(["mode", "goal", "projectId", "workMode", "urgency"])
-      : new Set(["mode", "goal", "loopId", "projectId", "workMode", "maxTurns", "lastResult"]);
+      : mode === "loop"
+        ? new Set(["mode", "goal", "loopId", "projectId", "workMode", "maxTurns", "lastResult"])
+        : new Set(["mode", "projectId", "workMode", "maxTurns", "lastResult"]);
     const extraKeys = Object.keys(input).filter((key) => !allowedKeys.has(key));
     if (extraKeys.length > 0) {
       return invalidActionInput(route.tool, `unexpected properties for mode=${mode}: ${extraKeys.join(", ")}`);
@@ -624,6 +626,7 @@ async function callDedicatedAction(
       forwarded.mode = forwarded.workMode;
       delete forwarded.workMode;
     }
+    if (mode === "resume") forwarded.resumeLatest = true;
     return callRegisteredTool(ctx, mode === "intake" ? "goal_intake" : "goal_loop", forwarded);
   }
 
@@ -932,7 +935,7 @@ function openApiSpec(publicOrigin: string): Record<string, unknown> {
           additionalProperties: false,
           required: ["mode"],
           properties: {
-            mode: { type: "string", enum: ["intake", "loop"] },
+            mode: { type: "string", enum: ["intake", "loop", "resume"] },
             goal: { type: "string" },
             projectId: { type: "string" },
             workMode: { type: "string", enum: ["implement", "research", "debug", "review", "plan"] },
@@ -1285,11 +1288,12 @@ function openApiSpec(publicOrigin: string): Record<string, unknown> {
           additionalProperties: false,
           required: ["mode", "projectId"],
           properties: {
-            mode: { type: "string", enum: ["fetch", "fast_forward", "fast_forward_from", "create_branch", "switch_branch"] },
+            mode: { type: "string", enum: ["fetch", "fast_forward", "fast_forward_from", "create_branch", "switch_branch", "list_worktrees", "add_worktree", "remove_worktree"] },
             projectId: { type: "string" },
             branchName: { type: "string", maxLength: 255 },
             baseBranch: { type: "string", maxLength: 255 },
             expectedTargetSha: { type: "string", pattern: "^[0-9a-fA-F]{40}$" },
+            targetPath: { type: "string", minLength: 1, maxLength: 1024 },
           },
         },
         GitPublishInput: {
@@ -1312,7 +1316,7 @@ function openApiSpec(publicOrigin: string): Record<string, unknown> {
           additionalProperties: false,
           required: ["mode", "projectId", "prNumber"],
           properties: {
-            mode: { type: "string", enum: ["inspect", "diff", "approve", "request_changes", "merge"] },
+            mode: { type: "string", enum: ["inspect", "diff", "approve", "request_changes", "close", "reopen", "merge"] },
             projectId: { type: "string" },
             prNumber: { type: "integer", minimum: 1 },
             expectedHeadSha: { type: "string", pattern: "^[0-9a-fA-F]{40}$" },

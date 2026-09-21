@@ -67,6 +67,8 @@ export type ExecutionMode = "observe" | "read" | "edit" | "verify" | "danger";
 export interface Config {
   workspaceRoot: string;
   stateDir: string;
+  /** Optional runtime instance name used to isolate per-chat/per-server state. */
+  instanceName?: string;
   /** Max bytes returned/read for a single file_read_slice call. */
   maxReadBytes: number;
   /** Max bytes accepted for a single file_apply_patch payload. */

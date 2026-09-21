@@ -10,8 +10,9 @@
  *   chatgpt2codex doctor
  */
 
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
+import { createServer as createNetServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -31,6 +32,28 @@ import { startExecutor } from "./control/executor.js";
 import { approveAction, isKilled, listActions, rejectAction, setKill, toSummary } from "./control/queue.js";
 import { preflightPermissions } from "./control/mac-input.js";
 import { clampMinutes, clearAuto, readAuto, setAuto, type AutoActionKind } from "./control/auto.js";
+import {
+  isProcessAlive,
+  listRuntimeInstances,
+  normalizeInstanceName,
+  readRuntimeInstance,
+  removeRuntimeInstance,
+  writeRuntimeInstance,
+} from "./runtime/instances.js";
+import {
+  getRuntimeSecret,
+  listRuntimeSecrets,
+  loadRuntimeEnvironment,
+  readRuntimeConfig,
+  removeRuntimeSecret,
+  resolveRuntimeSettingsWithLegacy,
+  setRuntimeConfigValue,
+  setRuntimeSecret,
+  settingsFromEnvironment,
+  unsetRuntimeConfigValue,
+  writeRuntimeConfig,
+  type TunnelMode,
+} from "./runtime/config.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -39,6 +62,46 @@ interface ParsedArgs {
   flags: Record<string, string | boolean>;
   /** Non-flag arguments after the command, e.g. `control approve <actionId>`. */
   positional: string[];
+}
+
+function printHelp(): void {
+  console.log([
+    "c2c — ChatGPT To Codex local coding runtime",
+    "",
+    "Usage:",
+    "  c2c <command> [options]",
+    "",
+    "Runtime:",
+    "  start       Start an HTTP c2c instance in the background",
+    "  stop        Stop an instance",
+    "  restart     Restart an instance",
+    "  status      Show one or all running instances",
+    "  health      Check whether an instance is alive and responding",
+    "  serve       Run the MCP server in the foreground",
+    "",
+    "Setup / diagnostics:",
+    "  init        Initialize workspace state and owner token",
+    "  doctor      Check runtime dependencies and configuration",
+    "  config      Show or update persistent non-secret runtime settings",
+    "  secret      Manage persistent runtime secrets",
+    "  owner-token Manage the HTTP owner token",
+    "  control     Manage local desktop-control approvals",
+    "",
+    "Common options:",
+    "  --instance <name>   Runtime instance name (default: default)",
+    "  --workspace <path>  Workspace root",
+    "  --port <port>       HTTP port; start auto-selects one when not otherwise configured",
+    "  --tunnel <mode>     none or cloudflare",
+    "  --help              Show this help",
+    "",
+    "Examples:",
+    "  c2c start --workspace ~/workspace",
+    "  c2c start --instance proj2 --workspace ~/proj2-3",
+    "  c2c status",
+    "  c2c health --instance proj2",
+    "",
+    "The long command name 'chatgpt2codex' is also supported.",
+  ].join("\n"));
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -68,10 +131,16 @@ function defaultStateDir(): string {
   return path.join(os.homedir(), ".local", "share", "chatgpt2codex");
 }
 
-function defaultConfig(workspaceRoot: string, stateDir: string): Config {
+function defaultConfigDir(): string {
+  const xdg = process.env.XDG_CONFIG_HOME?.trim();
+  return xdg ? path.join(xdg, "chatgpt2codex") : path.join(os.homedir(), ".config", "chatgpt2codex");
+}
+
+function defaultConfig(workspaceRoot: string, stateDir: string, instanceName = "default"): Config {
   return {
     workspaceRoot,
     stateDir,
+    instanceName,
     maxReadBytes: 10 * 1024 * 1024,
     maxPatchBytes: 10 * 1024 * 1024,
     defaultCommandTimeoutSec: 30,
@@ -79,17 +148,17 @@ function defaultConfig(workspaceRoot: string, stateDir: string): Config {
   };
 }
 
-async function buildToolContext(workspace: string): Promise<ToolContext> {
+async function buildToolContext(workspace: string, instance = "default"): Promise<ToolContext> {
   const workspaceRoot = path.resolve(workspace);
   const stateDir = defaultStateDir();
 
-  const store = new Store(stateDir);
+  const store = new Store(stateDir, normalizeInstanceName(instance));
   const ledger = new Ledger(stateDir);
 
   const registry = await scanWorkspace(workspaceRoot);
   await store.saveProjects(registry);
 
-  const config = defaultConfig(workspaceRoot, stateDir);
+  const config = defaultConfig(workspaceRoot, stateDir, normalizeInstanceName(instance));
 
   return {
     workspaceRoot,
@@ -154,14 +223,15 @@ async function applyStartupProjectSelection(ctx: ToolContext, flags: Record<stri
 
 async function cmdServeStdio(flags: Record<string, string | boolean>): Promise<void> {
   const workspace = typeof flags.workspace === "string" ? flags.workspace : process.cwd();
-  const ctx = await buildToolContext(workspace);
+  const instance = normalizeInstanceName(flags.instance);
+  const ctx = await buildToolContext(workspace, instance);
   await applyStartupProjectSelection(ctx, flags);
   if (isControlEnabled()) startExecutor(ctx);
   const server = await createServer(ctx);
   const transport = new StdioServerTransport();
   await server.connect(transport);
   await ctx.ledger.append({ type: "workspace.opened", workspaceRoot: ctx.workspaceRoot });
-  console.error(`chatgpt2codex serve: listening on stdio (workspace=${ctx.workspaceRoot})`);
+  console.error(`chatgpt2codex serve: listening on stdio (workspace=${ctx.workspaceRoot}, instance=${instance})`);
 }
 
 /**
@@ -172,7 +242,8 @@ async function cmdServeStdio(flags: Record<string, string | boolean>): Promise<v
  */
 async function cmdServeHttp(flags: Record<string, string | boolean>): Promise<void> {
   const workspace = typeof flags.workspace === "string" ? flags.workspace : process.cwd();
-  const ctx = await buildToolContext(workspace);
+  const instance = normalizeInstanceName(flags.instance);
+  const ctx = await buildToolContext(workspace, instance);
 
   if (!(await hasOwnerToken(ctx.stateDir))) {
     console.error(
@@ -202,7 +273,7 @@ async function cmdServeHttp(flags: Record<string, string | boolean>): Promise<vo
     shuttingDown = true;
     const finish = () => {
       closeHttpServer();
-      process.exit(exitCode);
+      void removeRuntimeInstance(ctx.stateDir, instance).finally(() => process.exit(exitCode));
     };
     if (httpServer) httpServer.close(finish);
     else finish();
@@ -226,9 +297,21 @@ async function cmdServeHttp(flags: Record<string, string | boolean>): Promise<vo
     console.error(`chatgpt2codex serve --http: listening on http://${host}:${port}/mcp`);
     console.error(`chatgpt2codex serve --http: public URL ${publicUrl}/mcp`);
     console.error(`chatgpt2codex serve --http: workspace=${ctx.workspaceRoot}`);
+    console.error(`chatgpt2codex serve --http: instance=${instance}`);
     if (idleShutdownMs !== undefined) {
       console.error(`chatgpt2codex serve --http: idle shutdown after ${idleShutdownMinutes} minute(s) without sessions`);
     }
+  });
+
+  await writeRuntimeInstance(ctx.stateDir, {
+    version: 1,
+    name: instance,
+    pid: process.pid,
+    workspace: ctx.workspaceRoot,
+    host,
+    port,
+    publicUrl,
+    startedAt: Date.now(),
   });
 
   await ctx.ledger.append({ type: "workspace.opened", workspaceRoot: ctx.workspaceRoot, transport: "http" });
@@ -299,6 +382,123 @@ async function readStdin(): Promise<string> {
     process.stdin.on("end", () => resolve(value));
     process.stdin.on("error", reject);
   });
+}
+
+async function cmdConfig(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const action = positional[0] ?? "show";
+  const configDir = defaultConfigDir();
+  const instance = typeof flags.instance === "string" ? normalizeInstanceName(flags.instance) : undefined;
+
+  if (action === "show") {
+    const config = await readRuntimeConfig(configDir);
+    const runtimeEnv = await loadRuntimeEnvironment(configDir);
+    if (instance) {
+      console.log(JSON.stringify({
+        configDir,
+        instance,
+        persisted: { ...config.defaults, ...(config.instances[instance] ?? {}) },
+        effective: resolveRuntimeSettingsWithLegacy(config, instance, runtimeEnv.fileEnv),
+        runtimeEnvPath: runtimeEnv.runtimeEnvPath,
+        runtimeEnvLoaded: runtimeEnv.loaded,
+        runtimeEnvUnset: runtimeEnv.unset,
+      }, null, 2));
+    } else {
+      console.log(JSON.stringify({
+        configDir,
+        ...config,
+        runtimeEnvPath: runtimeEnv.runtimeEnvPath,
+        runtimeEnvLoaded: runtimeEnv.loaded,
+        runtimeEnvUnset: runtimeEnv.unset,
+      }, null, 2));
+    }
+    return;
+  }
+
+  if (action === "set") {
+    const key = positional[1];
+    const value = positional[2];
+    if (!key || value === undefined) throw new Error("usage: c2c config set <key> <value> [--instance <name>]");
+    await setRuntimeConfigValue(configDir, key, value, instance);
+    console.log(JSON.stringify({ updated: true, configDir, instance: instance ?? "defaults", key }));
+    return;
+  }
+
+  if (action === "unset") {
+    const key = positional[1];
+    if (!key) throw new Error("usage: c2c config unset <key> [--instance <name>]");
+    await unsetRuntimeConfigValue(configDir, key, instance);
+    console.log(JSON.stringify({ updated: true, configDir, instance: instance ?? "defaults", key, unset: true }));
+    return;
+  }
+
+  if (action === "import-env") {
+    const runtimeEnv = await loadRuntimeEnvironment(configDir);
+    const imported = settingsFromEnvironment(runtimeEnv.env);
+    const config = await readRuntimeConfig(configDir);
+    const target = instance ? (config.instances[instance] ??= {}) : config.defaults;
+    Object.assign(target, imported);
+    await writeRuntimeConfig(configDir, config);
+
+    const token = runtimeEnv.env.CLOUDFLARED_TUNNEL_TOKEN?.trim();
+    let importedCloudflareToken = false;
+    if (token) {
+      await setRuntimeSecret(defaultStateDir(), "cloudflare-token", token);
+      importedCloudflareToken = true;
+    }
+    console.log(JSON.stringify({
+      imported: Object.keys(imported),
+      importedCloudflareToken,
+      configDir,
+      runtimeEnvPath: runtimeEnv.runtimeEnvPath,
+      runtimeEnvLoaded: runtimeEnv.loaded,
+      runtimeEnvUnset: runtimeEnv.unset,
+      instance: instance ?? "defaults",
+    }, null, 2));
+    return;
+  }
+
+  throw new Error(
+    "usage: c2c config [show|set <key> <value>|unset <key>|import-env] [--instance <name>]",
+  );
+}
+
+async function cmdSecret(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const action = positional[0] ?? "list";
+  const stateDir = defaultStateDir();
+
+  if (action === "list") {
+    console.log(JSON.stringify({ stateDir, names: await listRuntimeSecrets(stateDir) }, null, 2));
+    return;
+  }
+
+  if (action === "set") {
+    const name = positional[1];
+    if (!name || !flags.stdin) throw new Error("usage: c2c secret set <name> --stdin");
+    const value = (await readStdin()).trim();
+    await setRuntimeSecret(stateDir, name, value);
+    console.log(JSON.stringify({ stored: true, name }));
+    return;
+  }
+
+  if (action === "import-env") {
+    const name = positional[1];
+    const envName = positional[2];
+    if (!name || !envName) throw new Error("usage: c2c secret import-env <name> <ENV_VAR>");
+    const value = process.env[envName]?.trim();
+    if (!value) throw new Error("environment variable is empty or unset: " + envName);
+    await setRuntimeSecret(stateDir, name, value);
+    console.log(JSON.stringify({ stored: true, name, source: envName }));
+    return;
+  }
+
+  if (action === "remove") {
+    const name = positional[1];
+    if (!name) throw new Error("usage: c2c secret remove <name>");
+    console.log(JSON.stringify({ removed: await removeRuntimeSecret(stateDir, name), name }));
+    return;
+  }
+
+  throw new Error("usage: c2c secret [list|set <name> --stdin|import-env <name> <ENV_VAR>|remove <name>]");
 }
 
 async function cmdOwnerToken(flags: Record<string, string | boolean>): Promise<void> {
@@ -571,8 +771,413 @@ async function cmdDoctor(flags: Record<string, string | boolean>): Promise<void>
   );
 }
 
+async function runtimeHttpOptions(
+  flags: Record<string, string | boolean>,
+  legacyEnv: NodeJS.ProcessEnv,
+): Promise<{
+  instance: string;
+  workspace: string;
+  host: string;
+  port: number;
+  publicUrl: string;
+  publicHostname?: string;
+  tunnel: TunnelMode;
+  tunnelName?: string;
+  portExplicit: boolean;
+}> {
+  const instance = normalizeInstanceName(flags.instance);
+  const config = await readRuntimeConfig(defaultConfigDir());
+  const persisted = resolveRuntimeSettingsWithLegacy(config, instance, legacyEnv);
+  const workspace = path.resolve(
+    typeof flags.workspace === "string" ? flags.workspace : persisted.workspace ?? process.cwd(),
+  );
+  const host = typeof flags.host === "string" ? flags.host : persisted.host ?? "127.0.0.1";
+  const configuredPort = typeof flags.port === "string"
+    ? Number.parseInt(flags.port, 10)
+    : persisted.port;
+  const port = configuredPort ?? 7979;
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("port must be an integer from 1 to 65535");
+  const tunnelFlag = typeof flags.tunnel === "string" ? flags.tunnel : undefined;
+  if (tunnelFlag !== undefined && tunnelFlag !== "none" && tunnelFlag !== "cloudflare") {
+    throw new Error("tunnel must be none or cloudflare");
+  }
+  const tunnel: TunnelMode = flags["no-tunnel"]
+    ? "none"
+    : (tunnelFlag as TunnelMode | undefined) ?? persisted.tunnel ?? "none";
+  const publicHostname =
+    typeof flags["public-hostname"] === "string" ? flags["public-hostname"] : persisted.publicHostname;
+  const tunnelName =
+    typeof flags["tunnel-name"] === "string" ? flags["tunnel-name"] : persisted.tunnelName;
+  const publicUrl =
+    typeof flags["public-url"] === "string"
+      ? flags["public-url"]
+      : tunnel === "cloudflare" && publicHostname
+        ? "https://" + publicHostname
+        : "http://" + host + ":" + port;
+  return {
+    instance,
+    workspace,
+    host,
+    port,
+    publicUrl,
+    publicHostname,
+    tunnel,
+    tunnelName,
+    portExplicit: configuredPort !== undefined,
+  };
+}
+
+async function findAvailableLocalPort(host: string, startPort = 7979, attempts = 100): Promise<number> {
+  const bindHost = host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host;
+  for (let port = startPort; port < startPort + attempts; port += 1) {
+    const available = await new Promise<boolean>((resolve) => {
+      const server = createNetServer();
+      server.once("error", () => resolve(false));
+      server.listen(port, bindHost, () => server.close(() => resolve(true)));
+    });
+    if (available) return port;
+  }
+  throw new Error("no available local port found");
+}
+
+async function runtimeHealth(record: { host: string; port: number }): Promise<boolean> {
+  const host = record.host === "0.0.0.0" || record.host === "::" ? "127.0.0.1" : record.host;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 1500);
+  try {
+    const response = await fetch("http://" + host + ":" + record.port + "/healthz", { signal: controller.signal });
+    if (!response.ok) return false;
+    const body = await response.json() as { ok?: unknown };
+    return body.ok === true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function publicRuntimeHealth(publicUrl: string): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 4000);
+  try {
+    const response = await fetch(publicUrl.replace(/\/$/, "") + "/healthz", { signal: controller.signal });
+    if (!response.ok) return false;
+    const body = await response.json() as { ok?: unknown };
+    return body.ok === true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function spawnDetachedLogged(
+  command: string,
+  args: string[],
+  logPath: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<number> {
+  await fs.mkdir(path.dirname(logPath), { recursive: true, mode: 0o700 });
+  await fs.writeFile(logPath, "", { encoding: "utf8", mode: 0o600 });
+  const log = await fs.open(logPath, "a");
+  try {
+    return await new Promise<number>((resolve, reject) => {
+      const child = spawn(command, args, {
+        detached: true,
+        stdio: ["ignore", log.fd, log.fd],
+        env,
+      });
+      child.once("error", reject);
+      child.once("spawn", () => {
+        const pid = child.pid;
+        if (!pid) {
+          reject(new Error("failed to obtain child pid for " + command));
+          return;
+        }
+        child.unref();
+        resolve(pid);
+      });
+    });
+  } finally {
+    await log.close();
+  }
+}
+
+async function waitForQuickTunnelUrl(logPath: string, pid: number, attempts = 90): Promise<string> {
+  const urlPattern = /https:\/\/[A-Za-z0-9.-]+\.trycloudflare\.com/;
+  for (let i = 0; i < attempts; i += 1) {
+    if (!isProcessAlive(pid)) {
+      const log = await fs.readFile(logPath, "utf8").catch(() => "");
+      throw new Error("cloudflared exited before publishing a quick tunnel URL" + (log ? "\n" + log.slice(-4000) : ""));
+    }
+    const log = await fs.readFile(logPath, "utf8").catch(() => "");
+    const found = log.match(urlPattern)?.[0];
+    if (found) return found;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error("timed out waiting for Cloudflare quick tunnel URL; see " + logPath);
+}
+
+async function startCloudflareTunnel(options: {
+  stateDir: string;
+  instance: string;
+  localUrl: string;
+  publicHostname?: string;
+  tunnelName?: string;
+  credential?: string;
+  env?: NodeJS.ProcessEnv;
+}): Promise<{ pid: number; publicUrl: string; logPath: string }> {
+  if (!(await checkCommand("cloudflared", ["--version"]))) {
+    throw new Error("cloudflared is not available on PATH");
+  }
+
+  const logPath = path.join(options.stateDir, "logs", options.instance + ".cloudflared.log");
+  let args: string[];
+  let publicUrl: string;
+  const baseEnv = options.env ?? process.env;
+  let tunnelEnv = baseEnv;
+
+  if (options.credential) {
+    if (!options.publicHostname) throw new Error("public-hostname is required for a credential-backed Cloudflare tunnel");
+    args = ["tunnel", "--no-autoupdate", "run"];
+    const credentialEnvName = ["TUNNEL", "TOKEN"].join("_");
+    tunnelEnv = { ...baseEnv, [credentialEnvName]: options.credential };
+    publicUrl = "https://" + options.publicHostname;
+  } else if (options.tunnelName) {
+    if (!options.publicHostname) throw new Error("public-hostname is required for a named Cloudflare tunnel");
+    args = ["tunnel", "--no-autoupdate", "run", "--url", options.localUrl, options.tunnelName];
+    publicUrl = "https://" + options.publicHostname;
+  } else if (options.publicHostname) {
+    args = ["tunnel", "--hostname", options.publicHostname, "--url", options.localUrl, "--no-autoupdate"];
+    publicUrl = "https://" + options.publicHostname;
+  } else {
+    args = ["tunnel", "--no-autoupdate", "--url", options.localUrl];
+    const pid = await spawnDetachedLogged("cloudflared", args, logPath);
+    try {
+      publicUrl = await waitForQuickTunnelUrl(logPath, pid);
+      return { pid, publicUrl, logPath };
+    } catch (err) {
+      if (isProcessAlive(pid)) process.kill(pid, "SIGTERM");
+      throw err;
+    }
+  }
+
+  const pid = await spawnDetachedLogged("cloudflared", args, logPath, tunnelEnv);
+  await new Promise((resolve) => setTimeout(resolve, 800));
+  if (!isProcessAlive(pid)) {
+    const log = await fs.readFile(logPath, "utf8").catch(() => "");
+    throw new Error("cloudflared exited during startup" + (log ? "\n" + log.slice(-4000) : ""));
+  }
+  return { pid, publicUrl, logPath };
+}
+
+async function cmdStatus(flags: Record<string, string | boolean>): Promise<void> {
+  const stateDir = defaultStateDir();
+  const requested = typeof flags.instance === "string" ? normalizeInstanceName(flags.instance) : undefined;
+  const records = requested
+    ? [await readRuntimeInstance(stateDir, requested)].filter((r): r is NonNullable<typeof r> => r !== null)
+    : await listRuntimeInstances(stateDir);
+  const status = [];
+  for (const record of records) {
+    const alive = isProcessAlive(record.pid);
+    const healthy = alive ? await runtimeHealth(record) : false;
+    const tunnelAlive = record.tunnelPid !== undefined ? isProcessAlive(record.tunnelPid) : null;
+    if (!alive && tunnelAlive !== true) await removeRuntimeInstance(stateDir, record.name);
+    status.push({ ...record, alive, healthy, tunnelAlive });
+  }
+  console.log(JSON.stringify(requested ? status[0] ?? { name: requested, alive: false, healthy: false } : status, null, 2));
+}
+
+async function cmdHealth(flags: Record<string, string | boolean>): Promise<void> {
+  const instance = normalizeInstanceName(flags.instance);
+  const record = await readRuntimeInstance(defaultStateDir(), instance);
+  const alive = record ? isProcessAlive(record.pid) : false;
+  const healthy = record && alive ? await runtimeHealth(record) : false;
+  const tunnelAlive = record?.tunnelPid !== undefined ? isProcessAlive(record.tunnelPid) : null;
+  const publicHealthy =
+    record && record.tunnelMode === "cloudflare" && healthy && tunnelAlive
+      ? await publicRuntimeHealth(record.publicUrl)
+      : record?.tunnelMode === "cloudflare"
+        ? false
+        : null;
+  console.log(JSON.stringify({
+    instance,
+    alive,
+    healthy,
+    tunnelAlive,
+    publicHealthy,
+    endpoint: record ? record.publicUrl + "/healthz" : null,
+  }));
+  if (!healthy || (record?.tunnelMode === "cloudflare" && !publicHealthy)) process.exitCode = 1;
+}
+
+async function waitForRuntimeHealth(record: { host: string; port: number }, attempts = 40): Promise<boolean> {
+  for (let i = 0; i < attempts; i += 1) {
+    if (await runtimeHealth(record)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return false;
+}
+
+async function waitForPublicRuntimeHealth(publicUrl: string, attempts = 20): Promise<boolean> {
+  for (let i = 0; i < attempts; i += 1) {
+    if (await publicRuntimeHealth(publicUrl)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return false;
+}
+
+async function cmdStart(flags: Record<string, string | boolean>): Promise<void> {
+  const runtimeEnv = await loadRuntimeEnvironment(defaultConfigDir());
+  const options = await runtimeHttpOptions(flags, runtimeEnv.fileEnv);
+  if (!options.portExplicit) {
+    options.port = await findAvailableLocalPort(options.host);
+    if (typeof flags["public-url"] !== "string" && options.tunnel === "none") {
+      options.publicUrl = "http://" + options.host + ":" + options.port;
+    }
+  }
+  const stateDir = defaultStateDir();
+  const current = await readRuntimeInstance(stateDir, options.instance);
+  if (current && isProcessAlive(current.pid)) {
+    console.log(JSON.stringify({ started: false, reason: "already-running", ...current, healthy: await runtimeHealth(current) }, null, 2));
+    return;
+  }
+  if (current?.tunnelPid && isProcessAlive(current.tunnelPid)) {
+    throw new Error(
+      "instance " + options.instance + " has a stale server record but its tunnel process is still alive; stop it before restarting",
+    );
+  }
+  if (current) await removeRuntimeInstance(stateDir, options.instance);
+  if (!(await hasOwnerToken(stateDir))) {
+    throw new Error("owner token is not configured; run chatgpt2codex init first");
+  }
+
+  let tunnelPid: number | undefined;
+  let tunnelLogPath: string | undefined;
+  if (options.tunnel === "cloudflare") {
+    const legacyCredentialKey = ["CLOUDFLARED", "TUNNEL", "TOKEN"].join("_");
+    const credential =
+      process.env[legacyCredentialKey]?.trim() ||
+      await getRuntimeSecret(stateDir, "cloudflare-token") ||
+      runtimeEnv.fileEnv[legacyCredentialKey]?.trim();
+    const tunnel = await startCloudflareTunnel({
+      stateDir,
+      instance: options.instance,
+      localUrl: "http://127.0.0.1:" + options.port,
+      publicHostname: options.publicHostname,
+      tunnelName: options.tunnelName,
+      credential,
+      env: runtimeEnv.env,
+    });
+    tunnelPid = tunnel.pid;
+    tunnelLogPath = tunnel.logPath;
+    options.publicUrl = tunnel.publicUrl;
+  }
+
+  const entrypoint = process.argv[1];
+  if (!entrypoint) throw new Error("cannot determine chatgpt2codex CLI entrypoint");
+  const args = [
+    entrypoint,
+    "serve",
+    "--http",
+    "--instance", options.instance,
+    "--workspace", options.workspace,
+    "--host", options.host,
+    "--port", String(options.port),
+    "--public-url", options.publicUrl,
+  ];
+  const child = spawn(process.execPath, args, {
+    detached: true,
+    stdio: "ignore",
+    env: runtimeEnv.env,
+  });
+  child.unref();
+
+  const healthy = await waitForRuntimeHealth({ host: options.host, port: options.port });
+  const record = await readRuntimeInstance(stateDir, options.instance);
+  if (!healthy || !record) {
+    if (tunnelPid && isProcessAlive(tunnelPid)) process.kill(tunnelPid, "SIGTERM");
+    throw new Error("instance " + options.instance + " failed to become healthy");
+  }
+  const mergedRecord = {
+    ...record,
+    tunnelPid,
+    tunnelMode: options.tunnel,
+    tunnelLogPath,
+    publicUrl: options.publicUrl,
+  };
+  await writeRuntimeInstance(stateDir, mergedRecord);
+  const publicHealthy =
+    options.tunnel === "cloudflare"
+      ? await waitForPublicRuntimeHealth(options.publicUrl)
+      : null;
+  console.log(JSON.stringify({
+    started: true,
+    ...mergedRecord,
+    healthy: true,
+    tunnelAlive: tunnelPid ? isProcessAlive(tunnelPid) : null,
+    publicHealthy,
+  }, null, 2));
+}
+
+async function cmdStop(flags: Record<string, string | boolean>): Promise<void> {
+  const instance = normalizeInstanceName(flags.instance);
+  const stateDir = defaultStateDir();
+  const record = await readRuntimeInstance(stateDir, instance);
+  if (!record) {
+    console.log(JSON.stringify({ stopped: false, reason: "not-running", instance }));
+    return;
+  }
+  if (!isProcessAlive(record.pid)) {
+    if (record.tunnelPid && isProcessAlive(record.tunnelPid)) {
+      console.log(JSON.stringify({
+        stopped: false,
+        reason: "stale-server-live-tunnel",
+        instance,
+        pid: record.pid,
+        tunnelPid: record.tunnelPid,
+      }));
+      process.exitCode = 1;
+      return;
+    }
+    await removeRuntimeInstance(stateDir, instance);
+    console.log(JSON.stringify({ stopped: true, stale: true, instance, pid: record.pid }));
+    return;
+  }
+  if (!(await runtimeHealth(record))) {
+    throw new Error(
+      "refusing to signal pid " + record.pid + " because the recorded instance is alive but its health endpoint is not responding",
+    );
+  }
+  process.kill(record.pid, "SIGTERM");
+  for (let i = 0; i < 50 && isProcessAlive(record.pid); i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  if (isProcessAlive(record.pid)) throw new Error("instance " + instance + " did not stop cleanly");
+  if (record.tunnelPid && isProcessAlive(record.tunnelPid)) {
+    process.kill(record.tunnelPid, "SIGTERM");
+    for (let i = 0; i < 50 && isProcessAlive(record.tunnelPid); i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    if (isProcessAlive(record.tunnelPid)) {
+      throw new Error("Cloudflare tunnel for instance " + instance + " did not stop cleanly");
+    }
+  }
+  await removeRuntimeInstance(stateDir, instance);
+  console.log(JSON.stringify({ stopped: true, instance, pid: record.pid, tunnelPid: record.tunnelPid ?? null }));
+}
+
+async function cmdRestart(flags: Record<string, string | boolean>): Promise<void> {
+  await cmdStop(flags);
+  await cmdStart(flags);
+}
+
 async function main(): Promise<void> {
   const { command, flags, positional } = parseArgs(process.argv.slice(2));
+  if (command === undefined || command === "help" || command === "--help" || command === "-h") {
+    printHelp();
+    return;
+  }
   switch (command) {
     case "serve":
       await cmdServe(flags);
@@ -583,6 +1188,27 @@ async function main(): Promise<void> {
     case "doctor":
       await cmdDoctor(flags);
       break;
+    case "config":
+      await cmdConfig(positional, flags);
+      break;
+    case "secret":
+      await cmdSecret(positional, flags);
+      break;
+    case "start":
+      await cmdStart(flags);
+      break;
+    case "stop":
+      await cmdStop(flags);
+      break;
+    case "restart":
+      await cmdRestart(flags);
+      break;
+    case "status":
+      await cmdStatus(flags);
+      break;
+    case "health":
+      await cmdHealth(flags);
+      break;
     case "owner-token":
       await cmdOwnerToken(flags);
       break;
@@ -590,9 +1216,9 @@ async function main(): Promise<void> {
       await cmdControl(positional, flags);
       break;
     default:
-      console.error(
-        "usage: chatgpt2codex <serve|init|doctor|owner-token|control> [--workspace <path>] [--active-project-root <path>] [--stdio | --http [--port 7979] [--public-url <origin>]]",
-      );
+      console.error("Unknown command: " + command);
+      console.error("");
+      printHelp();
       process.exitCode = 1;
   }
 }

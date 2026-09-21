@@ -123,6 +123,63 @@ Windows short version:
 
 Keep the Owner Token private. Treat it like a password.
 
+## CLI Runtime And Configuration
+
+The developer CLI is available as either `c2c` or the longer
+`chatgpt2codex` command. Running `c2c` with no arguments prints the command
+overview.
+
+```bash
+c2c start
+c2c status
+c2c health
+c2c restart
+c2c stop
+```
+
+`c2c start` can manage both the local HTTP runtime and an optional Cloudflare
+tunnel. Runtime settings follow this precedence:
+
+```text
+CLI option > current process environment > instance config > global config > runtime.env > built-in default
+```
+
+Persistent non-secret settings live under
+`~/.config/chatgpt2codex/config.json` (or `$XDG_CONFIG_HOME`). Runtime
+process records stay under `~/.local/share/chatgpt2codex/runtime/`. Runtime
+secrets are stored separately in a user-only `0600` state file and are never
+included in `config show`, `status`, or runtime records.
+
+```bash
+# Global defaults
+c2c config set workspace ~/workspace
+c2c config set tunnel cloudflare
+c2c config set public-hostname c2c.example.com
+
+# Per-instance override
+c2c config set port 7980 --instance proj2
+c2c config show --instance proj2
+
+# Read a secret from stdin rather than command-line arguments
+printf '%s' "$CLOUDFLARED_TUNNEL_TOKEN" | c2c secret set cloudflare-token --stdin
+c2c secret list
+```
+
+Existing shell-based launcher settings can be migrated explicitly:
+
+```bash
+c2c config import-env
+```
+
+For compatibility, c2c reads `~/.config/chatgpt2codex/runtime.env` as a
+non-executable `NAME=value` file. It is passed to the child runtime for
+existing operator settings such as Python/Docker/database profiles, but its c2c
+runtime settings are only fallback values below the new persistent config.
+`config import-env` imports known runtime settings and, when present, the
+legacy Cloudflare tunnel credential into the separate runtime secret store.
+Current shell environment variables remain temporary overrides. c2c deliberately
+does not auto-load a project's `.env` file into its own server process.
+
 ## First Prompt To Try
 
 ```text

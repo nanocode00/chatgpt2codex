@@ -334,7 +334,7 @@ describe("Custom GPT action bridge", () => {
     expect(body.components.schemas.GoalWorkflowInput.type).toBe("object");
     expect(body.components.schemas.GoalWorkflowInput.required).toEqual(["mode"]);
     expect(body.components.schemas.GoalWorkflowInput.additionalProperties).toBe(false);
-    expect(body.components.schemas.GoalWorkflowInput.properties?.mode?.enum).toEqual(["intake", "loop"]);
+    expect(body.components.schemas.GoalWorkflowInput.properties?.mode?.enum).toEqual(["intake", "loop", "resume"]);
     expect(body.components.schemas.GoalWorkflowInput.oneOf).toBeUndefined();
     expect(body.components.schemas.GoalWorkflowInput.anyOf).toBeUndefined();
     expect(body.components.schemas.RepoInspectInput.required).toEqual(["projectId", "view"]);
@@ -393,8 +393,12 @@ describe("Custom GPT action bridge", () => {
       "fast_forward_from",
       "create_branch",
       "switch_branch",
+      "list_worktrees",
+      "add_worktree",
+      "remove_worktree",
     ]);
     expect((body.components.schemas.GitWorkspaceInput as { properties?: Record<string, unknown> }).properties?.expectedTargetSha).toBeDefined();
+    expect((body.components.schemas.GitWorkspaceInput as { properties?: Record<string, unknown> }).properties?.targetPath).toBeDefined();
     expect((body.components.schemas.GitPublishInput as { type?: string }).type).toBe("object");
     expect((body.components.schemas.GitPublishInput as { required?: string[] }).required).toEqual(["mode", "projectId"]);
     expect((body.components.schemas.GitPublishInput as { additionalProperties?: boolean }).additionalProperties).toBe(false);
@@ -407,7 +411,15 @@ describe("Custom GPT action bridge", () => {
     expect((body.components.schemas.GitPrInput as { type?: string }).type).toBe("object");
     expect((body.components.schemas.GitPrInput as { required?: string[] }).required).toEqual(["mode", "projectId", "prNumber"]);
     expect((body.components.schemas.GitPrInput as { additionalProperties?: boolean }).additionalProperties).toBe(false);
-    expect((((body.components.schemas.GitPrInput as { properties?: Record<string, { enum?: string[] }> }).properties?.mode?.enum) ?? [])).toContain("diff");
+    expect((((body.components.schemas.GitPrInput as { properties?: Record<string, { enum?: string[] }> }).properties?.mode?.enum) ?? [])).toEqual([
+      "inspect",
+      "diff",
+      "approve",
+      "request_changes",
+      "close",
+      "reopen",
+      "merge",
+    ]);
     expect((body.components.schemas.GitPrInput as { oneOf?: unknown }).oneOf).toBeUndefined();
     expect((body.components.schemas.GitPrInput as { anyOf?: unknown }).anyOf).toBeUndefined();
     expect((body.components.schemas.GitPrInput as { discriminator?: unknown }).discriminator).toBeUndefined();
@@ -702,6 +714,21 @@ describe("Custom GPT action bridge", () => {
     expect(loop.structuredContent?.turn).toBe(1);
     expect(loop.structuredContent?.remainingTurns).toBe(2);
 
+    const resumeRes = await postAction(server.baseUrl, "/actions/goal-workflow", {
+      mode: "resume",
+      projectId: "proj",
+      lastResult: "reconnected after an interrupted turn",
+    });
+    const resumed = (await resumeRes.json()) as {
+      ok?: boolean;
+      structuredContent?: { loopId?: string; turn?: number; resumed?: boolean; remainingTurns?: number };
+    };
+    expect(resumed.ok).toBe(true);
+    expect(resumed.structuredContent?.loopId).toBe("consolidated-loop");
+    expect(resumed.structuredContent?.turn).toBe(2);
+    expect(resumed.structuredContent?.resumed).toBe(true);
+    expect(resumed.structuredContent?.remainingTurns).toBe(1);
+
     const legacyLoopRes = await postAction(server.baseUrl, "/actions/goal-loop", {
       loopId: "legacy-loop",
       projectId: "proj",
@@ -752,6 +779,9 @@ describe("Custom GPT action bridge", () => {
       ["/actions/git-workspace", { mode: "fetch", projectId: "proj", expectedTargetSha: "a".repeat(40) }],
       ["/actions/git-workspace", { mode: "create_branch", projectId: "proj", branchName: "feature/x" }],
       ["/actions/git-workspace", { mode: "switch_branch", projectId: "proj", branchName: "main", baseBranch: "main" }],
+      ["/actions/git-workspace", { mode: "list_worktrees", projectId: "proj", targetPath: "not-allowed" }],
+      ["/actions/git-workspace", { mode: "add_worktree", projectId: "proj", targetPath: "proj-wt" }],
+      ["/actions/git-workspace", { mode: "remove_worktree", projectId: "proj" }],
       ["/actions/git-publish", { mode: "push", projectId: "proj", baseBranch: "main" }],
       ["/actions/git-publish", { mode: "commit", projectId: "proj" }],
       ["/actions/git-publish", { mode: "create_pr", projectId: "proj", baseBranch: "main", title: "x", message: "not-allowed" }],
@@ -763,6 +793,8 @@ describe("Custom GPT action bridge", () => {
       ["/actions/git-pr", { mode: "approve", projectId: "proj", prNumber: 1, expectedHeadSha: "a".repeat(40), mergeMethod: "merge" }],
       ["/actions/git-pr", { mode: "request_changes", projectId: "proj", prNumber: 1, expectedHeadSha: "a".repeat(40) }],
       ["/actions/git-pr", { mode: "request_changes", projectId: "proj", prNumber: 1, body: "Please revise this." }],
+      ["/actions/git-pr", { mode: "close", projectId: "proj", prNumber: 1 }],
+      ["/actions/git-pr", { mode: "reopen", projectId: "proj", prNumber: 1, expectedHeadSha: "bad" }],
       ["/actions/git-pr", { mode: "inspect", projectId: "proj", prNumber: 0 }],
       ["/actions/git-pr", { mode: "inspect", projectId: "proj", prNumber: -1 }],
       ["/actions/git-pr", { mode: "inspect", projectId: "proj", prNumber: 1.5 }],

@@ -122,4 +122,20 @@ describe("Store", () => {
     expect(Number.isInteger(raw.updatedAt)).toBe(true);
     expect(raw.updatedAt).toBeGreaterThan(1000);
   });
+
+  it("isolates projects and sessions by namespace", async () => {
+    const a = new Store(dir, "alpha");
+    const b = new Store(dir, "beta");
+    await a.saveProjects([{ projectId: "a", name: "a", root: "/a", aliases: ["a"] }]);
+    await b.saveProjects([{ projectId: "b", name: "b", root: "/b", aliases: ["b"] }]);
+    await a.setSession({ activeProjectId: "a", mode: "read", lease: null });
+    await b.setSession({ activeProjectId: "b", mode: "read", lease: null });
+
+    expect((await a.loadProjects())[0]?.projectId).toBe("a");
+    expect((await b.loadProjects())[0]?.projectId).toBe("b");
+    expect((await a.getSession()).activeProjectId).toBe("a");
+    expect((await b.getSession()).activeProjectId).toBe("b");
+    expect(await readFile(join(dir, "projects.alpha.json"), "utf8")).toContain('"projectId": "a"');
+    expect(await readFile(join(dir, "projects.beta.json"), "utf8")).toContain('"projectId": "b"');
+  });
 });

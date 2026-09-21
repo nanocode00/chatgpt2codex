@@ -56,6 +56,9 @@ import {
   gitFetchOrigin,
   gitCreateBranchFromOrigin,
   gitSwitchLocalBranch,
+  gitListLinkedWorktrees,
+  gitAddLinkedWorktree,
+  gitRemoveLinkedWorktree,
   gitFastForwardCurrentBranch,
   gitFastForwardCurrentBranchFromOriginBranch,
   gitPushCurrentBranch,
@@ -65,6 +68,7 @@ import {
   gitReviewPullRequest,
   gitMergePullRequest,
 } from "../git/git.js";
+import { gitUpdatePullRequest } from "../git/extended.js";
 import { resolveInProject } from "../policy/paths.js";
 import { isSecretPath, redact } from "../policy/secrets.js";
 import {
@@ -132,6 +136,23 @@ async function loadSession(ctx: ToolContext): Promise<SessionState> {
 
 async function saveSession(ctx: ToolContext, session: SessionState): Promise<void> {
   await ctx.store.setSession(session);
+}
+
+function resolveSiblingWorktreeTarget(projectRoot: string, targetPath: string): string {
+  if (!targetPath || targetPath.includes("\0")) {
+    throw new DomainError(ErrorCode.PATH_OUTSIDE_WORKSPACE, "Invalid worktree target path");
+  }
+  const projectAbs = path.resolve(projectRoot);
+  const parent = path.dirname(projectAbs);
+  const target = path.resolve(parent, targetPath);
+  if (path.dirname(target) !== parent || target === projectAbs) {
+    throw new DomainError(
+      ErrorCode.PATH_OUTSIDE_WORKSPACE,
+      "Linked worktree target must be a sibling directory of the project root",
+      { projectRoot: projectAbs, targetPath },
+    );
+  }
+  return target;
 }
 
 // ---------------------------------------------------------------------------
@@ -765,18 +786,51 @@ export async function discoverE2eAutomation(root: string, cwd?: string): Promise
   return { commandSource: source === "package.json" ? "no e2e/test/build/dev npm script" : source, targetKind: "generic", scriptNames };
 }
 
+function goalsDirForContext(ctx: ToolContext): string {
+  const instanceName = ctx.config.instanceName;
+  if (!instanceName || instanceName === "default") return path.join(ctx.stateDir, "goals");
+  return path.join(ctx.stateDir, "goals", instanceName.replace(/[^A-Za-z0-9_.-]/g, "_"));
+}
+
 async function writeGoalIntake(ctx: ToolContext, payload: Record<string, unknown>): Promise<string> {
   const goalId = String(payload.goalId);
-  const goalsDir = path.join(ctx.stateDir, "goals");
+  const goalsDir = goalsDirForContext(ctx);
   await fs.mkdir(goalsDir, { recursive: true });
   await fs.writeFile(path.join(goalsDir, `${goalId}.json`), `${JSON.stringify(payload, null, 2)}\n`, "utf8");
   return goalId;
 }
 
 async function writeGoalLoop(ctx: ToolContext, loopId: string, payload: Record<string, unknown>): Promise<void> {
-  const loopsDir = path.join(ctx.stateDir, "goals");
+  const loopsDir = goalsDirForContext(ctx);
   await fs.mkdir(loopsDir, { recursive: true });
   await fs.writeFile(path.join(loopsDir, `${loopId}.loop.json`), `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+}
+
+async function latestGoalLoop(
+  ctx: ToolContext,
+  projectId?: string,
+): Promise<{ loopId: string; payload: Record<string, unknown> } | null> {
+  const dir = goalsDirForContext(ctx);
+  let names: string[];
+  try {
+    names = await fs.readdir(dir);
+  } catch {
+    return null;
+  }
+  const candidates: Array<{ loopId: string; payload: Record<string, unknown>; mtimeMs: number }> = [];
+  for (const name of names.filter((entry) => entry.endsWith(".loop.json"))) {
+    try {
+      const full = path.join(dir, name);
+      const [raw, stat] = await Promise.all([fs.readFile(full, "utf8"), fs.stat(full)]);
+      const payload = JSON.parse(raw) as Record<string, unknown>;
+      if (projectId && payload.projectId !== projectId) continue;
+      candidates.push({ loopId: name.slice(0, -".loop.json".length), payload, mtimeMs: stat.mtimeMs });
+    } catch {
+      // Ignore incomplete/corrupt historical loop files.
+    }
+  }
+  candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return candidates[0] ?? null;
 }
 
 /**
@@ -1094,6 +1148,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
       inputSchema: {
         goal: z.string().min(1).optional(),
         loopId: z.string().min(1).optional(),
+        resumeLatest: z.boolean().optional(),
         projectId: z.string().optional(),
         mode: z.enum(["implement", "research", "debug", "review", "plan"]).optional(),
         maxTurns: z.number().int().min(1).max(50).optional(),
@@ -1102,10 +1157,22 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
     },
     async (input) => {
       return withErrorMapping(ctx, "goal_loop", { ...input, goal: input.goal ? "[goal redacted]" : undefined }, async () => {
-        const seed = (input.goal ?? input.loopId ?? input.lastResult ?? "local coding loop").trim();
-        const loopId = input.loopId?.trim() || loopIdFor(seed);
-        const maxTurns = input.maxTurns ?? 12;
-        const loopFile = path.join(ctx.stateDir, "goals", `${loopId}.loop.json`);
+        const resumed = input.resumeLatest ? await latestGoalLoop(ctx, input.projectId) : null;
+        const seed = (input.goal ?? input.loopId ?? resumed?.loopId ?? input.lastResult ?? "local coding loop").trim();
+        const loopId = input.loopId?.trim() || resumed?.loopId || loopIdFor(seed);
+        const resumedProjectId = typeof resumed?.payload.projectId === "string" ? resumed.payload.projectId : undefined;
+        const resumedMode =
+          typeof resumed?.payload.mode === "string" &&
+          ["implement", "research", "debug", "review", "plan"].includes(resumed.payload.mode)
+            ? resumed.payload.mode as "implement" | "research" | "debug" | "review" | "plan"
+            : undefined;
+        const resumedMaxTurns =
+          typeof resumed?.payload.maxTurns === "number" && Number.isInteger(resumed.payload.maxTurns)
+            ? resumed.payload.maxTurns
+            : undefined;
+        const effectiveProjectId = input.projectId ?? resumedProjectId;
+        const maxTurns = input.maxTurns ?? resumedMaxTurns ?? 12;
+        const loopFile = path.join(goalsDirForContext(ctx), `${loopId}.loop.json`);
         let previousTurns = 0;
         let existingTurns: unknown[] = [];
         try {
@@ -1120,14 +1187,14 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
         const remainingTurns = Math.max(0, maxTurns - turn);
         const remoteWriteAvailable = !ctx.remote || isRemoteWriteEnabled();
         const loopPreset = remoteWriteAvailable ? "full-write" : "read-only";
-        const nextActions = input.projectId
+        const nextActions = effectiveProjectId
           ? [
-              `Call project_select with projectId=${input.projectId}, preset=${loopPreset}, reason=loop ${loopId} turn ${turn}.`,
+              `Call project_select with projectId=${effectiveProjectId}, preset=${loopPreset}, reason=loop ${loopId} turn ${turn}.`,
               "Call project_rules and project_status if they are not already fresh in this chat.",
               remoteWriteAvailable
                 ? "Read the smallest relevant context slice, apply one coherent patch/create batch, then run the closest verification command."
                 : "Read the smallest relevant context slice and report the proposed change; remote mutation is disabled until CHATGPT2CODEX_REMOTE_WRITE=1 is enabled locally.",
-              `Call goal_loop again with loopId=${loopId}, projectId=${input.projectId}, maxTurns=${maxTurns}, and lastResult summarizing the batch.`,
+              `Call goal_loop again with loopId=${loopId}, projectId=${effectiveProjectId}, maxTurns=${maxTurns}, and lastResult summarizing the batch.`,
             ]
           : [
               "Call workspace_list_projects or workspace_refresh_index now.",
@@ -1140,8 +1207,8 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
         const payload = {
           loopId,
           goalPreview: input.goal ? redact(input.goal).slice(0, 1000) : undefined,
-          projectId: input.projectId,
-          mode: input.mode ?? "implement",
+          projectId: effectiveProjectId,
+          mode: input.mode ?? resumedMode ?? "implement",
           maxTurns,
           turns: [
             ...existingTurns,
@@ -1157,6 +1224,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
         return makeResult(
           {
             loopId,
+            resumed: Boolean(resumed),
             turn,
             remainingTurns,
             continueRequired: remainingTurns > 0,
@@ -2740,7 +2808,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
     "git_workspace",
     {
       title: "Manage safe Git workspace state",
-      description: "Fetch origin, fast-forward the current branch from its matching origin branch or an exact inspected origin/base SHA, or create/switch local branches using fixed Git operations. Requires a full-write lease.",
+      description: "Fetch origin, fast-forward, create/switch local branches, or list/add/remove linked Git worktrees using fixed Git operations. Linked worktrees are confined to sibling directories of the project root.",
       annotations: LOCAL_WRITE_ANNOTATIONS,
       _meta: chatGptToolMeta("Updating Git workspace...", "Git workspace updated"),
       inputSchema: z.discriminatedUnion("mode", [
@@ -2749,12 +2817,29 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
         z.object({ mode: z.literal("fast_forward_from"), projectId: z.string(), baseBranch: z.string(), expectedTargetSha: z.string().regex(/^[0-9a-fA-F]{40}$/) }).strict(),
         z.object({ mode: z.literal("create_branch"), projectId: z.string(), branchName: z.string(), baseBranch: z.string() }).strict(),
         z.object({ mode: z.literal("switch_branch"), projectId: z.string(), branchName: z.string() }).strict(),
+        z.object({ mode: z.literal("list_worktrees"), projectId: z.string() }).strict(),
+        z.object({ mode: z.literal("add_worktree"), projectId: z.string(), targetPath: z.string(), branchName: z.string(), baseBranch: z.string().optional() }).strict(),
+        z.object({ mode: z.literal("remove_worktree"), projectId: z.string(), targetPath: z.string() }).strict(),
       ]),
     },
     async (input) => {
       return withErrorMapping<Record<string, unknown>>(ctx, "git_workspace", input, async () => {
-        await requireProjectLease(ctx, input.projectId, "write");
+        await requireProjectLease(ctx, input.projectId, input.mode === "list_worktrees" ? "read" : "write");
         const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
+        if (input.mode === "list_worktrees") {
+          const worktrees = await gitListLinkedWorktrees(entry.root);
+          return makeResult({ worktrees }, `Found ${worktrees.length} linked Git worktree(s).`);
+        }
+        if (input.mode === "add_worktree") {
+          const targetPath = resolveSiblingWorktreeTarget(entry.root, input.targetPath);
+          const result = await gitAddLinkedWorktree(entry.root, targetPath, input.branchName, input.baseBranch);
+          return makeResult({ ...result }, `Created linked worktree for ${result.branch ?? "detached HEAD"} at ${result.path}.`);
+        }
+        if (input.mode === "remove_worktree") {
+          const targetPath = resolveSiblingWorktreeTarget(entry.root, input.targetPath);
+          const result = await gitRemoveLinkedWorktree(entry.root, targetPath);
+          return makeResult({ ...result }, `Removed linked worktree at ${result.path}.`);
+        }
         if (input.mode === "fetch") {
           const result = await gitFetchOrigin(entry.root);
           return makeResult({ ...result }, "Fetched origin.");
@@ -2826,8 +2911,8 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
   registerTool(
     "git_pr",
     {
-      title: "Inspect, diff, review, or safely merge a GitHub PR",
-      description: "Inspect PR state or read its remote patch without switching the local branch, submit approve/request-changes reviews against an exact inspected head SHA, or merge with an exact-head concurrency guard and existing remote authorization policy. A dirty local worktree is not a blocker for inspect/diff.",
+      title: "Inspect, diff, review, manage, or safely merge a GitHub PR",
+      description: "Inspect PR state or read its remote patch without switching the local branch, submit approve/request-changes reviews, close/reopen, or merge against an exact inspected head SHA. A dirty local worktree is not a blocker for inspect/diff.",
       annotations: COMMAND_RUN_ANNOTATIONS,
       _meta: chatGptToolMeta("Checking pull request...", "Pull request operation completed"),
       inputSchema: z.discriminatedUnion("mode", [
@@ -2862,6 +2947,18 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
           expectedHeadSha: z.string().regex(/^[0-9a-fA-F]{40}$/),
           body: z.string().min(1).max(64 * 1024),
         }).strict(),
+        z.object({
+          mode: z.literal("close"),
+          projectId: z.string(),
+          prNumber: z.number().int().positive(),
+          expectedHeadSha: z.string().regex(/^[0-9a-fA-F]{40}$/),
+        }).strict(),
+        z.object({
+          mode: z.literal("reopen"),
+          projectId: z.string(),
+          prNumber: z.number().int().positive(),
+          expectedHeadSha: z.string().regex(/^[0-9a-fA-F]{40}$/),
+        }).strict(),
       ]),
     },
     async (input) => {
@@ -2881,6 +2978,12 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
         if (input.mode === "merge") {
           const result = await gitMergePullRequest(entry.root, input.prNumber, input.expectedHeadSha, input.mergeMethod);
           return makeResult({ ...result }, result.alreadyMerged ? `PR #${result.number} was already merged.` : `Merged PR #${result.number}.`);
+        }
+        if (input.mode === "close" || input.mode === "reopen") {
+          const result = await gitUpdatePullRequest(entry.root, input.prNumber, input.expectedHeadSha, {
+            state: input.mode === "close" ? "closed" : "open",
+          });
+          return makeResult({ ...result }, `${input.mode === "close" ? "Closed" : "Reopened"} PR #${result.number}.`);
         }
         const result = await gitReviewPullRequest(entry.root, input.prNumber, input.expectedHeadSha, input.mode, input.body ?? "");
         return makeResult(

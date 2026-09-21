@@ -80,9 +80,19 @@ function emptySession(): SessionDocument {
 
 export class Store {
   private readonly stateDir: string;
+  private readonly namespace: string | null;
 
-  constructor(stateDir: string) {
+  constructor(stateDir: string, namespace?: string) {
     this.stateDir = stateDir;
+    this.namespace = namespace && namespace !== "default" ? namespace : null;
+  }
+
+  private scopedFilename(filename: string): string {
+    if (!this.namespace) return filename;
+    const safe = this.namespace.replace(/[^A-Za-z0-9_.-]/g, "_");
+    const ext = filename.endsWith(".json") ? ".json" : "";
+    const stem = ext ? filename.slice(0, -ext.length) : filename;
+    return `${stem}.${safe}${ext}`;
   }
 
   /** Ensure the state directory exists with restrictive 0700 permissions. */
@@ -132,13 +142,14 @@ export class Store {
   }
 
   async loadProjects(): Promise<ProjectRegistryEntry[]> {
-    const raw = await this.readJson(PROJECTS_FILE);
+    const filename = this.scopedFilename(PROJECTS_FILE);
+    const raw = await this.readJson(filename);
     if (raw === undefined) return [];
     const parsed = ProjectsFileSchema.safeParse(raw);
     if (!parsed.success) {
       throw new DomainError(
         ErrorCode.NOT_IMPLEMENTED,
-        `Store: ${PROJECTS_FILE} failed validation: ${parsed.error.message}`,
+        `Store: ${filename} failed validation: ${parsed.error.message}`,
       );
     }
     return parsed.data.projects;
@@ -151,17 +162,18 @@ export class Store {
       updatedAt: Date.now(),
       projects: validated,
     };
-    await this.atomicWriteJson(PROJECTS_FILE, doc);
+    await this.atomicWriteJson(this.scopedFilename(PROJECTS_FILE), doc);
   }
 
   async getSession(): Promise<SessionDocument> {
-    const raw = await this.readJson(SESSIONS_FILE);
+    const filename = this.scopedFilename(SESSIONS_FILE);
+    const raw = await this.readJson(filename);
     if (raw === undefined) return emptySession();
     const parsed = SessionSchema.safeParse(raw);
     if (!parsed.success) {
       throw new DomainError(
         ErrorCode.NOT_IMPLEMENTED,
-        `Store: ${SESSIONS_FILE} failed validation: ${parsed.error.message}`,
+        `Store: ${filename} failed validation: ${parsed.error.message}`,
       );
     }
     return parsed.data;
@@ -175,6 +187,6 @@ export class Store {
     // updatedAt is always server-recomputed, never trusted from caller input.
     merged.updatedAt = Date.now();
     const validated = SessionSchema.parse(merged);
-    await this.atomicWriteJson(SESSIONS_FILE, validated);
+    await this.atomicWriteJson(this.scopedFilename(SESSIONS_FILE), validated);
   }
 }

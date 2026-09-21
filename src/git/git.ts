@@ -364,6 +364,103 @@ export async function gitSwitchLocalBranch(root: string, branchName: string): Pr
   return { branch: branchName };
 }
 
+export interface GitLinkedWorktree {
+  path: string;
+  headSha: string;
+  branch: string | null;
+  detached: boolean;
+  bare: boolean;
+}
+
+function parseLinkedWorktrees(output: string): GitLinkedWorktree[] {
+  const result: GitLinkedWorktree[] = [];
+  for (const block of output.trim().split(/\n\s*\n/).filter(Boolean)) {
+    let worktreePath = "";
+    let headSha = "";
+    let branch: string | null = null;
+    let detached = false;
+    let bare = false;
+    for (const line of block.split("\n")) {
+      if (line.startsWith("worktree ")) worktreePath = line.slice("worktree ".length);
+      else if (line.startsWith("HEAD ")) headSha = line.slice("HEAD ".length);
+      else if (line.startsWith("branch refs/heads/")) branch = line.slice("branch refs/heads/".length);
+      else if (line === "detached") detached = true;
+      else if (line === "bare") bare = true;
+    }
+    if (worktreePath) result.push({ path: worktreePath, headSha, branch, detached, bare });
+  }
+  return result;
+}
+
+export async function gitListLinkedWorktrees(root: string): Promise<GitLinkedWorktree[]> {
+  const result = await runGit(root, ["worktree", "list", "--porcelain"]);
+  return parseLinkedWorktrees(result.stdout);
+}
+
+export async function gitAddLinkedWorktree(
+  root: string,
+  targetPath: string,
+  branchName: string,
+  baseBranch?: string,
+): Promise<GitLinkedWorktree> {
+  await validateBranchName(root, branchName);
+  if (!targetPath || targetPath.includes("\0")) {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Invalid worktree target path");
+  }
+  if (path.resolve(targetPath) === path.resolve(root)) {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Worktree target must differ from the current project root");
+  }
+
+  if (baseBranch !== undefined) {
+    await validateBranchName(root, baseBranch);
+    if (await refExists(root, `refs/heads/${branchName}`)) {
+      throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Local branch already exists");
+    }
+    const baseRef = `refs/remotes/origin/${baseBranch}`;
+    if (!(await refExists(root, baseRef))) {
+      throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Remote base branch does not exist");
+    }
+    await runGit(root, ["worktree", "add", "-b", branchName, targetPath, baseRef]);
+  } else {
+    if (!(await refExists(root, `refs/heads/${branchName}`))) {
+      throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Local branch does not exist");
+    }
+    await runGit(root, ["worktree", "add", targetPath, branchName]);
+  }
+
+  const created = (await gitListLinkedWorktrees(root)).find(
+    (entry) => path.resolve(entry.path) === path.resolve(targetPath),
+  );
+  if (!created || created.branch !== branchName) {
+    throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "Git worktree creation could not be verified");
+  }
+  return created;
+}
+
+export async function gitRemoveLinkedWorktree(
+  root: string,
+  targetPath: string,
+): Promise<{ removed: true; path: string }> {
+  if (!targetPath || targetPath.includes("\0")) {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Invalid worktree target path");
+  }
+  const target = path.resolve(targetPath);
+  if (target === path.resolve(root)) {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Refusing to remove the current project worktree");
+  }
+  const existing = (await gitListLinkedWorktrees(root)).find((entry) => path.resolve(entry.path) === target);
+  if (!existing) {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Linked worktree does not exist");
+  }
+
+  await runGit(root, ["worktree", "remove", targetPath]);
+  const stillPresent = (await gitListLinkedWorktrees(root)).some((entry) => path.resolve(entry.path) === target);
+  if (stillPresent) {
+    throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "Git worktree removal could not be verified");
+  }
+  return { removed: true, path: targetPath };
+}
+
 export interface GitFastForwardResult {
   branch: string;
   updated: boolean;

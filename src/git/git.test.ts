@@ -6,11 +6,14 @@ import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   gitCreateBranchFromOrigin,
+  gitAddLinkedWorktree,
   gitCreatePullRequest,
   gitInspectPullRequest,
   gitReadPullRequestDiff,
   gitReviewPullRequest,
   gitMergePullRequest,
+  gitListLinkedWorktrees,
+  gitRemoveLinkedWorktree,
   gitDiffSummary,
   gitFetchOrigin,
   gitFastForwardCurrentBranch,
@@ -332,6 +335,36 @@ describe("safe git workspace/publish workflow", () => {
     expect(await gitSwitchLocalBranch(dir, "local-only")).toEqual({ branch: "local-only" });
     await writeFile(join(dir, "dirty.txt"), "dirty\n");
     await expect(gitSwitchLocalBranch(dir, "main")).rejects.toMatchObject({ code: "COMMAND_NOT_ALLOWED" });
+  });
+
+  it("creates, lists, and removes a linked worktree without switching the current worktree", async () => {
+    const target = `${dir}-linked`;
+    try {
+      const beforeBranch = (await execFileAsync("git", ["branch", "--show-current"], { cwd: dir })).stdout.trim();
+      const created = await gitAddLinkedWorktree(dir, target, "feature/linked", "main");
+      expect(created).toMatchObject({ path: target, branch: "feature/linked", detached: false });
+      expect((await gitListLinkedWorktrees(dir)).some((entry) => entry.path === target && entry.branch === "feature/linked")).toBe(true);
+      expect((await execFileAsync("git", ["branch", "--show-current"], { cwd: dir })).stdout.trim()).toBe(beforeBranch);
+
+      expect(await gitRemoveLinkedWorktree(dir, target)).toEqual({ removed: true, path: target });
+      expect((await gitListLinkedWorktrees(dir)).some((entry) => entry.path === target)).toBe(false);
+    } finally {
+      await rm(target, { recursive: true, force: true });
+    }
+  });
+
+  it("does not remove a dirty linked worktree", async () => {
+    const target = `${dir}-dirty-linked`;
+    try {
+      await gitAddLinkedWorktree(dir, target, "feature/dirty-linked", "main");
+      await writeFile(join(target, "dirty.txt"), "dirty\n");
+      await expect(gitRemoveLinkedWorktree(dir, target)).rejects.toBeDefined();
+      expect((await gitListLinkedWorktrees(dir)).some((entry) => entry.path === target)).toBe(true);
+      await rm(join(target, "dirty.txt"), { force: true });
+      await gitRemoveLinkedWorktree(dir, target);
+    } finally {
+      await rm(target, { recursive: true, force: true });
+    }
   });
 
   it("fast-forwards a clean purely-behind branch to its exact origin tracking commit", async () => {

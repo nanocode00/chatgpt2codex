@@ -119,6 +119,7 @@ link_bin() {
     mkdir -p "$target_dir"
   fi
   ln -sfn "$PREFIX/chatgpt2codex" "$target_dir/chatgpt2codex"
+  ln -sfn "$PREFIX/chatgpt2codex" "$target_dir/c2c"
   ln -sfn "$PREFIX/start-chatgpt2codex.sh" "$target_dir/chatgpt2codex-start"
   echo "$target_dir"
 }

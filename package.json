@@ -6,7 +6,8 @@
   "copyright": "Copyright 2026 ezBuilder. All rights reserved.",
   "type": "module",
   "bin": {
-    "chatgpt2codex": "dist/cli.js"
+    "chatgpt2codex": "dist/cli.js",
+    "c2c": "dist/cli.js"
   },
   "engines": {
     "node": ">=22"
@@ -28,6 +29,7 @@
     "windows:e2e": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/e2e-windows-installer.ps1",
     "linux:package": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-linux-installer.ps1",
     "linux:e2e": "bash scripts/e2e-linux-installer.sh",
+    "link:local": "bash scripts/link-local-cli.sh",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
