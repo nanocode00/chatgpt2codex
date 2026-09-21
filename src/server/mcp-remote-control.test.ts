@@ -237,4 +237,44 @@ describe("remote MCP session (/mcp, how ChatGPT connects) marks ctx.remote", () 
     expect(result.isError).toBeFalsy();
     expect(result.structuredContent?.lease?.preset).toBe("full-write");
   }, 20_000);
+
+  it("isolates active project and lease state between concurrent MCP sessions", async () => {
+    const projectRoot2 = await fs.mkdtemp(path.join(os.tmpdir(), "chatgpt2codex-mcp-remote-proj2-"));
+    try {
+      const ctx = makeCtx(stateDir, projectRoot);
+      ctx.registry.push({ projectId: "proj2", name: "proj2", root: projectRoot2, aliases: [] });
+      const app = await startApp(ctx);
+      stop = app.stop;
+
+      const token = await getMcpAccessToken(app.baseUrl);
+      const client1 = await connectMcpClient(app.baseUrl, token);
+      const client2 = await connectMcpClient(app.baseUrl, token);
+      try {
+        const selected1 = await client1.callTool({
+          name: "project_select",
+          arguments: { projectId: "proj", reason: "session one", preset: "read-only" },
+        });
+        const selected2 = await client2.callTool({
+          name: "project_select",
+          arguments: { projectId: "proj2", reason: "session two", preset: "read-only" },
+        });
+        expect(selected1.isError).toBeFalsy();
+        expect(selected2.isError).toBeFalsy();
+
+        const files = (await fs.readdir(stateDir)).filter((name) => name.startsWith("sessions.default.session."));
+        expect(files).toHaveLength(2);
+        const activeProjects = [];
+        for (const file of files) {
+          const session = JSON.parse(await fs.readFile(path.join(stateDir, file), "utf8")) as { activeProjectId?: string };
+          activeProjects.push(session.activeProjectId);
+        }
+        expect(activeProjects.sort()).toEqual(["proj", "proj2"]);
+      } finally {
+        await client1.close().catch(() => undefined);
+        await client2.close().catch(() => undefined);
+      }
+    } finally {
+      await fs.rm(projectRoot2, { recursive: true, force: true });
+    }
+  }, 20_000);
 });

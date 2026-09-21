@@ -614,8 +614,8 @@ async function callDedicatedAction(
     const allowedKeys = mode === "intake"
       ? new Set(["mode", "goal", "projectId", "workMode", "urgency"])
       : mode === "loop"
-        ? new Set(["mode", "goal", "loopId", "projectId", "workMode", "maxTurns", "lastResult"])
-        : new Set(["mode", "projectId", "workMode", "maxTurns", "lastResult"]);
+        ? new Set(["mode", "goal", "loopId", "projectId", "workMode", "maxTurns", "lastResult", "jobStatus"])
+        : new Set(["mode", "projectId", "workMode", "maxTurns", "lastResult", "jobStatus"]);
     const extraKeys = Object.keys(input).filter((key) => !allowedKeys.has(key));
     if (extraKeys.length > 0) {
       return invalidActionInput(route.tool, `unexpected properties for mode=${mode}: ${extraKeys.join(", ")}`);
@@ -943,6 +943,7 @@ function openApiSpec(publicOrigin: string): Record<string, unknown> {
             loopId: { type: "string" },
             maxTurns: { type: "integer", minimum: 1, maximum: 50 },
             lastResult: { type: "string" },
+            jobStatus: { type: "string", enum: ["active", "completed", "blocked"] },
           },
         },
         RepoInspectInput: {
@@ -1314,14 +1315,17 @@ function openApiSpec(publicOrigin: string): Record<string, unknown> {
         GitPrInput: {
           type: "object",
           additionalProperties: false,
-          required: ["mode", "projectId", "prNumber"],
+          required: ["mode", "projectId"],
           properties: {
-            mode: { type: "string", enum: ["inspect", "diff", "approve", "request_changes", "close", "reopen", "merge"] },
+            mode: { type: "string", enum: ["create", "inspect", "diff", "comment", "approve", "request_changes", "close", "reopen", "merge"] },
             projectId: { type: "string" },
             prNumber: { type: "integer", minimum: 1 },
             expectedHeadSha: { type: "string", pattern: "^[0-9a-fA-F]{40}$" },
             mergeMethod: { type: "string", enum: ["merge", "squash", "rebase"] },
+            baseBranch: { type: "string", maxLength: 255 },
+            title: { type: "string", minLength: 1, maxLength: 256 },
             body: { type: "string", maxLength: 65536 },
+            draft: { type: "boolean" },
           },
         },
         SaveChatGptImageInput: {

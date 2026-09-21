@@ -8,6 +8,7 @@ import {
   normalizeInstanceName,
   readRuntimeInstance,
   removeRuntimeInstance,
+  runtimeCommandMatchesRecord,
   writeRuntimeInstance,
 } from "./instances.js";
 
@@ -34,6 +35,7 @@ describe("runtime instances", () => {
       version: 1 as const,
       name: "alpha",
       pid: process.pid,
+      entrypoint: "/opt/chatgpt2codex/dist/cli.js",
       tunnelPid: process.pid,
       tunnelMode: "cloudflare" as const,
       tunnelLogPath: "/tmp/cloudflared.log",
@@ -52,5 +54,36 @@ describe("runtime instances", () => {
 
   it("detects the current process as alive", () => {
     expect(isProcessAlive(process.pid)).toBe(true);
+  });
+
+  it("matches only the expected c2c serve process identity", () => {
+    const record = {
+      version: 1 as const,
+      name: "alpha",
+      pid: 123,
+      entrypoint: "/opt/chatgpt2codex/dist/cli.js",
+      workspace: "/workspace",
+      host: "127.0.0.1",
+      port: 7979,
+      publicUrl: "http://127.0.0.1:7979",
+      startedAt: Date.now(),
+    };
+    expect(runtimeCommandMatchesRecord(record, [
+      "/usr/bin/node",
+      "/opt/chatgpt2codex/dist/cli.js",
+      "serve",
+      "--http",
+      "--instance",
+      "alpha",
+    ])).toBe(true);
+    expect(runtimeCommandMatchesRecord(record, [
+      "/usr/bin/node",
+      "/opt/chatgpt2codex/dist/cli.js",
+      "serve",
+      "--http",
+      "--instance",
+      "beta",
+    ])).toBe(false);
+    expect(runtimeCommandMatchesRecord(record, ["/usr/bin/node", "/tmp/other.js", "serve", "--http", "--instance", "alpha"])).toBe(false);
   });
 });

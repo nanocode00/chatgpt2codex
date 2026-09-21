@@ -18,7 +18,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { Config, LeasePreset, ProjectRegistryEntry, ToolContext } from "./types.js";
-import { findProject, scanWorkspace } from "./workspace/registry.js";
+import { findProject, inspectProjectRoot, scanWorkspace } from "./workspace/registry.js";
 import { makeLease } from "./workspace/project-select.js";
 import { Store } from "./state/store.js";
 import { Ledger } from "./state/ledger.js";
@@ -38,6 +38,7 @@ import {
   normalizeInstanceName,
   readRuntimeInstance,
   removeRuntimeInstance,
+  runtimeProcessMatchesRecord,
   writeRuntimeInstance,
 } from "./runtime/instances.js";
 import {
@@ -54,6 +55,25 @@ import {
   writeRuntimeConfig,
   type TunnelMode,
 } from "./runtime/config.js";
+import {
+  applyManagedProfiles,
+  normalizeManagedProfileAlias,
+  normalizeRepositoryId,
+  readManagedProfiles,
+  readManagedRepositories,
+  slugRepositoryName,
+  testPythonProfile,
+  writeManagedProfiles,
+  writeManagedRepositories,
+  type ManagedDockerProfile,
+} from "./runtime/catalog.js";
+import { forceReleaseWorkspaceLock, listWorkspaceLocks } from "./workspace/operation-lock.js";
+import {
+  durableJobLogs,
+  listDurableJobs,
+  readDurableJob,
+  setDurableJobStatus,
+} from "./runtime/jobs.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -75,8 +95,11 @@ function printHelp(): void {
     "  start       Start an HTTP c2c instance in the background",
     "  stop        Stop an instance",
     "  restart     Restart an instance",
+    "  reload      Reload live-safe profile/repository configuration",
     "  status      Show one or all running instances",
+    "  ps          Alias for status",
     "  health      Check whether an instance is alive and responding",
+    "  logs        Show recent server or tunnel log lines",
     "  serve       Run the MCP server in the foreground",
     "",
     "Setup / diagnostics:",
@@ -84,12 +107,17 @@ function printHelp(): void {
     "  doctor      Check runtime dependencies and configuration",
     "  config      Show or update persistent non-secret runtime settings",
     "  secret      Manage persistent runtime secrets",
+    "  profile     Manage persistent Python/Docker runtime profiles",
+    "  repository  Manage persistent repository registrations",
+    "  lock        Inspect or recover workspace operation locks",
+    "  job         Inspect, resume, or cancel durable coding jobs",
     "  owner-token Manage the HTTP owner token",
     "  control     Manage local desktop-control approvals",
     "",
     "Common options:",
     "  --instance <name>   Runtime instance name (default: default)",
     "  --workspace <path>  Workspace root",
+    "  --repository <id>   Registered repository to use as workspace",
     "  --port <port>       HTTP port; start auto-selects one when not otherwise configured",
     "  --tunnel <mode>     none or cloudflare",
     "  --help              Show this help",
@@ -136,6 +164,36 @@ function defaultConfigDir(): string {
   return xdg ? path.join(xdg, "chatgpt2codex") : path.join(os.homedir(), ".config", "chatgpt2codex");
 }
 
+function withoutTunnelCredentials(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const cleaned = { ...env };
+  delete cleaned.CLOUDFLARED_TUNNEL_TOKEN;
+  delete cleaned.TUNNEL_TOKEN;
+  return cleaned;
+}
+
+async function hydrateDirectServeEnvironment(): Promise<void> {
+  const pythonLocked =
+    process.env.CHATGPT2CODEX_PYTHON_PROFILE_LOCKED !== undefined
+      ? process.env.CHATGPT2CODEX_PYTHON_PROFILE_LOCKED === "1"
+      : Boolean(process.env.CHATGPT2CODEX_PYTHON_RUNTIME_PROFILES?.trim());
+  const dockerLocked =
+    process.env.CHATGPT2CODEX_DOCKER_PROFILE_LOCKED !== undefined
+      ? process.env.CHATGPT2CODEX_DOCKER_PROFILE_LOCKED === "1"
+      : Boolean(process.env.CHATGPT2CODEX_DOCKER_PROFILES?.trim());
+  const loaded = await loadRuntimeEnvironment(defaultConfigDir());
+  const effective = withoutTunnelCredentials(
+    await applyManagedProfiles(defaultConfigDir(), loaded.env),
+  );
+  for (const name of loaded.unset) delete process.env[name];
+  for (const [name, value] of Object.entries(effective)) {
+    if (value !== undefined) process.env[name] = value;
+  }
+  delete process.env.CLOUDFLARED_TUNNEL_TOKEN;
+  delete process.env.TUNNEL_TOKEN;
+  process.env.CHATGPT2CODEX_PYTHON_PROFILE_LOCKED = pythonLocked ? "1" : "0";
+  process.env.CHATGPT2CODEX_DOCKER_PROFILE_LOCKED = dockerLocked ? "1" : "0";
+}
+
 function defaultConfig(workspaceRoot: string, stateDir: string, instanceName = "default"): Config {
   return {
     workspaceRoot,
@@ -155,7 +213,33 @@ async function buildToolContext(workspace: string, instance = "default"): Promis
   const store = new Store(stateDir, normalizeInstanceName(instance));
   const ledger = new Ledger(stateDir);
 
-  const registry = await scanWorkspace(workspaceRoot);
+  const scanned = await scanWorkspace(workspaceRoot);
+  const rememberedRaw = await store.loadProjects().catch(() => [] as ProjectRegistryEntry[]);
+  const remembered: ProjectRegistryEntry[] = [];
+  for (const project of rememberedRaw) {
+    try {
+      remembered.push(
+        await inspectProjectRoot(project.root, {
+          name: project.name,
+          projectId: project.projectId,
+        }),
+      );
+    } catch {
+      // Drop stale remembered roots that no longer exist or are no longer projects.
+    }
+  }
+  const managed = await readManagedRepositories(defaultConfigDir());
+  const configured: ProjectRegistryEntry[] = [];
+  for (const repo of managed.repositories) {
+    try {
+      configured.push(await inspectProjectRoot(repo.root, { name: repo.name, projectId: repo.id }));
+    } catch {
+      // Keep startup resilient when a configured repository is temporarily unavailable.
+    }
+  }
+  const byRoot = new Map<string, ProjectRegistryEntry>();
+  for (const entry of [...remembered, ...scanned, ...configured]) byRoot.set(path.resolve(entry.root), entry);
+  const registry = [...byRoot.values()];
   await store.saveProjects(registry);
 
   const config = defaultConfig(workspaceRoot, stateDir, normalizeInstanceName(instance));
@@ -173,6 +257,75 @@ async function buildToolContext(workspace: string, instance = "default"): Promis
     },
     config,
   };
+}
+
+async function reloadLiveRuntimeConfiguration(ctx: ToolContext): Promise<void> {
+  const configDir = defaultConfigDir();
+  const profiles = await readManagedProfiles(configDir);
+  const legacy = await loadRuntimeEnvironment(configDir, {});
+
+  if (process.env.CHATGPT2CODEX_PYTHON_PROFILE_LOCKED !== "1") {
+    const value =
+      Object.keys(profiles.python).length > 0
+        ? JSON.stringify(profiles.python)
+        : legacy.fileEnv.CHATGPT2CODEX_PYTHON_RUNTIME_PROFILES;
+    if (value) process.env.CHATGPT2CODEX_PYTHON_RUNTIME_PROFILES = value;
+    else delete process.env.CHATGPT2CODEX_PYTHON_RUNTIME_PROFILES;
+  }
+  if (process.env.CHATGPT2CODEX_DOCKER_PROFILE_LOCKED !== "1") {
+    const value =
+      Object.keys(profiles.docker).length > 0
+        ? JSON.stringify(profiles.docker)
+        : legacy.fileEnv.CHATGPT2CODEX_DOCKER_PROFILES;
+    if (value) process.env.CHATGPT2CODEX_DOCKER_PROFILES = value;
+    else delete process.env.CHATGPT2CODEX_DOCKER_PROFILES;
+  }
+
+  const candidates: ProjectRegistryEntry[] = await scanWorkspace(ctx.workspaceRoot);
+  const remembered = await ctx.store.loadProjects().catch(() => [] as ProjectRegistryEntry[]);
+  for (const project of remembered) {
+    try {
+      candidates.push(
+        await inspectProjectRoot(project.root, {
+          name: project.name,
+          projectId: project.projectId,
+        }),
+      );
+    } catch {
+      // Ignore stale remembered roots.
+    }
+  }
+  const managedRepositories = await readManagedRepositories(configDir);
+  for (const repository of managedRepositories.repositories) {
+    try {
+      candidates.push(
+        await inspectProjectRoot(repository.root, {
+          name: repository.name,
+          projectId: repository.id,
+        }),
+      );
+    } catch {
+      // Keep live reload resilient when a configured repository is temporarily unavailable.
+    }
+  }
+
+  const byRoot = new Map<string, ProjectRegistryEntry>();
+  for (const project of candidates) byRoot.set(path.resolve(project.root), project);
+  ctx.registry.splice(0, ctx.registry.length, ...byRoot.values());
+  await ctx.store.saveProjects(ctx.registry);
+}
+
+function installLiveReloadSignal(ctx: ToolContext): void {
+  if (process.platform === "win32") return;
+  process.on("SIGHUP", () => {
+    void reloadLiveRuntimeConfiguration(ctx)
+      .then(() => console.error("chatgpt2codex: reloaded live profile/repository configuration"))
+      .catch((err) =>
+        console.error(
+          "chatgpt2codex: live reload failed:",
+          err instanceof Error ? err.message : String(err),
+        ));
+  });
 }
 
 function parseLeasePreset(value: string | boolean | undefined): LeasePreset {
@@ -222,9 +375,11 @@ async function applyStartupProjectSelection(ctx: ToolContext, flags: Record<stri
 }
 
 async function cmdServeStdio(flags: Record<string, string | boolean>): Promise<void> {
+  await hydrateDirectServeEnvironment();
   const workspace = typeof flags.workspace === "string" ? flags.workspace : process.cwd();
   const instance = normalizeInstanceName(flags.instance);
   const ctx = await buildToolContext(workspace, instance);
+  installLiveReloadSignal(ctx);
   await applyStartupProjectSelection(ctx, flags);
   if (isControlEnabled()) startExecutor(ctx);
   const server = await createServer(ctx);
@@ -241,9 +396,11 @@ async function cmdServeStdio(flags: Record<string, string | boolean>): Promise<v
  * OAuth 2.1 (see src/server/http.ts, src/auth/oauth-provider.ts).
  */
 async function cmdServeHttp(flags: Record<string, string | boolean>): Promise<void> {
+  await hydrateDirectServeEnvironment();
   const workspace = typeof flags.workspace === "string" ? flags.workspace : process.cwd();
   const instance = normalizeInstanceName(flags.instance);
   const ctx = await buildToolContext(workspace, instance);
+  installLiveReloadSignal(ctx);
 
   if (!(await hasOwnerToken(ctx.stateDir))) {
     console.error(
@@ -307,6 +464,7 @@ async function cmdServeHttp(flags: Record<string, string | boolean>): Promise<vo
     version: 1,
     name: instance,
     pid: process.pid,
+    entrypoint: process.argv[1] ? path.resolve(process.argv[1]) : undefined,
     workspace: ctx.workspaceRoot,
     host,
     port,
@@ -442,7 +600,8 @@ async function cmdConfig(positional: string[], flags: Record<string, string | bo
     const token = runtimeEnv.env.CLOUDFLARED_TUNNEL_TOKEN?.trim();
     let importedCloudflareToken = false;
     if (token) {
-      await setRuntimeSecret(defaultStateDir(), "cloudflare-token", token);
+      const secretName = instance ? "cloudflare-token." + instance : "cloudflare-token";
+      await setRuntimeSecret(defaultStateDir(), secretName, token);
       importedCloudflareToken = true;
     }
     console.log(JSON.stringify({
@@ -457,14 +616,78 @@ async function cmdConfig(positional: string[], flags: Record<string, string | bo
     return;
   }
 
+  if (action === "export") {
+    const bundle = {
+      version: 1,
+      containsSecrets: false,
+      config: await readRuntimeConfig(configDir),
+      profiles: await readManagedProfiles(configDir),
+      repositories: await readManagedRepositories(configDir),
+    };
+    console.log(JSON.stringify(bundle, null, 2));
+    return;
+  }
+
+  if (action === "import") {
+    if (!flags.stdin) throw new Error("usage: c2c config import --stdin");
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await readStdin());
+    } catch {
+      throw new Error("config import input must be valid JSON");
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("config import bundle must be an object");
+    }
+    const bundle = parsed as Record<string, unknown>;
+    if (bundle.version !== 1) throw new Error("unsupported config import bundle version");
+    if (bundle.containsSecrets !== false) throw new Error("config import bundle must explicitly declare containsSecrets=false");
+    if (!bundle.config || !bundle.profiles || !bundle.repositories) {
+      throw new Error("config import bundle must include config, profiles, and repositories");
+    }
+
+    const incomingConfig = bundle.config as Awaited<ReturnType<typeof readRuntimeConfig>>;
+    const incomingProfiles = bundle.profiles as Awaited<ReturnType<typeof readManagedProfiles>>;
+    const incomingRepositories = bundle.repositories as Awaited<ReturnType<typeof readManagedRepositories>>;
+    const currentConfig = await readRuntimeConfig(configDir);
+    const currentProfiles = await readManagedProfiles(configDir);
+    const currentRepositories = await readManagedRepositories(configDir);
+
+    await writeRuntimeConfig(configDir, {
+      version: 1,
+      defaults: { ...currentConfig.defaults, ...incomingConfig.defaults },
+      instances: { ...currentConfig.instances, ...incomingConfig.instances },
+    });
+    await writeManagedProfiles(configDir, {
+      version: 1,
+      python: { ...currentProfiles.python, ...incomingProfiles.python },
+      docker: { ...currentProfiles.docker, ...incomingProfiles.docker },
+    });
+    const repositoriesById = new Map(currentRepositories.repositories.map((repo) => [repo.id, repo]));
+    for (const repo of incomingRepositories.repositories) repositoriesById.set(repo.id, repo);
+    await writeManagedRepositories(configDir, {
+      version: 1,
+      repositories: [...repositoriesById.values()].sort((a, b) => a.id.localeCompare(b.id)),
+    });
+    console.log(JSON.stringify({
+      imported: true,
+      containsSecrets: false,
+      configDir,
+      note: "Secrets are intentionally excluded; configure them separately with c2c secret.",
+    }, null, 2));
+    return;
+  }
+
   throw new Error(
-    "usage: c2c config [show|set <key> <value>|unset <key>|import-env] [--instance <name>]",
+    "usage: c2c config [show|set <key> <value>|unset <key>|import-env|export|import --stdin] [--instance <name>]",
   );
 }
 
 async function cmdSecret(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
   const action = positional[0] ?? "list";
   const stateDir = defaultStateDir();
+  const instance = typeof flags.instance === "string" ? normalizeInstanceName(flags.instance) : undefined;
+  const scopedName = (name: string): string => instance ? name + "." + instance : name;
 
   if (action === "list") {
     console.log(JSON.stringify({ stateDir, names: await listRuntimeSecrets(stateDir) }, null, 2));
@@ -475,8 +698,9 @@ async function cmdSecret(positional: string[], flags: Record<string, string | bo
     const name = positional[1];
     if (!name || !flags.stdin) throw new Error("usage: c2c secret set <name> --stdin");
     const value = (await readStdin()).trim();
-    await setRuntimeSecret(stateDir, name, value);
-    console.log(JSON.stringify({ stored: true, name }));
+    const storedName = scopedName(name);
+    await setRuntimeSecret(stateDir, storedName, value);
+    console.log(JSON.stringify({ stored: true, name: storedName }));
     return;
   }
 
@@ -486,19 +710,310 @@ async function cmdSecret(positional: string[], flags: Record<string, string | bo
     if (!name || !envName) throw new Error("usage: c2c secret import-env <name> <ENV_VAR>");
     const value = process.env[envName]?.trim();
     if (!value) throw new Error("environment variable is empty or unset: " + envName);
-    await setRuntimeSecret(stateDir, name, value);
-    console.log(JSON.stringify({ stored: true, name, source: envName }));
+    const storedName = scopedName(name);
+    await setRuntimeSecret(stateDir, storedName, value);
+    console.log(JSON.stringify({ stored: true, name: storedName, source: envName }));
     return;
   }
 
   if (action === "remove") {
     const name = positional[1];
     if (!name) throw new Error("usage: c2c secret remove <name>");
-    console.log(JSON.stringify({ removed: await removeRuntimeSecret(stateDir, name), name }));
+    const storedName = scopedName(name);
+    console.log(JSON.stringify({ removed: await removeRuntimeSecret(stateDir, storedName), name: storedName }));
     return;
   }
 
   throw new Error("usage: c2c secret [list|set <name> --stdin|import-env <name> <ENV_VAR>|remove <name>]");
+}
+
+function commaList(value: string | boolean | undefined, label: string): string[] {
+  if (typeof value !== "string") throw new Error(label + " requires a comma-separated value");
+  const items = value.split(",").map((item) => item.trim()).filter(Boolean);
+  if (items.length === 0) throw new Error(label + " must not be empty");
+  return items;
+}
+
+async function cmdProfile(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const action = positional[0] ?? "list";
+  const configDir = defaultConfigDir();
+  const profiles = await readManagedProfiles(configDir);
+
+  if (action === "list") {
+    const aliases = Array.from(new Set([...Object.keys(profiles.python), ...Object.keys(profiles.docker)])).sort();
+    console.log(JSON.stringify({
+      configDir,
+      profiles: aliases.map((alias) => ({
+        alias,
+        python: alias in profiles.python,
+        docker: alias in profiles.docker,
+      })),
+    }, null, 2));
+    return;
+  }
+
+  if (action === "show") {
+    const alias = normalizeManagedProfileAlias(positional[1] ?? "");
+    if (!(alias in profiles.python) && !(alias in profiles.docker)) throw new Error("profile not found: " + alias);
+    console.log(JSON.stringify({
+      alias,
+      python: profiles.python[alias] ?? null,
+      docker: profiles.docker[alias] ?? null,
+    }, null, 2));
+    return;
+  }
+
+  if (action === "add") {
+    const alias = normalizeManagedProfileAlias(positional[1] ?? "");
+    let changed = false;
+    if (typeof flags.python === "string") {
+      const executable = path.resolve(flags.python);
+      const checked = await testPythonProfile(executable);
+      if (!checked.available) throw new Error("python executable is unavailable or not executable: " + executable);
+      profiles.python[alias] = executable;
+      changed = true;
+    }
+    if (flags["compose-file"] !== undefined || flags["project-name"] !== undefined || flags.services !== undefined) {
+      if (
+        typeof flags["compose-file"] !== "string" ||
+        typeof flags["project-name"] !== "string" ||
+        typeof flags.services !== "string"
+      ) {
+        throw new Error(
+          "docker profile requires --compose-file <relative> --project-name <name> --services <a,b> [--control-services <a,b>]",
+        );
+      }
+      const docker: ManagedDockerProfile = {
+        composeFile: flags["compose-file"],
+        projectName: flags["project-name"],
+        services: commaList(flags.services, "--services"),
+        controlServices:
+          typeof flags["control-services"] === "string"
+            ? commaList(flags["control-services"], "--control-services")
+            : [],
+      };
+      profiles.docker[alias] = docker;
+      changed = true;
+    }
+    if (!changed) {
+      throw new Error(
+        "usage: c2c profile add <alias> --python <absolute-path> OR --compose-file <relative> --project-name <name> --services <a,b>",
+      );
+    }
+    await writeManagedProfiles(configDir, profiles);
+    console.log(JSON.stringify({ updated: true, alias, python: alias in profiles.python, docker: alias in profiles.docker }));
+    return;
+  }
+
+  if (action === "remove") {
+    const alias = normalizeManagedProfileAlias(positional[1] ?? "");
+    const removePython = flags.python === true;
+    const removeDocker = flags.docker === true;
+    const removeBoth = !removePython && !removeDocker;
+    const removed = {
+      python: (removeBoth || removePython) && delete profiles.python[alias],
+      docker: (removeBoth || removeDocker) && delete profiles.docker[alias],
+    };
+    await writeManagedProfiles(configDir, profiles);
+    console.log(JSON.stringify({ alias, removed }));
+    return;
+  }
+
+  if (action === "test") {
+    const alias = normalizeManagedProfileAlias(positional[1] ?? "");
+    if (!(alias in profiles.python) && !(alias in profiles.docker)) throw new Error("profile not found: " + alias);
+    console.log(JSON.stringify({
+      alias,
+      python: profiles.python[alias]
+        ? { configured: true, ...(await testPythonProfile(profiles.python[alias])) }
+        : { configured: false },
+      docker: profiles.docker[alias]
+        ? { configured: true, valid: true, profile: profiles.docker[alias] }
+        : { configured: false },
+    }, null, 2));
+    return;
+  }
+
+  if (action === "import-env") {
+    const runtimeEnv = await loadRuntimeEnvironment(configDir);
+    const imported: string[] = [];
+    for (const [envName, target] of [
+      ["CHATGPT2CODEX_PYTHON_RUNTIME_PROFILES", "python"],
+      ["CHATGPT2CODEX_DOCKER_PROFILES", "docker"],
+    ] as const) {
+      const raw = runtimeEnv.env[envName]?.trim();
+      if (!raw) continue;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        throw new Error(envName + " is not valid JSON");
+      }
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(envName + " must be a JSON object");
+      if (target === "python") {
+        for (const [aliasRaw, executable] of Object.entries(parsed as Record<string, unknown>)) {
+          const alias = normalizeManagedProfileAlias(aliasRaw);
+          if (typeof executable !== "string" || !path.isAbsolute(executable)) {
+            throw new Error("invalid Python profile in " + envName + ": " + alias);
+          }
+          profiles.python[alias] = executable;
+        }
+      } else {
+        for (const [aliasRaw, docker] of Object.entries(parsed as Record<string, unknown>)) {
+          const alias = normalizeManagedProfileAlias(aliasRaw);
+          profiles.docker[alias] = docker as ManagedDockerProfile;
+        }
+      }
+      imported.push(target);
+    }
+    await writeManagedProfiles(configDir, profiles);
+    console.log(JSON.stringify({ imported, configDir }, null, 2));
+    return;
+  }
+
+  throw new Error("usage: c2c profile [list|show <alias>|add <alias>|remove <alias>|test <alias>|import-env]");
+}
+
+async function cmdRepository(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const action = positional[0] ?? "list";
+  const configDir = defaultConfigDir();
+  const data = await readManagedRepositories(configDir);
+
+  if (action === "list") {
+    const repositories = [];
+    for (const repo of data.repositories) {
+      const available = await fs.stat(repo.root).then((st) => st.isDirectory()).catch(() => false);
+      repositories.push({ ...repo, available });
+    }
+    console.log(JSON.stringify({ configDir, repositories }, null, 2));
+    return;
+  }
+
+  if (action === "show") {
+    const id = normalizeRepositoryId(positional[1] ?? "");
+    const repo = data.repositories.find((item) => item.id === id);
+    if (!repo) throw new Error("repository not found: " + id);
+    const entry = await inspectProjectRoot(repo.root, { name: repo.name, projectId: repo.id });
+    console.log(JSON.stringify({ ...repo, project: entry }, null, 2));
+    return;
+  }
+
+  if (action === "add") {
+    const rootInput = positional[1];
+    if (!rootInput) throw new Error("usage: c2c repository add <path> [--id <id>] [--name <name>]");
+    const root = path.resolve(rootInput);
+    const name = typeof flags.name === "string" ? flags.name.trim() : path.basename(root);
+    const id = typeof flags.id === "string" ? normalizeRepositoryId(flags.id) : slugRepositoryName(name);
+    await inspectProjectRoot(root, { name, projectId: id });
+    if (data.repositories.some((repo) => repo.id === id)) throw new Error("repository id already exists: " + id);
+    if (data.repositories.some((repo) => path.resolve(repo.root) === root)) throw new Error("repository root is already registered: " + root);
+    data.repositories.push({ id, name, root });
+    data.repositories.sort((a, b) => a.id.localeCompare(b.id));
+    await writeManagedRepositories(configDir, data);
+    console.log(JSON.stringify({ added: true, id, name, root }, null, 2));
+    return;
+  }
+
+  if (action === "remove") {
+    const id = normalizeRepositoryId(positional[1] ?? "");
+    const before = data.repositories.length;
+    data.repositories = data.repositories.filter((repo) => repo.id !== id);
+    const removed = data.repositories.length !== before;
+    if (removed) await writeManagedRepositories(configDir, data);
+    console.log(JSON.stringify({ removed, id }));
+    return;
+  }
+
+  if (action === "use") {
+    const id = normalizeRepositoryId(positional[1] ?? "");
+    if (!data.repositories.some((repo) => repo.id === id)) throw new Error("repository not found: " + id);
+    const instance = typeof flags.instance === "string" ? normalizeInstanceName(flags.instance) : undefined;
+    await setRuntimeConfigValue(configDir, "repository", id, instance);
+    await unsetRuntimeConfigValue(configDir, "workspace", instance);
+    console.log(JSON.stringify({ selected: true, repository: id, instance: instance ?? "defaults" }));
+    return;
+  }
+
+  throw new Error("usage: c2c repository [list|show <id>|add <path>|remove <id>|use <id>]");
+}
+
+async function cmdLock(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const action = positional[0] ?? "list";
+  const stateDir = defaultStateDir();
+  if (action === "list") {
+    console.log(JSON.stringify({ stateDir, locks: await listWorkspaceLocks(stateDir) }, null, 2));
+    return;
+  }
+  if (action === "release") {
+    if (flags.force !== true) {
+      throw new Error("c2c lock release requires --force because it can interrupt another active c2c operation");
+    }
+    const target = positional[1];
+    if (!target) throw new Error("usage: c2c lock release <repository-id|path> --force");
+    const repositories = await readManagedRepositories(defaultConfigDir());
+    const byId = repositories.repositories.find((repo) => repo.id === target);
+    const projectRoot = byId?.root ?? path.resolve(target);
+    console.log(JSON.stringify({
+      released: await forceReleaseWorkspaceLock(stateDir, projectRoot),
+      projectRoot,
+    }));
+    return;
+  }
+  throw new Error("usage: c2c lock [list|release <repository-id|path> --force]");
+}
+
+async function cmdJob(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const action = positional[0] ?? "list";
+  const stateDir = defaultStateDir();
+
+  if (action === "list") {
+    console.log(JSON.stringify({ stateDir, jobs: await listDurableJobs(stateDir) }, null, 2));
+    return;
+  }
+
+  const id = positional[1];
+  if (!id) throw new Error("usage: c2c job <status|logs|resume|cancel> <job-id>");
+
+  if (action === "status") {
+    const job = await readDurableJob(stateDir, id);
+    if (!job) throw new Error("job not found: " + id);
+    const { filePath: _filePath, turns: _turns, ...summary } = job;
+    console.log(JSON.stringify(summary, null, 2));
+    return;
+  }
+
+  if (action === "logs") {
+    const limit =
+      typeof flags.limit === "string"
+        ? Number.parseInt(flags.limit, 10)
+        : 10;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 50) throw new Error("--limit must be an integer from 1 to 50");
+    const logs = await durableJobLogs(stateDir, id, limit);
+    if (!logs) throw new Error("job not found: " + id);
+    console.log(JSON.stringify(logs, null, 2));
+    return;
+  }
+
+  if (action === "cancel" || action === "resume") {
+    const job = await setDurableJobStatus(stateDir, id, action === "cancel" ? "canceled" : "active");
+    if (!job) throw new Error("job not found: " + id);
+    console.log(JSON.stringify({
+      id,
+      status: job.status,
+      projectId: job.projectId ?? null,
+      turnCount: job.turnCount,
+      nextActions: job.nextActions,
+      ...(action === "resume"
+        ? {
+            instruction:
+              "The durable job is active again. Continue it from ChatGPT with goal_loop using this loopId, or goal_workflow resume in the originating session.",
+          }
+        : {}),
+    }, null, 2));
+    return;
+  }
+
+  throw new Error("usage: c2c job [list|status <id>|logs <id> [--limit N]|resume <id>|cancel <id>]");
 }
 
 async function cmdOwnerToken(flags: Record<string, string | boolean>): Promise<void> {
@@ -788,9 +1303,23 @@ async function runtimeHttpOptions(
   const instance = normalizeInstanceName(flags.instance);
   const config = await readRuntimeConfig(defaultConfigDir());
   const persisted = resolveRuntimeSettingsWithLegacy(config, instance, legacyEnv);
-  const workspace = path.resolve(
-    typeof flags.workspace === "string" ? flags.workspace : persisted.workspace ?? process.cwd(),
-  );
+  const repositoryId =
+    typeof flags.repository === "string"
+      ? normalizeRepositoryId(flags.repository)
+      : persisted.repository
+        ? normalizeRepositoryId(persisted.repository)
+        : undefined;
+  let workspaceInput =
+    typeof flags.workspace === "string"
+      ? flags.workspace
+      : persisted.workspace;
+  if (!workspaceInput && repositoryId) {
+    const repositories = await readManagedRepositories(defaultConfigDir());
+    const repository = repositories.repositories.find((item) => item.id === repositoryId);
+    if (!repository) throw new Error("configured repository is not registered: " + repositoryId);
+    workspaceInput = repository.root;
+  }
+  const workspace = path.resolve(workspaceInput ?? process.cwd());
   const host = typeof flags.host === "string" ? flags.host : persisted.host ?? "127.0.0.1";
   const configuredPort = typeof flags.port === "string"
     ? Number.parseInt(flags.port, 10)
@@ -1011,6 +1540,26 @@ async function cmdHealth(flags: Record<string, string | boolean>): Promise<void>
   if (!healthy || (record?.tunnelMode === "cloudflare" && !publicHealthy)) process.exitCode = 1;
 }
 
+async function cmdReload(flags: Record<string, string | boolean>): Promise<void> {
+  if (process.platform !== "linux") {
+    throw new Error("c2c reload currently requires Linux/WSL; use c2c restart on this platform");
+  }
+  const instance = normalizeInstanceName(flags.instance);
+  const record = await readRuntimeInstance(defaultStateDir(), instance);
+  if (!record || !isProcessAlive(record.pid)) throw new Error("instance is not running: " + instance);
+  if (!(await runtimeProcessMatchesRecord(record))) {
+    throw new Error("refusing reload because the recorded pid could not be verified as this c2c instance");
+  }
+  process.kill(record.pid, "SIGHUP");
+  console.log(JSON.stringify({
+    reloaded: true,
+    instance,
+    pid: record.pid,
+    scope: ["profiles", "repositories"],
+    restartRequiredFor: ["port", "host", "tunnel", "public-hostname"],
+  }, null, 2));
+}
+
 async function waitForRuntimeHealth(record: { host: string; port: number }, attempts = 40): Promise<boolean> {
   for (let i = 0; i < attempts; i += 1) {
     if (await runtimeHealth(record)) return true;
@@ -1029,6 +1578,12 @@ async function waitForPublicRuntimeHealth(publicUrl: string, attempts = 20): Pro
 
 async function cmdStart(flags: Record<string, string | boolean>): Promise<void> {
   const runtimeEnv = await loadRuntimeEnvironment(defaultConfigDir());
+  const childEnv = await applyManagedProfiles(defaultConfigDir(), runtimeEnv.env);
+  const serverEnv = withoutTunnelCredentials(childEnv);
+  serverEnv.CHATGPT2CODEX_PYTHON_PROFILE_LOCKED =
+    process.env.CHATGPT2CODEX_PYTHON_RUNTIME_PROFILES?.trim() ? "1" : "0";
+  serverEnv.CHATGPT2CODEX_DOCKER_PROFILE_LOCKED =
+    process.env.CHATGPT2CODEX_DOCKER_PROFILES?.trim() ? "1" : "0";
   const options = await runtimeHttpOptions(flags, runtimeEnv.fileEnv);
   if (!options.portExplicit) {
     options.port = await findAvailableLocalPort(options.host);
@@ -1058,6 +1613,7 @@ async function cmdStart(flags: Record<string, string | boolean>): Promise<void> 
     const legacyCredentialKey = ["CLOUDFLARED", "TUNNEL", "TOKEN"].join("_");
     const credential =
       process.env[legacyCredentialKey]?.trim() ||
+      await getRuntimeSecret(stateDir, "cloudflare-token." + options.instance) ||
       await getRuntimeSecret(stateDir, "cloudflare-token") ||
       runtimeEnv.fileEnv[legacyCredentialKey]?.trim();
     const tunnel = await startCloudflareTunnel({
@@ -1067,7 +1623,7 @@ async function cmdStart(flags: Record<string, string | boolean>): Promise<void> 
       publicHostname: options.publicHostname,
       tunnelName: options.tunnelName,
       credential,
-      env: runtimeEnv.env,
+      env: childEnv,
     });
     tunnelPid = tunnel.pid;
     tunnelLogPath = tunnel.logPath;
@@ -1086,12 +1642,8 @@ async function cmdStart(flags: Record<string, string | boolean>): Promise<void> 
     "--port", String(options.port),
     "--public-url", options.publicUrl,
   ];
-  const child = spawn(process.execPath, args, {
-    detached: true,
-    stdio: "ignore",
-    env: runtimeEnv.env,
-  });
-  child.unref();
+  const serverLogPath = path.join(stateDir, "logs", options.instance + ".server.log");
+  const serverPid = await spawnDetachedLogged(process.execPath, args, serverLogPath, serverEnv);
 
   const healthy = await waitForRuntimeHealth({ host: options.host, port: options.port });
   const record = await readRuntimeInstance(stateDir, options.instance);
@@ -1101,6 +1653,8 @@ async function cmdStart(flags: Record<string, string | boolean>): Promise<void> 
   }
   const mergedRecord = {
     ...record,
+    pid: serverPid,
+    serverLogPath,
     tunnelPid,
     tunnelMode: options.tunnel,
     tunnelLogPath,
@@ -1118,6 +1672,30 @@ async function cmdStart(flags: Record<string, string | boolean>): Promise<void> 
     tunnelAlive: tunnelPid ? isProcessAlive(tunnelPid) : null,
     publicHealthy,
   }, null, 2));
+}
+
+async function cmdLogs(flags: Record<string, string | boolean>): Promise<void> {
+  const instance = normalizeInstanceName(flags.instance);
+  const component =
+    typeof flags.component === "string" ? flags.component : "server";
+  if (component !== "server" && component !== "tunnel") {
+    throw new Error("--component must be server or tunnel");
+  }
+  const lines =
+    typeof flags.lines === "string" ? Number.parseInt(flags.lines, 10) : 100;
+  if (!Number.isInteger(lines) || lines < 1 || lines > 5000) {
+    throw new Error("--lines must be an integer from 1 to 5000");
+  }
+  const record = await readRuntimeInstance(defaultStateDir(), instance);
+  if (!record) throw new Error("instance not found: " + instance);
+  const logPath = component === "server" ? record.serverLogPath : record.tunnelLogPath;
+  if (!logPath) throw new Error(component + " log is not recorded for instance " + instance);
+  const content = await fs.readFile(logPath, "utf8").catch((err: NodeJS.ErrnoException) => {
+    if (err.code === "ENOENT") return "";
+    throw err;
+  });
+  const tail = content.split(/\r?\n/).slice(-lines).join("\n");
+  process.stdout.write(tail + (tail.endsWith("\n") || !tail ? "" : "\n"));
 }
 
 async function cmdStop(flags: Record<string, string | boolean>): Promise<void> {
@@ -1144,14 +1722,31 @@ async function cmdStop(flags: Record<string, string | boolean>): Promise<void> {
     console.log(JSON.stringify({ stopped: true, stale: true, instance, pid: record.pid }));
     return;
   }
-  if (!(await runtimeHealth(record))) {
-    throw new Error(
-      "refusing to signal pid " + record.pid + " because the recorded instance is alive but its health endpoint is not responding",
-    );
+  const healthy = await runtimeHealth(record);
+  if (!healthy) {
+    if (flags.force !== true) {
+      throw new Error(
+        "refusing to signal pid " + record.pid + " because the recorded instance is alive but its health endpoint is not responding; retry with --force only after verifying the instance identity",
+      );
+    }
+    if (!(await runtimeProcessMatchesRecord(record))) {
+      throw new Error(
+        "refusing forced stop because pid " + record.pid + " could not be verified as this c2c instance",
+      );
+    }
   }
   process.kill(record.pid, "SIGTERM");
   for (let i = 0; i < 50 && isProcessAlive(record.pid); i += 1) {
     await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  if (isProcessAlive(record.pid) && flags.force === true) {
+    if (!(await runtimeProcessMatchesRecord(record))) {
+      throw new Error("refusing SIGKILL because runtime process identity no longer matches the recorded c2c instance");
+    }
+    process.kill(record.pid, "SIGKILL");
+    for (let i = 0; i < 20 && isProcessAlive(record.pid); i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
   }
   if (isProcessAlive(record.pid)) throw new Error("instance " + instance + " did not stop cleanly");
   if (record.tunnelPid && isProcessAlive(record.tunnelPid)) {
@@ -1160,7 +1755,15 @@ async function cmdStop(flags: Record<string, string | boolean>): Promise<void> {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     if (isProcessAlive(record.tunnelPid)) {
-      throw new Error("Cloudflare tunnel for instance " + instance + " did not stop cleanly");
+      if (flags.force === true) {
+        process.kill(record.tunnelPid, "SIGKILL");
+        for (let i = 0; i < 20 && isProcessAlive(record.tunnelPid); i += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      }
+      if (isProcessAlive(record.tunnelPid)) {
+        throw new Error("Cloudflare tunnel for instance " + instance + " did not stop cleanly");
+      }
     }
   }
   await removeRuntimeInstance(stateDir, instance);
@@ -1175,6 +1778,10 @@ async function cmdRestart(flags: Record<string, string | boolean>): Promise<void
 async function main(): Promise<void> {
   const { command, flags, positional } = parseArgs(process.argv.slice(2));
   if (command === undefined || command === "help" || command === "--help" || command === "-h") {
+    printHelp();
+    return;
+  }
+  if (flags.help === true) {
     printHelp();
     return;
   }
@@ -1194,6 +1801,18 @@ async function main(): Promise<void> {
     case "secret":
       await cmdSecret(positional, flags);
       break;
+    case "profile":
+      await cmdProfile(positional, flags);
+      break;
+    case "repository":
+      await cmdRepository(positional, flags);
+      break;
+    case "lock":
+      await cmdLock(positional, flags);
+      break;
+    case "job":
+      await cmdJob(positional, flags);
+      break;
     case "start":
       await cmdStart(flags);
       break;
@@ -1203,11 +1822,20 @@ async function main(): Promise<void> {
     case "restart":
       await cmdRestart(flags);
       break;
+    case "reload":
+      await cmdReload(flags);
+      break;
     case "status":
+      await cmdStatus(flags);
+      break;
+    case "ps":
       await cmdStatus(flags);
       break;
     case "health":
       await cmdHealth(flags);
+      break;
+    case "logs":
+      await cmdLogs(flags);
       break;
     case "owner-token":
       await cmdOwnerToken(flags);

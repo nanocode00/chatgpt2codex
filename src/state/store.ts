@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { DomainError, ErrorCode, type ProjectRegistryEntry } from "../types.js";
@@ -188,5 +188,19 @@ export class Store {
     merged.updatedAt = Date.now();
     const validated = SessionSchema.parse(merged);
     await this.atomicWriteJson(this.scopedFilename(SESSIONS_FILE), validated);
+  }
+
+  async clearNamespace(): Promise<void> {
+    if (!this.namespace) {
+      throw new DomainError(ErrorCode.PERMISSION_DENIED, "Refusing to clear the default store namespace");
+    }
+    await Promise.all(
+      [PROJECTS_FILE, SESSIONS_FILE].map(async (filename) => {
+        const target = join(this.stateDir, this.scopedFilename(filename));
+        await unlink(target).catch((err: NodeJS.ErrnoException) => {
+          if (err.code !== "ENOENT") throw err;
+        });
+      }),
+    );
   }
 }

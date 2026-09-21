@@ -409,11 +409,13 @@ describe("Custom GPT action bridge", () => {
     expect(body.paths["/actions/git-pr"]).toBeDefined();
     expect((body.paths["/actions/git-pr"] as { post: { operationId: string } }).post.operationId).toBe("git_pr");
     expect((body.components.schemas.GitPrInput as { type?: string }).type).toBe("object");
-    expect((body.components.schemas.GitPrInput as { required?: string[] }).required).toEqual(["mode", "projectId", "prNumber"]);
+    expect((body.components.schemas.GitPrInput as { required?: string[] }).required).toEqual(["mode", "projectId"]);
     expect((body.components.schemas.GitPrInput as { additionalProperties?: boolean }).additionalProperties).toBe(false);
     expect((((body.components.schemas.GitPrInput as { properties?: Record<string, { enum?: string[] }> }).properties?.mode?.enum) ?? [])).toEqual([
+      "create",
       "inspect",
       "diff",
+      "comment",
       "approve",
       "request_changes",
       "close",

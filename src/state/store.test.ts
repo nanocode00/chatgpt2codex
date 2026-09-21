@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Store } from "./store.js";
-import type { ProjectRegistryEntry } from "../types.js";
+import { ErrorCode, type ProjectRegistryEntry } from "../types.js";
 
 describe("Store", () => {
   let dir: string;
@@ -137,5 +137,19 @@ describe("Store", () => {
     expect((await b.getSession()).activeProjectId).toBe("b");
     expect(await readFile(join(dir, "projects.alpha.json"), "utf8")).toContain('"projectId": "a"');
     expect(await readFile(join(dir, "projects.beta.json"), "utf8")).toContain('"projectId": "b"');
+  });
+
+  it("cleans up only a named namespace", async () => {
+    const scoped = new Store(dir, "session-one");
+    await scoped.saveProjects([{ projectId: "p", name: "p", root: "/p", aliases: ["p"] }]);
+    await scoped.setSession({ activeProjectId: "p", mode: "read", lease: null });
+    await store.saveProjects([{ projectId: "default", name: "default", root: "/default", aliases: ["default"] }]);
+
+    await scoped.clearNamespace();
+
+    expect(await scoped.loadProjects()).toEqual([]);
+    expect((await scoped.getSession()).activeProjectId).toBeNull();
+    expect((await store.loadProjects())[0]?.projectId).toBe("default");
+    await expect(store.clearNamespace()).rejects.toMatchObject({ code: ErrorCode.PERMISSION_DENIED });
   });
 });

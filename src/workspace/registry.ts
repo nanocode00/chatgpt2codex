@@ -96,6 +96,43 @@ function slugify(name: string): string {
   return slug.length > 0 ? slug : name.trim().toLowerCase();
 }
 
+export async function inspectProjectRoot(
+  dirInput: string,
+  options: { name?: string; projectId?: string } = {},
+): Promise<ProjectRegistryEntry> {
+  const dir = path.resolve(dirInput);
+  const stat = await fs.stat(dir).catch(() => null);
+  if (!stat?.isDirectory()) {
+    throw new DomainError(ErrorCode.WORKSPACE_NOT_READY, "Repository root is not an accessible directory", { root: dir });
+  }
+  const isGit = await isGitRepo(dir);
+  const hasMarker = isGit || (await hasAnyProjectMarker(dir));
+  if (!hasMarker) {
+    throw new DomainError(ErrorCode.WORKSPACE_NOT_READY, "Repository root has no recognized project marker", { root: dir });
+  }
+  const name = options.name?.trim() || path.basename(dir);
+  const projectId = options.projectId?.trim() || slugify(name);
+  const [branch, dirty, packageHints, hasAgentsMd, hasCodeBrain] = await Promise.all([
+    isGit ? getBranch(dir) : Promise.resolve(undefined),
+    isGit ? getDirty(dir) : Promise.resolve(undefined),
+    detectPackageHints(dir),
+    pathExists(path.join(dir, "AGENTS.md")).then(async (has) => has || (await pathExists(path.join(dir, "CLAUDE.md")))),
+    pathExists(path.join(dir, ".ai", "bin", "ai")),
+  ]);
+  return {
+    projectId,
+    name,
+    root: dir,
+    aliases: Array.from(new Set([name, projectId, name.toLowerCase()])),
+    branch,
+    dirty,
+    hasAgentsMd,
+    hasCodeBrain,
+    packageHints,
+    lastSeenAt: new Date().toISOString(),
+  };
+}
+
 /**
  * Scan the workspace root for candidate projects (git repos / project marker
  * folders) and build registry entries (PRD §8.1 workspace_list_projects,
@@ -117,35 +154,13 @@ export async function scanWorkspace(root: string): Promise<ProjectRegistryEntry[
   const nowIso = new Date().toISOString();
 
   const pushProject = async (dir: string, name: string): Promise<void> => {
-    const isGit = await isGitRepo(dir);
-    const hasMarker = isGit || (await hasAnyProjectMarker(dir));
-    if (!hasMarker) return;
-
-    const [branch, dirty, packageHints, hasAgentsMd, hasCodeBrain] = await Promise.all([
-      isGit ? getBranch(dir) : Promise.resolve(undefined),
-      isGit ? getDirty(dir) : Promise.resolve(undefined),
-      detectPackageHints(dir),
-      pathExists(path.join(dir, "AGENTS.md")).then(
-        async (has) => has || (await pathExists(path.join(dir, "CLAUDE.md"))),
-      ),
-      pathExists(path.join(dir, ".ai", "bin", "ai")),
-    ]);
-
-    const projectId = slugify(name);
-    const aliases = Array.from(new Set([name, projectId, name.toLowerCase()].map((a) => a)));
-
-    entries.push({
-      projectId,
-      name,
-      root: dir,
-      aliases,
-      branch,
-      dirty,
-      hasAgentsMd,
-      hasCodeBrain,
-      packageHints,
-      lastSeenAt: nowIso,
-    });
+    try {
+      const entry = await inspectProjectRoot(dir, { name });
+      entries.push({ ...entry, lastSeenAt: nowIso });
+    } catch (err) {
+      if (err instanceof DomainError && err.code === ErrorCode.WORKSPACE_NOT_READY) return;
+      throw err;
+    }
   };
 
   await pushProject(root, path.basename(root));

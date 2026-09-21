@@ -132,7 +132,10 @@ overview.
 ```bash
 c2c start
 c2c status
+c2c ps
 c2c health
+c2c logs --lines 100
+c2c reload
 c2c restart
 c2c stop
 ```
@@ -163,7 +166,47 @@ c2c config show --instance proj2
 # Read a secret from stdin rather than command-line arguments
 printf '%s' "$CLOUDFLARED_TUNNEL_TOKEN" | c2c secret set cloudflare-token --stdin
 c2c secret list
+
+# Keep machine-specific Python/Docker profiles out of shell startup files
+c2c profile add proj2 --python ~/proj2-3/.venv/bin/python
+c2c profile list
+
+# Register repositories outside the startup workspace
+c2c repository add ~/proj2-3 --id proj2
+c2c repository use proj2 --instance proj2
+
+# Export/import only non-secret runtime configuration
+c2c config export > c2c-config.json
+c2c config import --stdin < c2c-config.json
 ```
+
+`config export` deliberately excludes runtime secrets. Secrets must be
+configured separately with `c2c secret`. A secret can also be scoped to one
+instance with `--instance <name>`.
+
+Long-running goal-loop state is persisted as a durable job so interrupted
+ChatGPT sessions can inspect and continue it:
+
+```bash
+c2c job list
+c2c job status <job-id>
+c2c job logs <job-id>
+c2c job resume <job-id>
+c2c job cancel <job-id>
+```
+
+Concurrent MCP sessions keep independent active-project/lease state. c2c also
+uses process-shared read/write operation locks for repository access:
+
+```bash
+c2c lock list
+c2c lock release <repository-id-or-path> --force
+```
+
+`c2c reload` live-reloads repository/profile catalogs on Linux/WSL. Changes to
+the listening host/port or Cloudflare tunnel topology still require
+`c2c restart`. `c2c stop --force` is reserved for a hung runtime and only
+signals a PID after verifying that it still matches the recorded c2c process.
 
 Existing shell-based launcher settings can be migrated explicitly:
 

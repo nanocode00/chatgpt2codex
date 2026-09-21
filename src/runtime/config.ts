@@ -5,6 +5,7 @@ export type TunnelMode = "none" | "cloudflare";
 
 export interface RuntimeSettings {
   workspace?: string;
+  repository?: string;
   host?: string;
   port?: number;
   publicHostname?: string;
@@ -25,7 +26,7 @@ interface RuntimeSecretFile {
 
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
-const CONFIG_KEYS = new Set(["workspace", "host", "port", "public-hostname", "tunnel", "tunnel-name"]);
+const CONFIG_KEYS = new Set(["workspace", "repository", "host", "port", "public-hostname", "tunnel", "tunnel-name"]);
 
 function emptyConfig(): RuntimeConfigFile {
   return { version: 1, defaults: {}, instances: {} };
@@ -39,6 +40,10 @@ function validateSettings(value: unknown): RuntimeSettings {
   if (raw.workspace !== undefined) {
     if (typeof raw.workspace !== "string" || !raw.workspace.trim()) throw new Error("workspace must be a non-empty string");
     out.workspace = raw.workspace;
+  }
+  if (raw.repository !== undefined) {
+    if (typeof raw.repository !== "string" || !raw.repository.trim()) throw new Error("repository must be a non-empty string");
+    out.repository = raw.repository.trim();
   }
   if (raw.host !== undefined) {
     if (typeof raw.host !== "string" || !raw.host.trim()) throw new Error("host must be a non-empty string");
@@ -126,6 +131,7 @@ export async function writeRuntimeConfig(configDir: string, config: RuntimeConfi
 function parseConfigValue(key: string, value: string): keyof RuntimeSettings | [keyof RuntimeSettings, string | number] {
   switch (key) {
     case "workspace": return ["workspace", value];
+    case "repository": return ["repository", value];
     case "host": return ["host", value];
     case "port": {
       const port = Number.parseInt(value, 10);

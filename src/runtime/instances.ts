@@ -5,6 +5,8 @@ export interface RuntimeInstanceRecord {
   version: 1;
   name: string;
   pid: number;
+  entrypoint?: string;
+  serverLogPath?: string;
   tunnelPid?: number;
   tunnelMode?: "none" | "cloudflare";
   tunnelLogPath?: string;
@@ -55,6 +57,8 @@ export async function readRuntimeInstance(stateDir: string, name: string): Promi
       typeof raw.pid !== "number" ||
       !Number.isInteger(raw.pid) ||
       raw.pid <= 0 ||
+      (raw.entrypoint !== undefined && typeof raw.entrypoint !== "string") ||
+      (raw.serverLogPath !== undefined && typeof raw.serverLogPath !== "string") ||
       (raw.tunnelPid !== undefined &&
         (typeof raw.tunnelPid !== "number" || !Number.isInteger(raw.tunnelPid) || raw.tunnelPid <= 0)) ||
       (raw.tunnelMode !== undefined && raw.tunnelMode !== "none" && raw.tunnelMode !== "cloudflare") ||
@@ -105,5 +109,35 @@ export function isProcessAlive(pid: number): boolean {
     return true;
   } catch (err) {
     return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+export function runtimeCommandMatchesRecord(
+  record: RuntimeInstanceRecord,
+  argv: string[],
+): boolean {
+  if (!record.entrypoint) return false;
+  const normalizedEntrypoint = path.resolve(record.entrypoint);
+  const entrypointMatches = argv.some((arg) => {
+    if (!arg) return false;
+    try {
+      return path.resolve(arg) === normalizedEntrypoint;
+    } catch {
+      return false;
+    }
+  });
+  if (!entrypointMatches || !argv.includes("serve") || !argv.includes("--http")) return false;
+  const instanceIndex = argv.indexOf("--instance");
+  return instanceIndex >= 0 && argv[instanceIndex + 1] === record.name;
+}
+
+export async function runtimeProcessMatchesRecord(record: RuntimeInstanceRecord): Promise<boolean> {
+  if (process.platform !== "linux" || !record.entrypoint || !isProcessAlive(record.pid)) return false;
+  try {
+    const raw = await readFile(`/proc/${record.pid}/cmdline`, "utf8");
+    const argv = raw.split("\0").filter(Boolean);
+    return runtimeCommandMatchesRecord(record, argv);
+  } catch {
+    return false;
   }
 }

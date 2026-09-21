@@ -15,9 +15,10 @@ import {
   type ToolContext,
   type ToolResult,
 } from "../types.js";
-import { scanWorkspace, findProject } from "../workspace/registry.js";
+import { scanWorkspace, findProject, inspectProjectRoot } from "../workspace/registry.js";
 import { makeLease } from "../workspace/project-select.js";
 import { requireProjectLease } from "../workspace/lease-guard.js";
+import { withWorkspaceLock, type WorkspaceLockMode } from "../workspace/operation-lock.js";
 import { codeSearch } from "../code/search.js";
 import { readSlice } from "../code/read-slice.js";
 import { applyPatch, createFile } from "../code/patch.js";
@@ -68,7 +69,7 @@ import {
   gitReviewPullRequest,
   gitMergePullRequest,
 } from "../git/git.js";
-import { gitUpdatePullRequest } from "../git/extended.js";
+import { gitCommentPullRequest, gitUpdatePullRequest } from "../git/extended.js";
 import { resolveInProject } from "../policy/paths.js";
 import { isSecretPath, redact } from "../policy/secrets.js";
 import {
@@ -830,7 +831,12 @@ async function latestGoalLoop(
     }
   }
   candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
-  return candidates[0] ?? null;
+  const sessionId = ctx.config.sessionId;
+  if (!sessionId) return candidates[0] ?? null;
+  const sameSession = candidates.filter((candidate) => candidate.payload.sessionId === sessionId);
+  if (sameSession.length > 0) return sameSession[0] ?? null;
+  const legacy = candidates.filter((candidate) => candidate.payload.sessionId === undefined);
+  return legacy[0] ?? null;
 }
 
 /**
@@ -870,6 +876,33 @@ async function guardSecretPath(ctx: ToolContext, absPath: string, toolName: stri
   }
 }
 
+const PROJECT_LOCK_BYPASS_TOOLS = new Set([
+  "project_select",
+  "goal_intake",
+  "goal_loop",
+  "goal_workflow",
+]);
+
+function projectOperationLockMode(
+  toolName: string,
+  config: Record<string, unknown>,
+  input: unknown,
+): WorkspaceLockMode | null {
+  if (PROJECT_LOCK_BYPASS_TOOLS.has(toolName)) return null;
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const row = input as Record<string, unknown>;
+  if (typeof row.projectId !== "string") return null;
+
+  if (toolName === "git_pr" && (row.mode === "inspect" || row.mode === "diff")) return "read";
+  if (toolName === "git_workspace" && row.mode === "list_worktrees") return "read";
+
+  const annotations = config.annotations;
+  if (annotations && typeof annotations === "object" && !Array.isArray(annotations)) {
+    if ((annotations as Record<string, unknown>).readOnlyHint === true) return "read";
+  }
+  return "write";
+}
+
 // ---------------------------------------------------------------------------
 // registerTools
 // ---------------------------------------------------------------------------
@@ -893,7 +926,40 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
           ...((config._meta as Record<string, unknown> | undefined) ?? {}),
         },
       } as never,
-      handler as never,
+      (async (...args: unknown[]) => {
+        const input = args[0];
+        const lockMode = projectOperationLockMode(name, config, input);
+        const projectId =
+          input && typeof input === "object" && !Array.isArray(input) && typeof (input as Record<string, unknown>).projectId === "string"
+            ? (input as Record<string, unknown>).projectId as string
+            : undefined;
+        const entry = projectId ? ctx.registry.find((project) => project.projectId === projectId) : undefined;
+        if (!lockMode || !entry) {
+          return await (handler as (...handlerArgs: unknown[]) => Promise<unknown>)(...args);
+        }
+        const owner = ctx.config.sessionId
+          ? "session:" + ctx.config.sessionId
+          : "instance:" + (ctx.config.instanceName ?? "default") + ":pid:" + process.pid;
+        try {
+          return await withWorkspaceLock(
+            ctx.stateDir,
+            entry.root,
+            lockMode,
+            owner,
+            async () => await (handler as (...handlerArgs: unknown[]) => Promise<unknown>)(...args),
+          );
+        } catch (err) {
+          const mapped = mapError(err);
+          await ctx.ledger.append({
+            type: "tool.call.failed",
+            tool: name,
+            input: redactUnknown(input),
+            code: mapped.structuredContent.code,
+            error: mapped.structuredContent.error,
+          });
+          return toCallToolResult(name, mapped);
+        }
+      }) as never,
     )) as unknown as McpServer["registerTool"];
 
   const widgetMeta = e2eWidgetResourceMeta(ctx.config.publicUrl);
@@ -1153,6 +1219,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
         mode: z.enum(["implement", "research", "debug", "review", "plan"]).optional(),
         maxTurns: z.number().int().min(1).max(50).optional(),
         lastResult: z.string().optional(),
+        jobStatus: z.enum(["active", "completed", "blocked"]).optional(),
       },
     },
     async (input) => {
@@ -1175,13 +1242,23 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
         const loopFile = path.join(goalsDirForContext(ctx), `${loopId}.loop.json`);
         let previousTurns = 0;
         let existingTurns: unknown[] = [];
+        let existingStatus: unknown;
         try {
-          const existing = JSON.parse(await fs.readFile(loopFile, "utf8")) as { turns?: unknown[] };
+          const existing = JSON.parse(await fs.readFile(loopFile, "utf8")) as { turns?: unknown[]; status?: unknown };
           existingTurns = Array.isArray(existing.turns) ? existing.turns : [];
           previousTurns = existingTurns.length;
+          existingStatus = existing.status;
         } catch {
           existingTurns = [];
           previousTurns = 0;
+          existingStatus = undefined;
+        }
+        if (existingStatus === "canceled") {
+          throw new DomainError(
+            ErrorCode.JOB_CANCELED,
+            `Job ${loopId} is canceled. Run c2c job resume ${loopId} before continuing it.`,
+            { loopId },
+          );
         }
         const turn = previousTurns + 1;
         const remainingTurns = Math.max(0, maxTurns - turn);
@@ -1204,19 +1281,25 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
             ];
         const doneRule =
           "Stop only when the requested work is implemented and verified, a real blocker is proven, or a security/approval gate is hit.";
+        const jobStatus = input.jobStatus ?? (remainingTurns > 0 ? "active" : "paused");
+        const persistedNextActions =
+          jobStatus === "completed" || jobStatus === "blocked" ? [] : nextActions;
         const payload = {
           loopId,
           goalPreview: input.goal ? redact(input.goal).slice(0, 1000) : undefined,
           projectId: effectiveProjectId,
           mode: input.mode ?? resumedMode ?? "implement",
           maxTurns,
+          status: jobStatus,
+          sessionId: ctx.config.sessionId,
+          updatedAt: new Date().toISOString(),
           turns: [
             ...existingTurns,
             {
               turn,
               at: new Date().toISOString(),
               lastResult: input.lastResult ? redact(input.lastResult).slice(0, 1000) : undefined,
-              nextActions,
+              nextActions: persistedNextActions,
             },
           ],
         };
@@ -1225,10 +1308,11 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
           {
             loopId,
             resumed: Boolean(resumed),
+            jobStatus,
             turn,
             remainingTurns,
-            continueRequired: remainingTurns > 0,
-            nextActions,
+            continueRequired: jobStatus === "active" && remainingTurns > 0,
+            nextActions: persistedNextActions,
             loopRules: [
               "Do one small inspect/edit/verify batch per action round.",
               "Keep each tool call short; avoid silent long thinking turns.",
@@ -2833,11 +2917,28 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
         if (input.mode === "add_worktree") {
           const targetPath = resolveSiblingWorktreeTarget(entry.root, input.targetPath);
           const result = await gitAddLinkedWorktree(entry.root, targetPath, input.branchName, input.baseBranch);
-          return makeResult({ ...result }, `Created linked worktree for ${result.branch ?? "detached HEAD"} at ${result.path}.`);
+          const worktreeEntry = await inspectProjectRoot(result.path, {
+            name: path.basename(result.path),
+          });
+          const existingByRoot = ctx.registry.findIndex(
+            (project) => path.resolve(project.root) === path.resolve(worktreeEntry.root),
+          );
+          if (existingByRoot >= 0) ctx.registry[existingByRoot] = worktreeEntry;
+          else ctx.registry.push(worktreeEntry);
+          await ctx.store.saveProjects(ctx.registry);
+          return makeResult(
+            { ...result, projectId: worktreeEntry.projectId },
+            `Created and registered linked worktree for ${result.branch ?? "detached HEAD"} at ${result.path} as project ${worktreeEntry.projectId}.`,
+          );
         }
         if (input.mode === "remove_worktree") {
           const targetPath = resolveSiblingWorktreeTarget(entry.root, input.targetPath);
           const result = await gitRemoveLinkedWorktree(entry.root, targetPath);
+          const nextRegistry = ctx.registry.filter(
+            (project) => path.resolve(project.root) !== path.resolve(targetPath),
+          );
+          ctx.registry.splice(0, ctx.registry.length, ...nextRegistry);
+          await ctx.store.saveProjects(ctx.registry);
           return makeResult({ ...result }, `Removed linked worktree at ${result.path}.`);
         }
         if (input.mode === "fetch") {
@@ -2911,11 +3012,19 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
   registerTool(
     "git_pr",
     {
-      title: "Inspect, diff, review, manage, or safely merge a GitHub PR",
-      description: "Inspect PR state or read its remote patch without switching the local branch, submit approve/request-changes reviews, close/reopen, or merge against an exact inspected head SHA. A dirty local worktree is not a blocker for inspect/diff.",
+      title: "Create, inspect, diff, review, manage, or safely merge a GitHub PR",
+      description: "Create a PR from the current pushed branch, inspect PR state or read its remote patch without switching the local branch, comment, submit approve/request-changes reviews, close/reopen, or merge against an exact inspected head SHA. A dirty local worktree is not a blocker for inspect/diff.",
       annotations: COMMAND_RUN_ANNOTATIONS,
       _meta: chatGptToolMeta("Checking pull request...", "Pull request operation completed"),
       inputSchema: z.discriminatedUnion("mode", [
+        z.object({
+          mode: z.literal("create"),
+          projectId: z.string(),
+          baseBranch: z.string(),
+          title: z.string().min(1).max(256),
+          body: z.string().max(64 * 1024).optional(),
+          draft: z.boolean().optional(),
+        }).strict(),
         z.object({
           mode: z.literal("inspect"),
           projectId: z.string(),
@@ -2932,6 +3041,13 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
           prNumber: z.number().int().positive(),
           expectedHeadSha: z.string().regex(/^[0-9a-fA-F]{40}$/),
           mergeMethod: z.enum(["merge", "squash", "rebase"]).optional(),
+        }).strict(),
+        z.object({
+          mode: z.literal("comment"),
+          projectId: z.string(),
+          prNumber: z.number().int().positive(),
+          expectedHeadSha: z.string().regex(/^[0-9a-fA-F]{40}$/),
+          body: z.string().min(1).max(64 * 1024),
         }).strict(),
         z.object({
           mode: z.literal("approve"),
@@ -2963,6 +3079,15 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
     },
     async (input) => {
       return withErrorMapping<Record<string, unknown>>(ctx, "git_pr", input, async () => {
+        if (input.mode === "create") {
+          await requireProjectLease(ctx, input.projectId, "remote");
+          const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
+          const result = await gitCreatePullRequest(entry.root, input.baseBranch, input.title, input.body, input.draft);
+          return makeResult(
+            { ...result },
+            result.created ? `Created PR #${result.number}.` : `Open PR #${result.number} already exists.`,
+          );
+        }
         if (input.mode === "inspect" || input.mode === "diff") {
           await requireProjectLease(ctx, input.projectId, "read");
           const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
@@ -2975,6 +3100,10 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
         }
         await requireProjectLease(ctx, input.projectId, "remote");
         const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
+        if (input.mode === "comment") {
+          const result = await gitCommentPullRequest(entry.root, input.prNumber, input.expectedHeadSha, input.body);
+          return makeResult({ ...result }, `Commented on PR #${input.prNumber}.`);
+        }
         if (input.mode === "merge") {
           const result = await gitMergePullRequest(entry.root, input.prNumber, input.expectedHeadSha, input.mergeMethod);
           return makeResult({ ...result }, result.alreadyMerged ? `PR #${result.number} was already merged.` : `Merged PR #${result.number}.`);

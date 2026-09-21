@@ -69,6 +69,8 @@ export interface Config {
   stateDir: string;
   /** Optional runtime instance name used to isolate per-chat/per-server state. */
   instanceName?: string;
+  /** MCP transport session id when this context belongs to one remote client. */
+  sessionId?: string;
   /** Max bytes returned/read for a single file_read_slice call. */
   maxReadBytes: number;
   /** Max bytes accepted for a single file_apply_patch payload. */
@@ -140,6 +142,8 @@ export enum ErrorCode {
   PATCH_TOO_LARGE = "PATCH_TOO_LARGE",
   NULLBYTE_REJECTED = "NULLBYTE_REJECTED",
   PENDING_WORK_IN_ACTIVE = "PENDING_WORK_IN_ACTIVE",
+  WORKSPACE_LOCKED = "WORKSPACE_LOCKED",
+  JOB_CANCELED = "JOB_CANCELED",
   SCAN_DENIED = "SCAN_DENIED",
   PROJECT_NOT_SELECTED = "PROJECT_NOT_SELECTED",
   NOT_IMPLEMENTED = "NOT_IMPLEMENTED",

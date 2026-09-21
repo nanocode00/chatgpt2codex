@@ -11,6 +11,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { checkResourceAllowed, resourceUrlFromServerUrl } from "@modelcontextprotocol/sdk/shared/auth-utils.js";
 import type { ToolContext } from "../types.js";
+import { Store } from "../state/store.js";
 import { createServer as createMcpServer } from "./mcp-server.js";
 import { SingleUserOAuthProvider, type OAuthConfig } from "../auth/oauth-provider.js";
 import { verifyOwnerToken } from "../auth/owner-token.js";
@@ -73,6 +74,31 @@ export function defaultHttpServerConfig(overrides: Partial<HttpServerConfig> = {
 interface TrackedSession {
   transport: StreamableHTTPServerTransport;
   lastActiveAtMs: number;
+  cleanup: () => Promise<void>;
+}
+
+async function createSessionContext(
+  ctx: ToolContext,
+  sessionId: string,
+): Promise<{ ctx: ToolContext; cleanup: () => Promise<void> }> {
+  const instance = ctx.config.instanceName ?? "default";
+  const namespace = instance + ".session." + sessionId;
+  const store = new Store(ctx.stateDir, namespace);
+  await store.saveProjects(ctx.registry);
+  return {
+    ctx: {
+      ...ctx,
+      remote: true,
+      config: { ...ctx.config, sessionId },
+      store: {
+        loadProjects: () => store.loadProjects(),
+        saveProjects: (projects) => store.saveProjects(projects),
+        getSession: () => store.getSession(),
+        setSession: (session) => store.setSession(session),
+      },
+    },
+    cleanup: () => store.clearNamespace(),
+  };
 }
 
 function sendJsonRpcError(res: Response, status: number, code: number, message: string): void {
@@ -294,7 +320,9 @@ export function createHttpServer(ctx: ToolContext, config: HttpServerConfig): Ru
       }
     }
     if (oldestId) {
-      sessions.get(oldestId)?.transport.close();
+      const oldest = sessions.get(oldestId);
+      oldest?.transport.close();
+      if (oldest) void oldest.cleanup().catch(() => undefined);
       sessions.delete(oldestId);
     }
   }
@@ -304,6 +332,7 @@ export function createHttpServer(ctx: ToolContext, config: HttpServerConfig): Ru
     for (const [id, session] of sessions) {
       if (now - session.lastActiveAtMs > config.sessionTtlMs) {
         session.transport.close();
+        void session.cleanup().catch(() => undefined);
         sessions.delete(id);
       }
     }
@@ -355,19 +384,29 @@ export function createHttpServer(ctx: ToolContext, config: HttpServerConfig): Ru
       } else if (initializeRequest) {
         if (sessions.size >= config.maxSessions) evictOldestSession();
 
+        const newSessionId = randomUUID();
+        const session = await createSessionContext(ctx, newSessionId);
         transport = new StreamableHTTPServerTransport({
-          sessionIdGenerator: () => randomUUID(),
+          sessionIdGenerator: () => newSessionId,
           onsessioninitialized: (newSessionId) => {
             if (transport) {
               lastSessionActivityAtMs = Date.now();
-              sessions.set(newSessionId, { transport, lastActiveAtMs: lastSessionActivityAtMs });
+              sessions.set(newSessionId, {
+                transport,
+                lastActiveAtMs: lastSessionActivityAtMs,
+                cleanup: session.cleanup,
+              });
             }
           },
         });
 
         transport.onclose = () => {
           const closedSessionId = transport?.sessionId;
-          if (closedSessionId) sessions.delete(closedSessionId);
+          if (closedSessionId) {
+            const tracked = sessions.get(closedSessionId);
+            sessions.delete(closedSessionId);
+            if (tracked) void tracked.cleanup().catch(() => undefined);
+          }
         };
 
         // Mark this session remote: it's how ChatGPT (and any other network
@@ -375,7 +414,7 @@ export function createHttpServer(ctx: ToolContext, config: HttpServerConfig): Ru
         // refused here even when the desktop-control tools are exposed to
         // ChatGPT (see src/server/tools.ts project_select handler /
         // isControlChatGptExposed) — lease arming stays local-only (stdio).
-        const mcpServer = await createMcpServer({ ...ctx, remote: true });
+        const mcpServer = await createMcpServer(session.ctx);
         await mcpServer.connect(transport);
       } else {
         sendJsonRpcError(res, 400, -32000, "No valid MCP session");
@@ -398,7 +437,10 @@ export function createHttpServer(ctx: ToolContext, config: HttpServerConfig): Ru
       if (closed) return;
       closed = true;
       clearInterval(sweepInterval);
-      for (const session of sessions.values()) session.transport.close();
+      for (const session of sessions.values()) {
+        session.transport.close();
+        void session.cleanup().catch(() => undefined);
+      }
       sessions.clear();
       oauthProvider.close();
     },
