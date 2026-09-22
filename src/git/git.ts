@@ -725,6 +725,36 @@ export interface GitPrInspection {
   mergedCommitSha: string | null;
 }
 
+export interface GitPrReviewDetail {
+  id: number;
+  url: string;
+  author: string | null;
+  state: string;
+  body: string;
+  commitSha: string | null;
+  submittedAt: string | null;
+}
+
+export interface GitPrInlineComment {
+  id: number;
+  url: string;
+  author: string | null;
+  body: string;
+  path: string | null;
+  line: number | null;
+  side: string | null;
+  commitSha: string | null;
+  createdAt: string | null;
+}
+
+export interface GitPrReviewDetailsResult {
+  number: number;
+  url: string;
+  headSha: string;
+  reviews: GitPrReviewDetail[];
+  inlineComments: GitPrInlineComment[];
+}
+
 type SleepFn = (ms: number) => Promise<void>;
 const sleep: SleepFn = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const PR_MERGEABILITY_RETRY_DELAYS_MS = [1000, 2000, 4000] as const;
@@ -840,6 +870,65 @@ export async function gitInspectPullRequest(
     }
   }
   throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "GitHub PR inspection retry state was invalid");
+}
+
+export async function gitReadPullRequestReviewDetails(
+  root: string,
+  prNumber: number,
+  ghRunner: GitProcessRunner = runGh,
+): Promise<GitPrReviewDetailsResult> {
+  assertPrNumber(prNumber);
+  const repository = await githubRepositoryForRoot(root);
+  const inspection = await gitInspectPullRequest(root, prNumber, ghRunner, async () => undefined);
+  try {
+    const [reviewsResponse, commentsResponse] = await Promise.all([
+      ghRunner(root, ["api", `repos/${repository}/pulls/${prNumber}/reviews`, "--paginate", "--slurp"]),
+      ghRunner(root, ["api", `repos/${repository}/pulls/${prNumber}/comments`, "--paginate", "--slurp"]),
+    ]);
+    const reviewPages = JSON.parse(reviewsResponse.stdout || "[]");
+    const commentPages = JSON.parse(commentsResponse.stdout || "[]");
+    if (!Array.isArray(reviewPages) || !Array.isArray(commentPages)) throw new Error("unexpected response");
+    const rawReviews = reviewPages.flatMap((page) => Array.isArray(page) ? page : []);
+    const rawComments = commentPages.flatMap((page) => Array.isArray(page) ? page : []);
+    const reviews = rawReviews.map((item) => {
+      const row = item as Record<string, unknown>;
+      const user = row.user && typeof row.user === "object" ? row.user as Record<string, unknown> : null;
+      return {
+        id: Number(row.id),
+        url: typeof row.html_url === "string" ? row.html_url : "",
+        author: user && typeof user.login === "string" ? user.login : null,
+        state: typeof row.state === "string" ? row.state.toUpperCase() : "",
+        body: redact(typeof row.body === "string" ? row.body : ""),
+        commitSha: typeof row.commit_id === "string" ? row.commit_id : null,
+        submittedAt: typeof row.submitted_at === "string" ? row.submitted_at : null,
+      };
+    }).filter((row) => Number.isInteger(row.id) && row.id > 0);
+    const inlineComments = rawComments.map((item) => {
+      const row = item as Record<string, unknown>;
+      const user = row.user && typeof row.user === "object" ? row.user as Record<string, unknown> : null;
+      return {
+        id: Number(row.id),
+        url: typeof row.html_url === "string" ? row.html_url : "",
+        author: user && typeof user.login === "string" ? user.login : null,
+        body: redact(typeof row.body === "string" ? row.body : ""),
+        path: typeof row.path === "string" ? row.path : null,
+        line: typeof row.line === "number" && Number.isInteger(row.line) ? row.line : null,
+        side: typeof row.side === "string" ? row.side : null,
+        commitSha: typeof row.commit_id === "string" ? row.commit_id : null,
+        createdAt: typeof row.created_at === "string" ? row.created_at : null,
+      };
+    }).filter((row) => Number.isInteger(row.id) && row.id > 0);
+    return {
+      number: inspection.number,
+      url: inspection.url,
+      headSha: inspection.headSha,
+      reviews,
+      inlineComments,
+    };
+  } catch (err) {
+    if (err instanceof DomainError) throw err;
+    throw sanitizedProcessError("GitHub PR review details", err);
+  }
 }
 
 export interface GitPrDiffResult {

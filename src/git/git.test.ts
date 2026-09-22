@@ -9,6 +9,7 @@ import {
   gitAddLinkedWorktree,
   gitCreatePullRequest,
   gitInspectPullRequest,
+  gitReadPullRequestReviewDetails,
   gitReadPullRequestDiff,
   gitReviewPullRequest,
   gitMergePullRequest,
@@ -864,6 +865,40 @@ describe("safe git workspace/publish workflow", () => {
     expect(result.diff).toContain("diff --git");
     expect(result.diff).not.toContain("ghp_123456789012345678901234567890123456");
     expect(calls).toContainEqual(["pr", "diff", "6", "--repo", "example/repo", "--patch"]);
+    expect((await execFileAsync("git", ["status", "--porcelain"], { cwd: dir })).stdout).toBe("");
+  });
+
+  it("reads review bodies and inline review comments without mutating the worktree", async () => {
+    await execFileAsync("git", ["remote", "set-url", "origin", "https://github.com/example/repo.git"], { cwd: dir });
+    const headSha = "a".repeat(40);
+    const calls: string[][] = [];
+    const result = await gitReadPullRequestReviewDetails(dir, 8, async (_cwd, args) => {
+      calls.push(args);
+      if (args[0] === "pr") {
+        return { stdout: JSON.stringify({
+          number: 8, url: "https://github.com/example/repo/pull/8", state: "OPEN", isDraft: false,
+          baseRefName: "main", headRefName: "feature/review-details", headRefOid: headSha,
+          mergeable: "MERGEABLE", mergeStateStatus: "CLEAN", reviewDecision: "CHANGES_REQUESTED",
+          statusCheckRollup: [], mergedAt: null, mergeCommit: null,
+        }), stderr: "" };
+      }
+      if (args[1]?.endsWith("/reviews")) {
+        return { stdout: JSON.stringify([[{
+          id: 11, html_url: "https://github.com/example/repo/pull/8#pullrequestreview-11",
+          user: { login: "reviewer" }, state: "CHANGES_REQUESTED", body: "Please fix the guard.",
+          commit_id: headSha, submitted_at: "2026-09-22T00:00:00Z",
+        }]]), stderr: "" };
+      }
+      return { stdout: JSON.stringify([[{
+        id: 22, html_url: "https://github.com/example/repo/pull/8#discussion_r22",
+        user: { login: "reviewer" }, body: "This path is unsafe.", path: "src/a.ts",
+        line: 42, side: "RIGHT", commit_id: headSha, created_at: "2026-09-22T00:01:00Z",
+      }]]), stderr: "" };
+    });
+    expect(result.reviews).toEqual([expect.objectContaining({ id: 11, state: "CHANGES_REQUESTED", body: "Please fix the guard." })]);
+    expect(result.inlineComments).toEqual([expect.objectContaining({ id: 22, path: "src/a.ts", line: 42, body: "This path is unsafe." })]);
+    expect(calls).toContainEqual(["api", "repos/example/repo/pulls/8/reviews", "--paginate", "--slurp"]);
+    expect(calls).toContainEqual(["api", "repos/example/repo/pulls/8/comments", "--paginate", "--slurp"]);
     expect((await execFileAsync("git", ["status", "--porcelain"], { cwd: dir })).stdout).toBe("");
   });
 

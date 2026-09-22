@@ -67,6 +67,7 @@ import {
   gitPushCurrentBranch,
   gitCreatePullRequest,
   gitInspectPullRequest,
+  gitReadPullRequestReviewDetails,
   gitReadPullRequestDiff,
   gitReviewPullRequest,
   gitMergePullRequest,
@@ -154,6 +155,17 @@ function resolveSiblingWorktreeTarget(projectRoot: string, targetPath: string): 
       "Linked worktree target must be a sibling directory of the project root",
       { projectRoot: projectAbs, targetPath },
     );
+  }
+  return target;
+}
+
+function resolveRegisteredWorktreeTarget(projectRoot: string, targetPath: string): string {
+  if (!targetPath || targetPath.includes("\0")) {
+    throw new DomainError(ErrorCode.PATH_OUTSIDE_WORKSPACE, "Invalid worktree target path");
+  }
+  const target = path.resolve(targetPath);
+  if (target === path.resolve(projectRoot)) {
+    throw new DomainError(ErrorCode.PATH_OUTSIDE_WORKSPACE, "Refusing to remove the current project worktree");
   }
   return target;
 }
@@ -895,7 +907,7 @@ function projectOperationLockMode(
   const row = input as Record<string, unknown>;
   if (typeof row.projectId !== "string") return null;
 
-  if (toolName === "git_pr" && (row.mode === "inspect" || row.mode === "diff")) return "read";
+  if (toolName === "git_pr" && (row.mode === "inspect" || row.mode === "diff" || row.mode === "review_details")) return "read";
   if (toolName === "git_workspace" && row.mode === "list_worktrees") return "read";
 
   const annotations = config.annotations;
@@ -2928,7 +2940,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
     "git_workspace",
     {
       title: "Manage safe Git workspace state",
-      description: "Fetch origin, fast-forward, create/switch local branches, or list/add/remove linked Git worktrees using fixed Git operations. Linked worktrees are confined to sibling directories of the project root.",
+      description: "Fetch origin, fast-forward, create/switch local branches, or list/add/remove linked Git worktrees using fixed Git operations. New worktrees are confined to sibling directories; removal may target any worktree already registered by Git.",
       annotations: LOCAL_WRITE_ANNOTATIONS,
       _meta: chatGptToolMeta("Updating Git workspace...", "Git workspace updated"),
       inputSchema: z.discriminatedUnion("mode", [
@@ -2968,7 +2980,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
           );
         }
         if (input.mode === "remove_worktree") {
-          const targetPath = resolveSiblingWorktreeTarget(entry.root, input.targetPath);
+          const targetPath = resolveRegisteredWorktreeTarget(entry.root, input.targetPath);
           const result = await gitRemoveLinkedWorktree(entry.root, targetPath);
           const nextRegistry = ctx.registry.filter(
             (project) => path.resolve(project.root) !== path.resolve(targetPath),
@@ -3049,7 +3061,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
     "git_pr",
     {
       title: "Create, inspect, diff, review, manage, or safely merge a GitHub PR",
-      description: "Create a PR from the current pushed branch, inspect PR state or read its remote patch without switching the local branch, comment, submit approve/request-changes reviews, close/reopen, or merge against an exact inspected head SHA. A dirty local worktree is not a blocker for inspect/diff.",
+      description: "Create a PR from the current pushed branch, inspect PR state, read its remote patch or review bodies/inline comments, retarget its base, comment, submit approve/request-changes reviews, close/reopen, or merge against an exact inspected head SHA. A dirty local worktree is not a blocker for read-only PR operations.",
       annotations: COMMAND_RUN_ANNOTATIONS,
       _meta: chatGptToolMeta("Checking pull request...", "Pull request operation completed"),
       inputSchema: z.discriminatedUnion("mode", [
@@ -3072,6 +3084,11 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
           prNumber: z.number().int().positive(),
         }).strict(),
         z.object({
+          mode: z.literal("review_details"),
+          projectId: z.string(),
+          prNumber: z.number().int().positive(),
+        }).strict(),
+        z.object({
           mode: z.literal("merge"),
           projectId: z.string(),
           prNumber: z.number().int().positive(),
@@ -3084,6 +3101,13 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
           prNumber: z.number().int().positive(),
           expectedHeadSha: z.string().regex(/^[0-9a-fA-F]{40}$/),
           body: z.string().min(1).max(64 * 1024),
+        }).strict(),
+        z.object({
+          mode: z.literal("update_base"),
+          projectId: z.string(),
+          prNumber: z.number().int().positive(),
+          expectedHeadSha: z.string().regex(/^[0-9a-fA-F]{40}$/),
+          baseBranch: z.string(),
         }).strict(),
         z.object({
           mode: z.literal("approve"),
@@ -3124,12 +3148,16 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
             result.created ? `Created PR #${result.number}.` : `Open PR #${result.number} already exists.`,
           );
         }
-        if (input.mode === "inspect" || input.mode === "diff") {
+        if (input.mode === "inspect" || input.mode === "diff" || input.mode === "review_details") {
           await requireProjectLease(ctx, input.projectId, "read");
           const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
           if (input.mode === "diff") {
             const result = await gitReadPullRequestDiff(entry.root, input.prNumber);
             return makeResult({ ...result }, `Read PR #${result.number} diff without changing the local worktree.`);
+          }
+          if (input.mode === "review_details") {
+            const result = await gitReadPullRequestReviewDetails(entry.root, input.prNumber);
+            return makeResult({ ...result }, `Read ${result.reviews.length} review(s) and ${result.inlineComments.length} inline comment(s) for PR #${result.number}.`);
           }
           const result = await gitInspectPullRequest(entry.root, input.prNumber);
           return makeResult({ ...result }, `Inspected PR #${result.number}.`);
@@ -3149,6 +3177,10 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
             state: input.mode === "close" ? "closed" : "open",
           });
           return makeResult({ ...result }, `${input.mode === "close" ? "Closed" : "Reopened"} PR #${result.number}.`);
+        }
+        if (input.mode === "update_base") {
+          const result = await gitUpdatePullRequest(entry.root, input.prNumber, input.expectedHeadSha, { baseBranch: input.baseBranch });
+          return makeResult({ ...result }, `Updated PR #${result.number} base to ${input.baseBranch}.`);
         }
         const result = await gitReviewPullRequest(entry.root, input.prNumber, input.expectedHeadSha, input.mode, input.body ?? "");
         return makeResult(
