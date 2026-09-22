@@ -8,6 +8,7 @@ import {
   gitCherryPick,
   gitCompare,
   gitDeleteLocalBranch,
+  gitDeleteRemoteBranch,
   gitListBranches,
   gitListStashes,
   gitLog,
@@ -18,6 +19,7 @@ import {
   gitStashDrop,
   gitStashPush,
   gitUnstage,
+  gitUpdatePullRequest,
 } from "./extended.js";
 
 const execFileAsync = promisify(execFile);
@@ -60,6 +62,44 @@ describe("extended safe git operations", () => {
     const result = await gitDeleteLocalBranch(root, "merged-feature", feature!.sha);
     expect(result.deleted).toBe(true);
     expect((await gitListBranches(root)).some((branch) => branch.name === "merged-feature")).toBe(false);
+  });
+
+  it("deletes an exact remote branch only after verifying it is merged into the requested origin base", async () => {
+    const bare = await mkdtemp(path.join(os.tmpdir(), "c2c-git-remote-"));
+    try {
+      await git(bare, "init", "--bare");
+      await git(root, "remote", "add", "origin", bare);
+      await git(root, "push", "-u", "origin", "main");
+      await git(root, "branch", "merged-remote");
+      await git(root, "push", "origin", "merged-remote");
+      const branches = await gitListBranches(root);
+      const remote = branches.find((branch) => branch.name === "origin/merged-remote");
+      expect(remote?.sha).toMatch(/^[0-9a-f]{40}$/);
+      const result = await gitDeleteRemoteBranch(root, "merged-remote", remote!.sha, "main");
+      expect(result).toMatchObject({ deleted: true, branch: "merged-remote", baseBranch: "main" });
+      await git(root, "fetch", "--prune", "origin");
+      expect((await gitListBranches(root)).some((branch) => branch.name === "origin/merged-remote")).toBe(false);
+    } finally {
+      await rm(bare, { recursive: true, force: true });
+    }
+  });
+
+  it("updates a PR base through GitHub with an exact head concurrency guard", async () => {
+    await git(root, "remote", "add", "origin", "https://github.com/example/repo.git");
+    const expectedHead = "a".repeat(40);
+    const calls: string[][] = [];
+    const result = await gitUpdatePullRequest(root, 9, expectedHead, { baseBranch: "main" }, async (_cwd, args) => {
+      calls.push(args);
+      if (args[0] === "pr") {
+        return { stdout: JSON.stringify({ headRefOid: expectedHead, state: "OPEN" }), stderr: "" };
+      }
+      return { stdout: JSON.stringify({
+        number: 9, state: "open", title: "Retarget me", html_url: "https://github.com/example/repo/pull/9",
+        base: { ref: "main" },
+      }), stderr: "" };
+    });
+    expect(result).toMatchObject({ updated: true, number: 9, baseBranch: "main" });
+    expect(calls).toContainEqual(["api", "--method", "PATCH", "repos/example/repo/pulls/9", "-f", "base=main"]);
   });
 
   it("creates, lists, applies, and drops a stash without pop semantics", async () => {

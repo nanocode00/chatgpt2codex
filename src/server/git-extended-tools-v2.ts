@@ -10,6 +10,7 @@ import {
   gitCommentPullRequest,
   gitCompare,
   gitDeleteLocalBranch,
+  gitDeleteRemoteBranch,
   gitListBranches,
   gitListPullRequests,
   gitListStashes,
@@ -123,20 +124,25 @@ export function registerExtendedGitTools(server: McpServer, ctx: ToolContext): v
     "git_branch",
     {
       title: "List or safely delete Git branches",
-      description: "List local/origin branches or delete a non-current local branch only when its exact SHA still matches and normal git branch -d considers it safely merged.",
-      annotations: LOCAL_WRITE_ANNOTATIONS,
+      description: "List local/origin branches, safely delete a merged local branch, or delete an origin branch only when its exact SHA still matches and it is an ancestor of an explicit origin base branch.",
+      annotations: REMOTE_WRITE_ANNOTATIONS,
       _meta: toolMeta("Checking Git branches...", "Git branch operation completed"),
       inputSchema: z.discriminatedUnion("mode", [
         z.object({ mode: z.literal("list"), projectId: z.string() }).strict(),
         z.object({ mode: z.literal("delete"), projectId: z.string(), branchName: z.string(), expectedSha: z.string().regex(/^[0-9a-fA-F]{40}$/) }).strict(),
+        z.object({ mode: z.literal("delete_remote"), projectId: z.string(), branchName: z.string(), expectedSha: z.string().regex(/^[0-9a-fA-F]{40}$/), baseBranch: z.string() }).strict(),
       ]),
     },
     async (input) => invoke(ctx, "git_branch", input, async () => {
-      await requireProjectLease(ctx, input.projectId, input.mode === "list" ? "read" : "write");
+      await requireProjectLease(ctx, input.projectId, input.mode === "list" ? "read" : input.mode === "delete_remote" ? "remote" : "write");
       const entry = await resolveProject(ctx, input.projectId);
       if (input.mode === "list") {
         const branches = await gitListBranches(entry.root);
         return makeResult({ branches }, `Found ${branches.length} branch ref(s).`);
+      }
+      if (input.mode === "delete_remote") {
+        const result = await gitDeleteRemoteBranch(entry.root, input.branchName, input.expectedSha, input.baseBranch);
+        return makeResult({ ...result }, `Deleted merged remote branch origin/${result.branch}.`);
       }
       const result = await gitDeleteLocalBranch(entry.root, input.branchName, input.expectedSha);
       return makeResult({ ...result }, `Deleted local branch ${result.branch}.`);

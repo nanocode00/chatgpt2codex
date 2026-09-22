@@ -143,6 +143,36 @@ export async function gitDeleteLocalBranch(root: string, branchName: string, exp
   return { deleted: true, branch: branchName, sha: actual };
 }
 
+export async function gitDeleteRemoteBranch(
+  root: string,
+  branchName: string,
+  expectedSha: string,
+  baseBranch: string,
+): Promise<{ deleted: true; branch: string; sha: string; baseBranch: string }> {
+  assertBranch(branchName);
+  assertBranch(baseBranch);
+  assertFullSha(expectedSha, "expected remote branch SHA");
+  if (branchName === baseBranch) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Cannot delete the merge base branch");
+  const remoteRef = `refs/remotes/origin/${branchName}`;
+  const baseRef = `refs/remotes/origin/${baseBranch}`;
+  const actual = await refSha(root, remoteRef);
+  if (actual.toLowerCase() !== expectedSha.toLowerCase()) {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Remote branch changed; list branches again");
+  }
+  await refSha(root, baseRef);
+  try {
+    await runGit(root, ["merge-base", "--is-ancestor", remoteRef, baseRef]);
+  } catch {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, `Remote branch is not merged into origin/${baseBranch}`);
+  }
+  try {
+    await runGitNetwork(root, ["push", "origin", "--delete", branchName]);
+  } catch (err) {
+    throw sanitizedProcessError("Remote branch deletion", err);
+  }
+  return { deleted: true, branch: branchName, sha: actual, baseBranch };
+}
+
 export interface GitStashInfo { ref: string; sha: string; subject: string }
 
 export async function gitListStashes(root: string): Promise<GitStashInfo[]> {
@@ -390,15 +420,20 @@ export async function gitCommentPullRequest(root: string, prNumber: number, expe
   }
 }
 
-export async function gitUpdatePullRequest(root: string, prNumber: number, expectedHeadSha: string, changes: { title?: string; body?: string; state?: "open" | "closed" }, ghRunner: ProcessRunner = runGh): Promise<{ updated: true; number: number; state: string; title: string; url: string }> {
+export async function gitUpdatePullRequest(root: string, prNumber: number, expectedHeadSha: string, changes: { title?: string; body?: string; state?: "open" | "closed"; baseBranch?: string }, ghRunner: ProcessRunner = runGh): Promise<{ updated: true; number: number; state: string; title: string; url: string; baseBranch: string | null }> {
   if (changes.title !== undefined) assertText(changes.title, "PR title", 256);
   if (changes.body !== undefined && (changes.body.length > 64 * 1024 || changes.body.includes("\0"))) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Invalid PR body");
-  if (changes.title === undefined && changes.body === undefined && changes.state === undefined) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "No PR changes requested");
-  const { repository } = await assertPrHead(root, prNumber, expectedHeadSha, ghRunner);
+  if (changes.baseBranch !== undefined) assertBranch(changes.baseBranch);
+  if (changes.title === undefined && changes.body === undefined && changes.state === undefined && changes.baseBranch === undefined) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "No PR changes requested");
+  const { repository, state: currentState } = await assertPrHead(root, prNumber, expectedHeadSha, ghRunner);
+  if (changes.baseBranch !== undefined && currentState !== "OPEN") {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "PR is not open");
+  }
   const args = ["api", "--method", "PATCH", `repos/${repository}/pulls/${prNumber}`];
   if (changes.title !== undefined) args.push("-f", `title=${changes.title}`);
   if (changes.body !== undefined) args.push("-f", `body=${changes.body}`);
   if (changes.state !== undefined) args.push("-f", `state=${changes.state}`);
+  if (changes.baseBranch !== undefined) args.push("-f", `base=${changes.baseBranch}`);
   try {
     const out = await ghRunner(root, args);
     const row = JSON.parse(out.stdout) as Record<string, unknown>;
@@ -406,8 +441,10 @@ export async function gitUpdatePullRequest(root: string, prNumber: number, expec
     const state = String(row.state ?? "").toUpperCase();
     const title = redact(String(row.title ?? ""));
     const url = String(row.html_url ?? "");
+    const base = row.base && typeof row.base === "object" ? String((row.base as Record<string, unknown>).ref ?? "") : "";
     if (number !== prNumber || !url || !state) throw new Error("unexpected response");
-    return { updated: true, number, state, title, url };
+    if (changes.baseBranch !== undefined && base !== changes.baseBranch) throw new Error("base update was not confirmed");
+    return { updated: true, number, state, title, url, baseBranch: base || null };
   } catch (err) {
     throw sanitizedProcessError("GitHub PR update", err);
   }
