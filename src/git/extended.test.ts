@@ -6,10 +6,12 @@ import path from "node:path";
 import { promisify } from "node:util";
 import {
   gitCherryPick,
+  gitCreateIssue,
   gitCompare,
   gitDeleteLocalBranch,
   gitDeleteRemoteBranch,
   gitListBranches,
+  gitListIssues,
   gitListStashes,
   gitLog,
   gitRestoreWorktree,
@@ -20,6 +22,7 @@ import {
   gitStashPush,
   gitUnstage,
   gitUpdatePullRequest,
+  gitUpdateIssue,
 } from "./extended.js";
 
 const execFileAsync = promisify(execFile);
@@ -100,6 +103,39 @@ describe("extended safe git operations", () => {
     });
     expect(result).toMatchObject({ updated: true, number: 9, baseBranch: "main" });
     expect(calls).toContainEqual(["api", "--method", "PATCH", "repos/example/repo/pulls/9", "-f", "base=main"]);
+  });
+
+  it("lists issues and updates one only when updatedAt still matches", async () => {
+    await git(root, "remote", "add", "origin", "https://github.com/example/repo.git");
+    const updatedAt = "2026-09-28T00:00:00Z";
+    const calls: string[][] = [];
+    const runner = async (_cwd: string, args: string[]) => {
+      calls.push(args);
+      if (args[0] === "issue" && args[1] === "list") {
+        return { stdout: JSON.stringify([{ number: 3, title: "Issue", url: "https://github.com/example/repo/issues/3", state: "OPEN", updatedAt, labels: [{ name: "bug" }], assignees: [{ login: "alice" }] }]), stderr: "" };
+      }
+      if (args[0] === "issue" && args[1] === "view") {
+        return { stdout: JSON.stringify({ number: 3, title: "Issue", body: "old", url: "https://github.com/example/repo/issues/3", state: "OPEN", updatedAt, labels: [], assignees: [] }), stderr: "" };
+      }
+      return { stdout: JSON.stringify({ number: 3, title: "Updated", body: "new", html_url: "https://github.com/example/repo/issues/3", state: "open", updated_at: "2026-09-28T00:01:00Z", labels: [], assignees: [] }), stderr: "" };
+    };
+
+    const issues = await gitListIssues(root, "open", 20, runner);
+    expect(issues[0]).toMatchObject({ number: 3, labels: ["bug"], assignees: ["alice"], updatedAt });
+    const updated = await gitUpdateIssue(root, 3, updatedAt, { title: "Updated", body: "new" }, runner);
+    expect(updated).toMatchObject({ number: 3, title: "Updated", body: "new" });
+    expect(calls).toContainEqual(["api", "--method", "PATCH", "repos/example/repo/issues/3", "-f", "title=Updated", "-f", "body=new"]);
+  });
+
+  it("creates an issue through the repository-scoped GitHub API", async () => {
+    await git(root, "remote", "add", "origin", "https://github.com/example/repo.git");
+    const calls: string[][] = [];
+    const result = await gitCreateIssue(root, "New issue", "Details", async (_cwd, args) => {
+      calls.push(args);
+      return { stdout: JSON.stringify({ number: 4, title: "New issue", body: "Details", html_url: "https://github.com/example/repo/issues/4", state: "open", updated_at: "2026-09-28T00:02:00Z", labels: [], assignees: [] }), stderr: "" };
+    });
+    expect(result).toMatchObject({ number: 4, title: "New issue", body: "Details" });
+    expect(calls[0]).toEqual(["api", "--method", "POST", "repos/example/repo/issues", "-f", "title=New issue", "-f", "body=Details"]);
   });
 
   it("creates, lists, applies, and drops a stash without pop semantics", async () => {

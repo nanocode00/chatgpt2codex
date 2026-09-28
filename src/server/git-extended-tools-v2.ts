@@ -7,16 +7,20 @@ import { addToolCallProof } from "./tool-proof.js";
 import {
   gitAbortMerge,
   gitCherryPick,
+  gitCommentIssue,
   gitCommentPullRequest,
   gitCompare,
+  gitCreateIssue,
   gitDeleteLocalBranch,
   gitDeleteRemoteBranch,
   gitListBranches,
+  gitListIssues,
   gitListPullRequests,
   gitListStashes,
   gitLog,
   gitMergeConflictStatus,
   gitMergeFromOriginBranch,
+  gitInspectIssue,
   gitRestoreWorktree,
   gitRevertCommit,
   gitSetPullRequestDraft,
@@ -26,6 +30,7 @@ import {
   gitStashPush,
   gitUnstage,
   gitUpdatePullRequest,
+  gitUpdateIssue,
 } from "../git/extended.js";
 
 const READ_ONLY_ANNOTATIONS = { readOnlyHint: true, destructiveHint: false, openWorldHint: false } as const;
@@ -299,7 +304,7 @@ export function registerExtendedGitTools(server: McpServer, ctx: ToolContext): v
       inputSchema: z.discriminatedUnion("mode", [
         z.object({ mode: z.literal("list"), projectId: z.string(), state: z.enum(["open", "closed", "merged", "all"]).optional(), limit: z.number().int().min(1).max(50).optional() }).strict(),
         z.object({ mode: z.literal("comment"), projectId: z.string(), prNumber: z.number().int().positive(), expectedHeadSha: z.string().regex(/^[0-9a-fA-F]{40}$/), body: z.string().min(1).max(64 * 1024) }).strict(),
-        z.object({ mode: z.literal("update"), projectId: z.string(), prNumber: z.number().int().positive(), expectedHeadSha: z.string().regex(/^[0-9a-fA-F]{40}$/), title: z.string().min(1).max(256).optional(), body: z.string().max(64 * 1024).optional() }).strict(),
+        z.object({ mode: z.literal("update"), projectId: z.string(), prNumber: z.number().int().positive(), expectedHeadSha: z.string().regex(/^[0-9a-fA-F]{40}$/), title: z.string().min(1).max(256).optional(), body: z.string().max(64 * 1024).optional(), baseBranch: z.string().min(1).max(255).optional() }).strict(),
         z.object({ mode: z.literal("close"), projectId: z.string(), prNumber: z.number().int().positive(), expectedHeadSha: z.string().regex(/^[0-9a-fA-F]{40}$/) }).strict(),
         z.object({ mode: z.literal("reopen"), projectId: z.string(), prNumber: z.number().int().positive(), expectedHeadSha: z.string().regex(/^[0-9a-fA-F]{40}$/) }).strict(),
         z.object({ mode: z.literal("mark_ready"), projectId: z.string(), prNumber: z.number().int().positive(), expectedHeadSha: z.string().regex(/^[0-9a-fA-F]{40}$/) }).strict(),
@@ -318,7 +323,7 @@ export function registerExtendedGitTools(server: McpServer, ctx: ToolContext): v
         return makeResult({ ...result }, `Commented on PR #${input.prNumber}.`);
       }
       if (input.mode === "update") {
-        const result = await gitUpdatePullRequest(entry.root, input.prNumber, input.expectedHeadSha, { title: input.title, body: input.body });
+        const result = await gitUpdatePullRequest(entry.root, input.prNumber, input.expectedHeadSha, { title: input.title, body: input.body, baseBranch: input.baseBranch });
         return makeResult({ ...result }, `Updated PR #${input.prNumber}.`);
       }
       if (input.mode === "close" || input.mode === "reopen") {
@@ -328,6 +333,51 @@ export function registerExtendedGitTools(server: McpServer, ctx: ToolContext): v
       const draft = input.mode === "convert_to_draft";
       const result = await gitSetPullRequestDraft(entry.root, input.prNumber, input.expectedHeadSha, draft);
       return makeResult({ ...result }, draft ? `Converted PR #${input.prNumber} to draft.` : `Marked PR #${input.prNumber} ready for review.`);
+    }),
+  );
+
+  registerTool(
+    "git_issue_manage",
+    {
+      title: "Inspect and manage GitHub issues",
+      description: "List/inspect issues read-only, or create/comment/update/close/reopen with an expectedUpdatedAt concurrency guard for existing issues.",
+      annotations: REMOTE_WRITE_ANNOTATIONS,
+      _meta: toolMeta("Managing issue...", "Issue management completed"),
+      inputSchema: z.discriminatedUnion("mode", [
+        z.object({ mode: z.literal("list"), projectId: z.string(), state: z.enum(["open", "closed", "all"]).optional(), limit: z.number().int().min(1).max(50).optional() }).strict(),
+        z.object({ mode: z.literal("inspect"), projectId: z.string(), issueNumber: z.number().int().positive() }).strict(),
+        z.object({ mode: z.literal("create"), projectId: z.string(), title: z.string().min(1).max(256), body: z.string().max(64 * 1024).optional() }).strict(),
+        z.object({ mode: z.literal("comment"), projectId: z.string(), issueNumber: z.number().int().positive(), expectedUpdatedAt: z.string().min(1).max(128), body: z.string().min(1).max(64 * 1024) }).strict(),
+        z.object({ mode: z.literal("update"), projectId: z.string(), issueNumber: z.number().int().positive(), expectedUpdatedAt: z.string().min(1).max(128), title: z.string().min(1).max(256).optional(), body: z.string().max(64 * 1024).optional() }).strict(),
+        z.object({ mode: z.literal("close"), projectId: z.string(), issueNumber: z.number().int().positive(), expectedUpdatedAt: z.string().min(1).max(128) }).strict(),
+        z.object({ mode: z.literal("reopen"), projectId: z.string(), issueNumber: z.number().int().positive(), expectedUpdatedAt: z.string().min(1).max(128) }).strict(),
+      ]),
+    },
+    async (input) => invoke(ctx, "git_issue_manage", input, async () => {
+      await requireProjectLease(ctx, input.projectId, input.mode === "list" || input.mode === "inspect" ? "read" : "remote");
+      const entry = await resolveProject(ctx, input.projectId);
+      if (input.mode === "list") {
+        const issues = await gitListIssues(entry.root, input.state, input.limit);
+        return makeResult({ issues }, `Found ${issues.length} issue(s).`);
+      }
+      if (input.mode === "inspect") {
+        const issue = await gitInspectIssue(entry.root, input.issueNumber);
+        return makeResult({ issue }, `Inspected issue #${input.issueNumber}.`);
+      }
+      if (input.mode === "create") {
+        const issue = await gitCreateIssue(entry.root, input.title, input.body ?? "");
+        return makeResult({ issue }, `Created issue #${issue.number}.`);
+      }
+      if (input.mode === "comment") {
+        const result = await gitCommentIssue(entry.root, input.issueNumber, input.expectedUpdatedAt, input.body);
+        return makeResult({ ...result }, `Commented on issue #${input.issueNumber}.`);
+      }
+      if (input.mode === "update") {
+        const issue = await gitUpdateIssue(entry.root, input.issueNumber, input.expectedUpdatedAt, { title: input.title, body: input.body });
+        return makeResult({ issue }, `Updated issue #${input.issueNumber}.`);
+      }
+      const issue = await gitUpdateIssue(entry.root, input.issueNumber, input.expectedUpdatedAt, { state: input.mode === "close" ? "closed" : "open" });
+      return makeResult({ issue }, `${input.mode === "close" ? "Closed" : "Reopened"} issue #${input.issueNumber}.`);
     }),
   );
 }

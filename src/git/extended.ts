@@ -450,6 +450,96 @@ export async function gitUpdatePullRequest(root: string, prNumber: number, expec
   }
 }
 
+export interface GitIssueListItem {
+  number: number;
+  title: string;
+  url: string;
+  state: string;
+  updatedAt: string;
+  labels: string[];
+  assignees: string[];
+}
+
+export interface GitIssueDetails extends GitIssueListItem { body: string }
+
+function mapIssueRow(row: Record<string, unknown>): GitIssueDetails {
+  const labels = Array.isArray(row.labels) ? row.labels.map((label) => typeof label === "string" ? label : String((label as Record<string, unknown>)?.name ?? "")).filter(Boolean) : [];
+  const assignees = Array.isArray(row.assignees) ? row.assignees.map((assignee) => typeof assignee === "string" ? assignee : String((assignee as Record<string, unknown>)?.login ?? "")).filter(Boolean) : [];
+  const number = Number(row.number);
+  const url = String(row.url ?? row.html_url ?? "");
+  const updatedAt = String(row.updatedAt ?? row.updated_at ?? "");
+  if (!Number.isInteger(number) || number <= 0 || !url || !updatedAt) throw new Error("unexpected response");
+  return { number, title: redact(String(row.title ?? "")), body: redact(String(row.body ?? "")), url, state: String(row.state ?? "").toUpperCase(), updatedAt, labels: labels.map(redact), assignees: assignees.map(redact) };
+}
+
+export async function gitListIssues(root: string, state: "open" | "closed" | "all" = "open", limit = 20, ghRunner: ProcessRunner = runGh): Promise<GitIssueListItem[]> {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 50) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Invalid issue list limit");
+  const repository = await originRepository(root);
+  try {
+    const out = await ghRunner(root, ["issue", "list", "--repo", repository, "--state", state, "--limit", String(limit), "--json", "number,title,url,state,updatedAt,labels,assignees"]);
+    const rows = JSON.parse(out.stdout || "[]");
+    if (!Array.isArray(rows)) throw new Error("unexpected response");
+    return rows.map((row) => { const { body: _body, ...issue } = mapIssueRow(row as Record<string, unknown>); return issue; });
+  } catch (err) { throw sanitizedProcessError("GitHub issue list", err); }
+}
+
+export async function gitInspectIssue(root: string, issueNumber: number, ghRunner: ProcessRunner = runGh): Promise<GitIssueDetails> {
+  if (!Number.isInteger(issueNumber) || issueNumber <= 0) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Invalid issue number");
+  const repository = await originRepository(root);
+  try {
+    const out = await ghRunner(root, ["issue", "view", String(issueNumber), "--repo", repository, "--json", "number,title,body,url,state,updatedAt,labels,assignees"]);
+    return mapIssueRow(JSON.parse(out.stdout) as Record<string, unknown>);
+  } catch (err) { throw sanitizedProcessError("GitHub issue inspect", err); }
+}
+
+async function assertIssueUpdatedAt(root: string, issueNumber: number, expectedUpdatedAt: string, ghRunner: ProcessRunner): Promise<{ repository: string; issue: GitIssueDetails }> {
+  if (!expectedUpdatedAt || expectedUpdatedAt.length > 128 || expectedUpdatedAt.includes("\0")) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Invalid expected issue updatedAt");
+  const repository = await originRepository(root);
+  const issue = await gitInspectIssue(root, issueNumber, ghRunner);
+  if (issue.updatedAt !== expectedUpdatedAt) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Issue changed; inspect again");
+  return { repository, issue };
+}
+
+export async function gitCreateIssue(root: string, title: string, body = "", ghRunner: ProcessRunner = runGh): Promise<GitIssueDetails> {
+  assertText(title, "issue title", 256);
+  if (body.length > 64 * 1024 || body.includes("\0")) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Invalid issue body");
+  const repository = await originRepository(root);
+  try {
+    const args = ["api", "--method", "POST", `repos/${repository}/issues`, "-f", `title=${title}`];
+    if (body) args.push("-f", `body=${body}`);
+    const out = await ghRunner(root, args);
+    return mapIssueRow(JSON.parse(out.stdout) as Record<string, unknown>);
+  } catch (err) { throw sanitizedProcessError("GitHub issue create", err); }
+}
+
+export async function gitCommentIssue(root: string, issueNumber: number, expectedUpdatedAt: string, body: string, ghRunner: ProcessRunner = runGh): Promise<{ commented: true; commentId: number; url: string }> {
+  assertText(body, "issue comment");
+  const { repository, issue } = await assertIssueUpdatedAt(root, issueNumber, expectedUpdatedAt, ghRunner);
+  if (issue.state !== "OPEN") throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Issue is not open");
+  try {
+    const out = await ghRunner(root, ["api", "--method", "POST", `repos/${repository}/issues/${issueNumber}/comments`, "-f", `body=${body}`]);
+    const row = JSON.parse(out.stdout) as Record<string, unknown>;
+    const id = Number(row.id); const url = String(row.html_url ?? "");
+    if (!Number.isInteger(id) || id <= 0 || !url) throw new Error("unexpected response");
+    return { commented: true, commentId: id, url };
+  } catch (err) { throw sanitizedProcessError("GitHub issue comment", err); }
+}
+
+export async function gitUpdateIssue(root: string, issueNumber: number, expectedUpdatedAt: string, changes: { title?: string; body?: string; state?: "open" | "closed" }, ghRunner: ProcessRunner = runGh): Promise<GitIssueDetails> {
+  if (changes.title !== undefined) assertText(changes.title, "issue title", 256);
+  if (changes.body !== undefined && (changes.body.length > 64 * 1024 || changes.body.includes("\0"))) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Invalid issue body");
+  if (changes.title === undefined && changes.body === undefined && changes.state === undefined) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "No issue changes requested");
+  const { repository } = await assertIssueUpdatedAt(root, issueNumber, expectedUpdatedAt, ghRunner);
+  try {
+    const args = ["api", "--method", "PATCH", `repos/${repository}/issues/${issueNumber}`];
+    if (changes.title !== undefined) args.push("-f", `title=${changes.title}`);
+    if (changes.body !== undefined) args.push("-f", `body=${changes.body}`);
+    if (changes.state !== undefined) args.push("-f", `state=${changes.state}`);
+    const out = await ghRunner(root, args);
+    return mapIssueRow(JSON.parse(out.stdout) as Record<string, unknown>);
+  } catch (err) { throw sanitizedProcessError("GitHub issue update", err); }
+}
+
 export async function gitSetPullRequestDraft(root: string, prNumber: number, expectedHeadSha: string, draft: boolean, ghRunner: ProcessRunner = runGh): Promise<{ updated: true; draft: boolean; number: number }> {
   const { repository, state } = await assertPrHead(root, prNumber, expectedHeadSha, ghRunner);
   if (state !== "OPEN") throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "PR is not open");
