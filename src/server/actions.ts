@@ -191,7 +191,7 @@ const ACTION_ROUTES: ActionRoute[] = [
     tool: "file_transfer",
     operationId: "file_transfer",
     summary: "Transfer one explicitly selected original binary file in chunks",
-    description: "On user request only, call begin, then ordered Base64 chunks, then finish (or abort). Repeat for multiple files. Requires full-write project lease and verifies exact size and SHA-256.",
+    description: "Only on user request: begin/chunk/finish/abort original bytes, or from_url for public HTTPS files when original size and SHA-256 are known. Private ChatGPT Library sandbox paths are inaccessible to C2C. Requires full-write project lease.",
     schema: "FileTransferInput",
   },
   {
@@ -1105,7 +1105,7 @@ function openApiSpec(publicOrigin: string): Record<string, unknown> {
           additionalProperties: false,
           required: ["mode", "projectId"],
           properties: {
-            mode: { type: "string", enum: ["begin", "chunk", "finish", "abort"] },
+            mode: { type: "string", enum: ["begin", "chunk", "finish", "abort", "from_url"] },
             projectId: { type: "string" },
             filename: { type: "string", maxLength: 160 },
             sizeBytes: { type: "integer", minimum: 1, maximum: 20971520 },
@@ -1114,6 +1114,7 @@ function openApiSpec(publicOrigin: string): Record<string, unknown> {
             transferId: { type: "string", format: "uuid" },
             index: { type: "integer", minimum: 0 },
             dataBase64: { type: "string", maxLength: 349528, description: "Base64 of no more than 256 KiB of the original bytes; never a file path or extracted PDF text." },
+            url: { type: "string", maxLength: 2048, description: "Public HTTPS URL only; exact size and SHA-256 must also be supplied. Never use for private or signed Library links." },
           },
         },
         CommandRunInput: {

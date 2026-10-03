@@ -22,6 +22,12 @@ The HTTP Action equivalent is `/actions/file-transfer`; it uses the same tool co
 - Staging is in the project's `.chatgpt2codex/imports/.staging`; `finish` places the file via a non-overwriting hard link on the same filesystem. `abort`, failed integrity checks, and normal finalization delete temporary staged data. Inactive in-process transfers expire after 30 minutes when transfer operations are next invoked.
 - No raw Base64 payload is intentionally included in completion audit records or file-transfer error logs. Do not put private file contents or credentials into transfer metadata or Git commits.
 
+## Public-source direct import without model Base64
+
+If the user explicitly selects a file and there is a byte-identical PUBLIC HTTPS source, use file_transfer mode=from_url with projectId, filename, url, sizeBytes, sha256, and optional destPath. C2C downloads the original bytes directly, rejects unsafe URL schemes/addresses/redirects and private credentials, and matches the exact supplied length and SHA-256 before storing the file. Downloads are limited to 20 MiB.
+
+For example, the user's Library copy of seq2seq-asr-chiu-2018.pdf was confirmed identical to https://arxiv.org/pdf/1712.01769v6 (303358 bytes, SHA-256 687e651bc1461992d6548e48555aae85159c78e2be5d4835042f7facdf268629). The optional public-source verification script in scripts/verify_public_paper_sample.py also downloads and atomically stores this verified fixture in its current C2C test worktree. This demonstrates equivalence to a PUBLIC paper version, not access to the user's private Library through C2C. Actual from_url tool execution against a live server requires publishing this feature and restarting C2C.
+
 ## ChatGPT-side source and transport boundary
 
 C2C cannot directly access ChatGPT's isolated `/mnt/data` paths or private attachment URLs. Library materialization can provide original bytes *inside ChatGPT's environment*, but that does not by itself copy the bytes into the user's C2C server. The assistant must have an actual supported byte-to-tool-call transport for the selected files. A manual Base64 relay is suitable only for small diagnostic fixtures; do not claim end-to-end transfer of a large user document based solely on receiving a parsed text excerpt or seeing a materialized path.
