@@ -5,6 +5,7 @@ import path from "node:path";
 import { DomainError, ErrorCode } from "../types.js";
 import { resolveInProject } from "../policy/paths.js";
 import { isSecretPath } from "../policy/secrets.js";
+import { fetchPublicBinaryFromUrl, type FetchImageOptions } from "./image-url.js";
 
 export const TRANSFER_MAX_BYTES = 20 * 1024 * 1024;
 export const TRANSFER_CHUNK_BYTES = 256 * 1024;
@@ -66,6 +67,37 @@ async function sha256File(file: string): Promise<string> {
 
 export class FileTransferManager {
   private active = new Map<string, Transfer>();
+
+  /** On-demand public URL intake: downloaded bytes must match both user-supplied
+   * exact size and original SHA-256 before even beginning a staged upload.
+   * This is NOT a bridge to private ChatGPT Library files or sandbox paths.
+   */
+  async fromPublicUrl(input: {
+    projectId: string; root: string; sessionId?: string; filename: string;
+    sizeBytes: number; sha256: string; url: string; destPath?: string;
+  }, fetchOptions: FetchImageOptions = {}): Promise<{ filePath: string; bytes: number; sha256: string; deduped: boolean }> {
+    if (!Number.isSafeInteger(input.sizeBytes) || input.sizeBytes < 1 || input.sizeBytes > TRANSFER_MAX_BYTES)
+      return invalid("Invalid expected public file size");
+    if (!SHA256.test(input.sha256)) return invalid("Invalid expected public file hash");
+    const bytes = await fetchPublicBinaryFromUrl(input.url, {
+      ...fetchOptions, maxBytes: input.sizeBytes,
+    });
+    if (bytes.length !== input.sizeBytes ||
+        createHash("sha256").update(bytes).digest("hex") !== input.sha256.toLowerCase()) {
+      return invalid("Public source differs from the requested original file: size or SHA-256 mismatch");
+    }
+    const transfer = await this.begin(input);
+    try {
+      for (let offset = 0, index = 0; offset < bytes.length; offset += TRANSFER_CHUNK_BYTES, index += 1) {
+        const dataBase64 = bytes.subarray(offset, offset + TRANSFER_CHUNK_BYTES).toString("base64");
+        await this.chunk({ ...input, transferId: transfer.transferId, index, dataBase64 });
+      }
+      return await this.finish({ ...input, transferId: transfer.transferId });
+    } catch (error) {
+      await this.abort({ ...input, transferId: transfer.transferId }).catch(() => undefined);
+      throw error;
+    }
+  }
 
   private async discard(t: Transfer): Promise<void> {
     this.active.delete(t.id);

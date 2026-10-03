@@ -358,7 +358,7 @@ describe("Custom GPT action bridge", () => {
     expect(body.components.schemas.FileCreateInput.properties.content).toBeDefined();
     expect(body.paths["/actions/file-transfer"]).toBeDefined();
     expect(body.components.schemas.FileTransferInput.required).toEqual(["mode", "projectId"]);
-    expect(body.components.schemas.FileTransferInput.properties.mode.enum).toEqual(["begin", "chunk", "finish", "abort"]);
+    expect(body.components.schemas.FileTransferInput.properties.mode.enum).toEqual(["begin", "chunk", "finish", "abort", "from_url"]);
     expect(body.components.schemas.NotebookPathInput.required).toEqual(["projectId", "path"]);
     expect(body.components.schemas.NotebookPathInput.additionalProperties).toBe(false);
     expect(Object.keys(body.components.schemas.NotebookPathInput.properties)).toEqual(["projectId", "path"]);

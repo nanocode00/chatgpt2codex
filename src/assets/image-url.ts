@@ -602,3 +602,65 @@ export async function fetchImageFromUrl(url: string, opts: FetchImageOptions = {
     clearTimeout(timer);
   }
 }
+
+/** Explicit-request download of PUBLIC HTTPS binary bytes, never private Library URLs.
+ * Reuses the existing DNS/IP checks and pinned HTTPS connector from image intake.
+ * The caller must match exact expected length and SHA-256 before storing bytes.
+ */
+export async function fetchPublicBinaryFromUrl(rawUrl: string, opts: FetchImageOptions = {}): Promise<Buffer> {
+  const fetchImpl = opts.fetchImpl ?? defaultFetchImpl;
+  const lookupImpl: LookupFn = opts.lookupImpl ?? defaultLookup;
+  const maxBytes = opts.maxBytes ?? 20 * 1024 * 1024;
+  const timeoutMs = opts.timeoutMs ?? 30_000;
+  const maxRedirects = Math.min(opts.maxRedirects ?? 3, 3);
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 20 * 1024 * 1024) {
+    throw new DomainError(ErrorCode.QUOTA_EXCEEDED, "Invalid public file download size");
+  }
+  const checkPublicUrl = (raw: string): void => {
+    let url: URL;
+    try { url = new URL(raw); }
+    catch { throw new DomainError(ErrorCode.PERMISSION_DENIED, "Invalid public file URL"); }
+    // No private/signed URLs, credentials, unusual ports, or HTTP downgrade.
+    if (url.protocol !== "https:" || url.username || url.password || url.search ||
+        url.hash || (url.port && url.port !== "443")) {
+      throw new DomainError(ErrorCode.PERMISSION_DENIED, "Public HTTPS URL without credentials, query or custom port required");
+    }
+  };
+  checkPublicUrl(rawUrl);
+  let { url: currentUrl, addresses } = await assertUrlAllowed(rawUrl, lookupImpl);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    for (let hop = 0; ; hop++) {
+      let res: Awaited<ReturnType<FetchLike>>;
+      try {
+        res = await fetchImpl(currentUrl.toString(), {
+          signal: controller.signal, redirect: "manual", pinnedAddresses: addresses,
+        });
+      } catch {
+        if (controller.signal.aborted) throw new DomainError(ErrorCode.TIMEOUT, "Public file download timed out");
+        throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "Public file download failed");
+      }
+      if (res.status >= 300 && res.status < 400) {
+        if (hop >= maxRedirects) throw new DomainError(ErrorCode.PERMISSION_DENIED, "Too many public file redirects");
+        const location = res.headers.get("location");
+        if (!location) throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "Public file redirect missing location");
+        const next = new URL(location, currentUrl).toString();
+        checkPublicUrl(next);
+        const validated = await assertUrlAllowed(next, lookupImpl);
+        currentUrl = validated.url;
+        addresses = validated.addresses;
+        continue;
+      }
+      if (res.status !== 200) throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "Public file returned HTTP " + res.status);
+      const declared = res.headers.get("content-length");
+      if (declared && Number.isFinite(Number(declared)) && Number(declared) > maxBytes)
+        throw new DomainError(ErrorCode.QUOTA_EXCEEDED, "Public file exceeds declared byte limit");
+      const bytes = await readBodyWithLimit(res, maxBytes);
+      if (bytes.length === 0) throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "Empty public file");
+      return bytes;
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+}

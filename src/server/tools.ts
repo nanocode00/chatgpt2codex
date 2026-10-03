@@ -3360,7 +3360,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
     "file_transfer",
     {
       title: "Transfer user-selected files into a local C2C project",
-      description: "Only when explicitly requested by the user: begin, upload ordered Base64 chunks, finish with SHA-256 verification, or abort an original binary file transfer. Repeat independently for multiple requested files. Requires full-write authorization; does not access ChatGPT attachments automatically.",
+      description: "Only when requested: begin/chunk/finish/abort raw binary bytes, or from_url to download a publicly accessible HTTPS file server-side with exact expected byte length and SHA-256 before saving. Private ChatGPT Library files and sandbox paths are not directly reachable. Requires full-write authorization.",
       annotations: LOCAL_WRITE_ANNOTATIONS,
       _meta: chatGptToolMeta("Transferring requested file...", "File transfer operation completed"),
       inputSchema: z.discriminatedUnion("mode", [
@@ -3371,6 +3371,12 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
           destPath: z.string().max(4096).optional(),
         }).strict(),
         z.object({
+          mode: z.literal("from_url"), projectId: z.string(), filename: z.string().min(1).max(160),
+          sizeBytes: z.number().int().min(1).max(TRANSFER_MAX_BYTES),
+          sha256: z.string().regex(/^[a-fA-F0-9]{64}$/),
+          url: z.string().url().max(2048), destPath: z.string().max(4096).optional(),
+        }).strict(),
+        z.object({
           mode: z.literal("chunk"), projectId: z.string(), transferId: z.string().uuid(),
           index: z.number().int().min(0), dataBase64: z.string().min(4).max(349528),
         }).strict(),
@@ -3378,10 +3384,18 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
         z.object({ mode: z.literal("abort"), projectId: z.string(), transferId: z.string().uuid() }).strict(),
       ]),
     },
-    async (input) => withErrorMapping<Record<string, unknown>>(ctx, "file_transfer", { ...input, dataBase64: undefined }, async () => {
+    async (input) => withErrorMapping<Record<string, unknown>>(ctx, "file_transfer", { ...input, dataBase64: undefined, url: undefined }, async () => {
       await requireProjectLease(ctx, input.projectId, "write");
       const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
       const common = { projectId: input.projectId, root: entry.root, sessionId: ctx.config.sessionId };
+      if (input.mode === "from_url") {
+        const result = await fileTransfers.fromPublicUrl({
+          ...common, filename: input.filename, sizeBytes: input.sizeBytes,
+          sha256: input.sha256, url: input.url, destPath: input.destPath,
+        });
+        await ctx.ledger.append({ type: "file.transfer.completed", projectId: input.projectId, path: result.filePath, bytes: result.bytes, sha256: result.sha256 });
+        return makeResult(result, "Downloaded and verified original public file " + result.filePath);
+      }
       if (input.mode === "begin") {
         const result = await fileTransfers.begin({ ...common, filename: input.filename, sizeBytes: input.sizeBytes, sha256: input.sha256, destPath: input.destPath });
         return makeResult(result, "Transfer started: " + result.transferId);

@@ -82,6 +82,12 @@ describe("on-demand file transfer through MCP and HTTP-style re-registration", (
     });
     expect(result.isError).toBe(true);
     expect(result.structuredContent.code).toBe("PERMISSION_DENIED");
+    const urlResult = await (await handler(createContext(true)))({
+      mode: "from_url", projectId: "proj", filename: "blocked.pdf",
+      sizeBytes: 5, sha256: "a".repeat(64), url: "https://public.example/blocked.pdf",
+    });
+    expect(urlResult.isError).toBe(true);
+    expect(urlResult.structuredContent.code).toBe("PERMISSION_DENIED");
   });
 
   it("still requires write authorization on a reconnected session that knows a transfer ID", async () => {
