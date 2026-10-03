@@ -188,14 +188,20 @@ function sanitizePublishers(value: unknown): Array<{ url?: string; targetPort?: 
   return result.length ? result : undefined;
 }
 
-export async function dockerStatus(projectRoot: string, profileAlias: string, service?: string): Promise<{ services: Array<Record<string, unknown>> }> {
+export async function dockerStatus(projectRoot: string, profileAlias: string, service?: string): Promise<{
+  services: Array<Record<string, unknown>>;
+  diagnostic?: "no-containers-for-configured-project" | "no-allowlisted-services-found";
+}> {
   const profile = await resolveProfile(projectRoot, profileAlias);
   if (service !== undefined) requireService(profile, service);
-  const args = [...composePrefix(profile), "ps", "--format", "json"];
+  // Default `compose ps` hides stopped containers and may misleadingly
+  // report an empty stack. Include stopped services for status inspection.
+  const args = [...composePrefix(profile), "ps", "--all", "--format", "json"];
   if (service !== undefined) args.push(service);
   const { stdout } = await runDocker(projectRoot, args);
   const allowed = new Set(profile.services);
-  const services = parseStatusRows(stdout).flatMap((row) => {
+  const rows = parseStatusRows(stdout);
+  const services = rows.flatMap((row) => {
     const serviceName = safeScalar(row.Service, 128);
     if (!serviceName || !allowed.has(serviceName)) return [];
     const item: Record<string, unknown> = { service: serviceName };
@@ -213,6 +219,9 @@ export async function dockerStatus(projectRoot: string, profileAlias: string, se
     if (ports) item.publishedPorts = ports;
     return [item];
   });
+  if (!services.length) {
+    return { services, diagnostic: rows.length ? "no-allowlisted-services-found" : "no-containers-for-configured-project" };
+  }
   return { services };
 }
 

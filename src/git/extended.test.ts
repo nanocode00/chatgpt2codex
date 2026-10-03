@@ -5,16 +5,20 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import {
+  gitArchiveAndDeleteLocalBranch,
   gitCherryPick,
   gitCreateIssue,
   gitCompare,
   gitDeleteLocalBranch,
   gitDeleteRemoteBranch,
+  gitDiffCheck,
   gitListBranches,
+  gitListBranchArchives,
   gitListIssues,
   gitListStashes,
   gitLog,
   gitRestoreWorktree,
+  gitRestoreBranchArchive,
   gitRevertCommit,
   gitShowCommit,
   gitStashApply,
@@ -67,6 +71,49 @@ describe("extended safe git operations", () => {
     expect((await gitListBranches(root)).some((branch) => branch.name === "merged-feature")).toBe(false);
   });
 
+  it("refuses regular deletion of an unmerged branch but preserves it before explicit archive-deletion", async () => {
+    await git(root, "switch", "-c", "unmerged-feature");
+    const featureSha = await commitFile(root, "feature.txt", "unmerged\n", "new feature");
+    await git(root, "switch", "main");
+    await expect(gitDeleteLocalBranch(root, "unmerged-feature", featureSha)).rejects.toThrow(/merge/i);
+    await expect(gitArchiveAndDeleteLocalBranch(root, "unmerged-feature", "f".repeat(40))).rejects.toThrow(/changed/i);
+
+    const result = await gitArchiveAndDeleteLocalBranch(root, "unmerged-feature", featureSha);
+    expect(result.archiveRef).toContain("refs/c2c-archive/unmerged-feature/");
+    expect(await git(root, "rev-parse", result.archiveRef)).toBe(featureSha);
+    expect((await gitListBranches(root)).some((branch) => branch.name === "unmerged-feature")).toBe(false);
+    expect(await git(root, "show", `${result.archiveRef}:feature.txt`)).toBe("unmerged");
+    expect(await gitListBranchArchives(root)).toContainEqual({ branch: "unmerged-feature", sha: featureSha, archiveRef: result.archiveRef });
+    const restored = await gitRestoreBranchArchive(root, "unmerged-feature", featureSha);
+    expect(restored).toMatchObject({ restored: true, branch: "unmerged-feature", sha: featureSha });
+    expect(await git(root, "rev-parse", "unmerged-feature")).toBe(featureSha);
+    await expect(gitRestoreBranchArchive(root, "unmerged-feature", featureSha)).rejects.toThrow(/already exist/i);
+    await expect(gitArchiveAndDeleteLocalBranch(root, "main", await git(root, "rev-parse", "main"))).rejects.toThrow(/Protected/i);
+  });
+
+  it("checks both working and staged whitespace while leaving files unchanged", async () => {
+    expect(await gitDiffCheck(root)).toMatchObject({ ok: true, issues: [] });
+    await writeFile(path.join(root, "a.txt"), "one\ntrailing   \n", "utf8");
+    const working = await gitDiffCheck(root, "working");
+    expect(working.ok).toBe(false);
+    expect(working.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: "working", message: expect.stringContaining("trailing whitespace") }),
+    ]));
+    expect((await gitDiffCheck(root, "staged")).ok).toBe(true);
+    await git(root, "add", "a.txt");
+    const staged = await gitDiffCheck(root, "all");
+    expect(staged.ok).toBe(false);
+    expect(staged.issues.every((issue) => issue.source === "staged")).toBe(true);
+    expect(await readFile(path.join(root, "a.txt"), "utf8")).toBe("one\ntrailing   \n");
+  });
+
+  it("documents that untracked files are excluded from diff checks", async () => {
+    await writeFile(path.join(root, "untracked.txt"), "bad  \n", "utf8");
+    const result = await gitDiffCheck(root);
+    expect(result.ok).toBe(true);
+    expect(result.note).toContain("untracked");
+  });
+
   it("deletes an exact remote branch only after verifying it is merged into the requested origin base", async () => {
     const bare = await mkdtemp(path.join(os.tmpdir(), "c2c-git-remote-"));
     try {
@@ -82,6 +129,28 @@ describe("extended safe git operations", () => {
       expect(result).toMatchObject({ deleted: true, branch: "merged-remote", baseBranch: "main" });
       await git(root, "fetch", "--prune", "origin");
       expect((await gitListBranches(root)).some((branch) => branch.name === "origin/merged-remote")).toBe(false);
+    } finally {
+      await rm(bare, { recursive: true, force: true });
+    }
+  });
+
+  it("does not delete a remote branch advanced since the inspected SHA", async () => {
+    const bare = await mkdtemp(path.join(os.tmpdir(), "c2c-git-remote-race-"));
+    try {
+      await git(bare, "init", "--bare");
+      await git(root, "remote", "add", "origin", bare);
+      await git(root, "push", "-u", "origin", "main");
+      await git(root, "branch", "merged-remote");
+      await git(root, "push", "origin", "merged-remote");
+      const inspectedSha = await git(root, "rev-parse", "refs/remotes/origin/merged-remote");
+      await git(root, "switch", "-c", "advance");
+      const newerSha = await commitFile(root, "new.txt", "new\n", "advance remote");
+      await git(root, "push", "origin", "HEAD:refs/heads/merged-remote");
+      await git(root, "update-ref", "refs/remotes/origin/merged-remote", inspectedSha);
+
+      await expect(gitDeleteRemoteBranch(root, "merged-remote", inspectedSha, "main")).rejects.toThrow();
+      const remoteTip = await git(root, "ls-remote", "origin", "refs/heads/merged-remote");
+      expect(remoteTip.split(/\s+/)[0]).toBe(newerSha);
     } finally {
       await rm(bare, { recursive: true, force: true });
     }

@@ -109,6 +109,46 @@ export interface GitBranchInfo {
   upstream: string | null;
 }
 
+export type GitDiffCheckScope = "working" | "staged" | "all";
+
+/** Check tracked changes without modifying the index or working tree. */
+export async function gitDiffCheck(root: string, scope: GitDiffCheckScope = "all"): Promise<{
+  ok: boolean;
+  scope: GitDiffCheckScope;
+  issues: Array<{ source: "working" | "staged"; message: string }>;
+  truncated: boolean;
+  note: string;
+}> {
+  const sources: Array<"working" | "staged"> = scope === "all" ? ["staged", "working"] : [scope];
+  const issues: Array<{ source: "working" | "staged"; message: string }> = [];
+  let truncated = false;
+  for (const source of sources) {
+    try {
+      await runGit(root, source === "staged" ? ["diff", "--cached", "--check"] : ["diff", "--check"]);
+    } catch (error) {
+      const failure = error as { code?: number | string; stdout?: string; stderr?: string };
+      // Git diff --check exits 2 for whitespace problems. Never mistake other
+      // Git failures (e.g. an invalid repository) for successful validation.
+      if (failure.code !== 2) throw sanitizedProcessError("Git whitespace check", error);
+      const messages = redact([failure.stdout, failure.stderr].filter(Boolean).join("\n"))
+        .split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+      if (!messages.length) messages.push("Git reported a whitespace error without details");
+      for (const message of messages) {
+        if (issues.length >= 50) { truncated = true; break; }
+        issues.push({ source, message: message.slice(0, 1024) });
+        if (message.length > 1024) truncated = true;
+      }
+    }
+  }
+  return {
+    ok: issues.length === 0,
+    scope,
+    issues,
+    truncated,
+    note: "Checks tracked Git diffs only; untracked files must be added before checking.",
+  };
+}
+
 export async function gitListBranches(root: string): Promise<GitBranchInfo[]> {
   const current = await currentBranch(root).catch(() => "");
   const local = await runGit(root, ["for-each-ref", "--format=%(refname:short)%09%(objectname)%09%(upstream:short)", "refs/heads"]);
@@ -143,6 +183,73 @@ export async function gitDeleteLocalBranch(root: string, branchName: string, exp
   return { deleted: true, branch: branchName, sha: actual };
 }
 
+/** Explicit alternative to force-delete: preserve the exact tip in a local archive ref first. */
+export async function gitArchiveAndDeleteLocalBranch(root: string, branchName: string, expectedSha: string): Promise<{
+  deleted: true; branch: string; sha: string; archiveRef: string;
+}> {
+  assertBranch(branchName);
+  assertFullSha(expectedSha, "expected branch SHA");
+  if (/^(main|master|develop|development)$/.test(branchName) || branchName.startsWith("release/")) {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Protected branches cannot be archive-deleted");
+  }
+  if ((await currentBranch(root)) === branchName) {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Cannot delete the current branch");
+  }
+  const actual = await refSha(root, `refs/heads/${branchName}`);
+  if (actual.toLowerCase() !== expectedSha.toLowerCase()) {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Branch changed; list branches again");
+  }
+  const archiveRef = `refs/c2c-archive/${branchName}/${actual}`;
+  // A preexisting archive must point to the same commit; update-ref's empty
+  // old value prevents accidentally overwriting an archive made elsewhere.
+  const existing = await runGit(root, ["show-ref", "--verify", "--hash", archiveRef])
+    .then((result) => result.stdout.trim(), () => null);
+  if (existing && existing.toLowerCase() !== actual.toLowerCase()) {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Existing archive ref does not match the branch tip");
+  }
+  if (!existing) await runGit(root, ["update-ref", archiveRef, actual, ""]);
+  try {
+    // Git itself protects branches checked out in another linked worktree.
+    await runGit(root, ["branch", "-D", branchName]);
+  } catch {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, `Branch was not deleted; preserved tip at ${archiveRef}`);
+  }
+  return { deleted: true, branch: branchName, sha: actual, archiveRef };
+}
+
+export async function gitListBranchArchives(root: string): Promise<Array<{ branch: string; sha: string; archiveRef: string }>> {
+  const output = await runGit(root, ["for-each-ref", "--format=%(refname)%09%(objectname)", "refs/c2c-archive"]);
+  return output.stdout.split("\n").filter(Boolean).flatMap((line) => {
+    const [archiveRef = "", sha = ""] = line.split("\t");
+    const prefix = "refs/c2c-archive/";
+    if (!archiveRef.startsWith(prefix) || !/^[0-9a-f]{40}$/i.test(sha)) return [];
+    const suffix = `/${sha}`;
+    if (!archiveRef.endsWith(suffix)) return [];
+    const branch = archiveRef.slice(prefix.length, -suffix.length);
+    try { assertBranch(branch); } catch { return []; }
+    return [{ branch, sha, archiveRef }];
+  }).slice(0, 100);
+}
+
+export async function gitRestoreBranchArchive(root: string, branchName: string, expectedSha: string): Promise<{
+  restored: true; branch: string; sha: string; archiveRef: string;
+}> {
+  assertBranch(branchName);
+  assertFullSha(expectedSha, "expected archive SHA");
+  const archiveRef = `refs/c2c-archive/${branchName}/${expectedSha.toLowerCase()}`;
+  const archived = await refSha(root, archiveRef);
+  if (archived.toLowerCase() !== expectedSha.toLowerCase()) {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Archive changed; inspect it again");
+  }
+  try {
+    // Never overwrite a branch that another operation has recreated.
+    await runGit(root, ["branch", branchName, archiveRef]);
+  } catch {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Branch could not be restored; it may already exist");
+  }
+  return { restored: true, branch: branchName, sha: archived, archiveRef };
+}
+
 export async function gitDeleteRemoteBranch(
   root: string,
   branchName: string,
@@ -166,7 +273,9 @@ export async function gitDeleteRemoteBranch(
     throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, `Remote branch is not merged into origin/${baseBranch}`);
   }
   try {
-    await runGitNetwork(root, ["push", "origin", "--delete", branchName]);
+    // The remote may have advanced since the last fetch. Never delete a tip
+    // different from the exact SHA the caller inspected.
+    await runGitNetwork(root, ["push", "origin", `--force-with-lease=refs/heads/${branchName}:${actual}`, "--delete", branchName]);
   } catch (err) {
     throw sanitizedProcessError("Remote branch deletion", err);
   }
