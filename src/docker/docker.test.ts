@@ -86,6 +86,17 @@ describe("safe Docker read-only adapter", () => {
     await expect(dockerLogs(root, "mallo", "web-extra", 10)).rejects.toThrow(/allowlisted/);
   });
 
+  it("distinguishes a missing Compose stack from services excluded by the allowlist", async () => {
+    setDockerExecForTests(async () => ({ stdout: "[]", stderr: "" }));
+    await expect(dockerStatus(root, "mallo")).resolves.toEqual({
+      services: [], diagnostic: "no-containers-for-configured-project",
+    });
+    setDockerExecForTests(async () => ({ stdout: JSON.stringify({ Service: "unlisted", State: "running" }), stderr: "" }));
+    await expect(dockerStatus(root, "mallo")).resolves.toEqual({
+      services: [], diagnostic: "no-allowlisted-services-found",
+    });
+  });
+
   it("uses docker only with fixed argv, shell false, safe env, and bounded maxBuffer", async () => {
     const calls: Array<{ file: string; args: readonly string[]; options: Record<string, unknown> }> = [];
     setDockerExecForTests(async (file, args, options) => {
@@ -97,7 +108,7 @@ describe("safe Docker read-only adapter", () => {
     await dockerLogs(root, "mallo", "api", 17);
     expect(calls).toHaveLength(2);
     expect(calls[0]?.file).toBe("docker");
-    expect(calls[0]?.args).toEqual(["compose", "-p", "mallo_project", "-f", path.join(root, "docker-compose.yml"), "ps", "--format", "json", "web"]);
+    expect(calls[0]?.args).toEqual(["compose", "-p", "mallo_project", "-f", path.join(root, "docker-compose.yml"), "ps", "--all", "--format", "json", "web"]);
     expect(calls[1]?.args).toEqual(["compose", "-p", "mallo_project", "-f", path.join(root, "docker-compose.yml"), "logs", "--no-color", "--tail", "17", "api"]);
     for (const call of calls) {
       expect(call.options.shell).toBe(false);
