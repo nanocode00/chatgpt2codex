@@ -75,7 +75,7 @@ describe("on-demand generic binary file transfer", () => {
     expect(await readFile(path.join(root, ".chatgpt2codex/imports/paper.pdf"))).toEqual(pdf);
   });
 
-  it("prevents escape paths, symlinks, secret filenames, and other-session access", async () => {
+  it("prevents escape paths, symlinks, secret filenames, and other-project access", async () => {
     await expect(start("../unsafe.pdf", pdf)).rejects.toThrow(/filename/);
     await expect(start(".env", pdf)).rejects.toThrow(/filename/);
     await expect(start("safe.pdf", pdf, "../../outside.pdf")).rejects.toThrow(/escapes/);
@@ -85,8 +85,12 @@ describe("on-demand generic binary file transfer", () => {
       await symlink(outside, path.join(root, "uploads", "go"));
       await expect(start("safe.pdf", pdf, "uploads/go/escape.pdf")).rejects.toThrow(/symlink/);
       const a = await start("safe.pdf", pdf);
-      await expect(t.chunk({ projectId, root, sessionId: "another-session", transferId: a.transferId, index: 0, dataBase64: pdf.toString("base64") })).rejects.toThrow(/not found/);
-      expect(await t.abort({ projectId, root, sessionId, transferId: a.transferId })).toEqual({ aborted: true });
+      await expect(t.chunk({ projectId: "different-project", root, sessionId, transferId: a.transferId, index: 0, dataBase64: pdf.toString("base64") })).rejects.toThrow(/not found/);
+      await t.chunk({ projectId, root, sessionId: "another-session", transferId: a.transferId, index: 0, dataBase64: pdf.toString("base64") });
+      const completed = await t.finish({ projectId, root, sessionId, transferId: a.transferId });
+      expect(completed.sha256).toBe(hash(pdf));
+      const canceled = await start("cancel.pdf", pdf);
+      expect(await t.abort({ projectId, root, sessionId, transferId: canceled.transferId })).toEqual({ aborted: true });
     } finally { await rm(outside, { recursive: true, force: true }); }
   });
 
