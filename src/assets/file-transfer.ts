@@ -17,7 +17,6 @@ interface Transfer {
   id: string;
   projectId: string;
   root: string;
-  sessionId: string | undefined;
   filename: string;
   destRel: string;
   stageDir: string;
@@ -81,12 +80,15 @@ export class FileTransferManager {
     }
   }
 
-  private async owned(projectId: string, root: string, id: string, sessionId?: string): Promise<Transfer> {
+  private async owned(projectId: string, root: string, id: string): Promise<Transfer> {
     await this.reap();
     const t = this.active.get(id);
-    if (!t || t.projectId !== projectId || path.resolve(t.root) !== path.resolve(root) ||
-        t.sessionId !== sessionId) {
-      return invalid("Transfer not found or not owned by this session");
+    // ChatGPT's remote MCP client may initialize a fresh session for each tool
+    // invocation. Bind the transfer to the selected project and the
+    // unguessable transfer ID, not a connection-scoped MCP session ID.
+    // The tool boundary requires a valid full-write lease on *every* call.
+    if (!t || t.projectId !== projectId || path.resolve(t.root) !== path.resolve(root)) {
+      return invalid("Transfer not found for this project");
     }
     return t;
   }
@@ -122,7 +124,7 @@ export class FileTransferManager {
     }
     const id = randomUUID();
     this.active.set(id, {
-      id, projectId: input.projectId, root: rootAbs, sessionId: input.sessionId,
+      id, projectId: input.projectId, root: rootAbs,
       filename, destRel: rel, stageDir, stageFile, handle,
       expectedBytes: input.sizeBytes, expectedSha256: input.sha256.toLowerCase(),
       receivedBytes: 0, nextIndex: 0, hash: createHash("sha256"), startedAt: Date.now(),
@@ -134,7 +136,7 @@ export class FileTransferManager {
     projectId: string; root: string; sessionId?: string;
     transferId: string; index: number; dataBase64: string;
   }): Promise<{ receivedBytes: number; nextIndex: number }> {
-    const t = await this.owned(input.projectId, input.root, input.transferId, input.sessionId);
+    const t = await this.owned(input.projectId, input.root, input.transferId);
     if (input.index !== t.nextIndex) return invalid("Out-of-order or duplicate transfer chunk");
     const bytes = decodeChunk(input.dataBase64);
     if (t.receivedBytes + bytes.length > t.expectedBytes) return invalid("Transfer exceeds declared byte count");
@@ -149,7 +151,7 @@ export class FileTransferManager {
   async finish(input: {
     projectId: string; root: string; sessionId?: string; transferId: string;
   }): Promise<{ filePath: string; bytes: number; sha256: string; deduped: boolean }> {
-    const t = await this.owned(input.projectId, input.root, input.transferId, input.sessionId);
+    const t = await this.owned(input.projectId, input.root, input.transferId);
     if (t.receivedBytes !== t.expectedBytes) return invalid("Transfer is incomplete");
     const digest = t.hash.digest("hex");
     if (digest !== t.expectedSha256) {
@@ -187,7 +189,7 @@ export class FileTransferManager {
   async abort(input: {
     projectId: string; root: string; sessionId?: string; transferId: string;
   }): Promise<{ aborted: true }> {
-    const t = await this.owned(input.projectId, input.root, input.transferId, input.sessionId);
+    const t = await this.owned(input.projectId, input.root, input.transferId);
     await this.discard(t);
     return { aborted: true };
   }

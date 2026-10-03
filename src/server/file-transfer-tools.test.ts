@@ -10,7 +10,7 @@ let projectRoot: string;
 let stateDir: string;
 let records: Array<Record<string, unknown>>;
 
-function createContext(remote = false): ToolContext {
+function createContext(remote = false, sessionId = "requester"): ToolContext {
   const registry = [{ projectId: "proj", name: "proj", root: projectRoot, aliases: [] }];
   const lease: Lease = {
     projectId: "proj", projectRoot, leaseId: "lease_for_explicit_transfer", preset: "full-write",
@@ -25,7 +25,7 @@ function createContext(remote = false): ToolContext {
       setSession: async () => undefined,
     },
     config: {
-      workspaceRoot: path.dirname(projectRoot), stateDir, sessionId: "requester",
+      workspaceRoot: path.dirname(projectRoot), stateDir, sessionId,
       maxReadBytes: 1024 * 1024, maxPatchBytes: 1024 * 1024,
       defaultCommandTimeoutSec: 30, defaultLeaseTtlMs: 60_000,
     },
@@ -54,7 +54,7 @@ afterEach(async () => {
 });
 
 describe("on-demand file transfer through MCP and HTTP-style re-registration", () => {
-  it("continues one PDF transfer across three separate tool registrations", async () => {
+  it("continues PDF transfer across three separate MCP sessions and tool registrations", async () => {
     const ctx = createContext();
     const original = Buffer.from("%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n");
     const sha256 = createHash("sha256").update(original).digest("hex");
@@ -62,11 +62,11 @@ describe("on-demand file transfer through MCP and HTTP-style re-registration", (
     const started = await a({ mode: "begin", projectId: "proj", filename: "source.pdf", sizeBytes: original.length, sha256 });
     expect(started.isError).not.toBe(true);
     const transferId = String(started.structuredContent.transferId);
-    const b = await handler(ctx);
+    const b = await handler(createContext(false, "reconnected-session-for-chunk"));
     const dataBase64 = original.toString("base64");
     const chunk = await b({ mode: "chunk", projectId: "proj", transferId, index: 0, dataBase64 });
     expect(chunk.structuredContent.receivedBytes).toBe(original.length);
-    const c = await handler(ctx);
+    const c = await handler(createContext(false, "reconnected-session-for-finish"));
     const finished = await c({ mode: "finish", projectId: "proj", transferId });
     expect(finished.isError).not.toBe(true);
     expect(finished.structuredContent.sha256).toBe(sha256);
@@ -82,5 +82,23 @@ describe("on-demand file transfer through MCP and HTTP-style re-registration", (
     });
     expect(result.isError).toBe(true);
     expect(result.structuredContent.code).toBe("PERMISSION_DENIED");
+  });
+
+  it("still requires write authorization on a reconnected session that knows a transfer ID", async () => {
+    const original = Buffer.from("%PDF-1.4\n%%EOF\n");
+    const sha256 = createHash("sha256").update(original).digest("hex");
+    const started = await (await handler(createContext()))({
+      mode: "begin", projectId: "proj", filename: "guarded.pdf", sizeBytes: original.length, sha256,
+    });
+    expect(started.isError).not.toBe(true);
+    const transferId = String(started.structuredContent.transferId);
+    delete process.env.CHATGPT2CODEX_REMOTE_WRITE;
+    const denied = await (await handler(createContext(true, "reconnected-remote-session")))({
+      mode: "chunk", projectId: "proj", transferId, index: 0, dataBase64: original.toString("base64"),
+    });
+    expect(denied.isError).toBe(true);
+    expect(denied.structuredContent.code).toBe("PERMISSION_DENIED");
+    const aborted = await (await handler(createContext()))({ mode: "abort", projectId: "proj", transferId });
+    expect(aborted.isError).not.toBe(true);
   });
 });

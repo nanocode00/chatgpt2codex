@@ -17,7 +17,7 @@ The HTTP Action equivalent is `/actions/file-transfer`; it uses the same tool co
 
 ## Security and data integrity
 
-- An unpredictable UUIDv4 transfer ID, the selected project, and the initiating C2C session identify each upload.
+- An unpredictable UUIDv4 transfer ID and the selected project identify each upload; every operation independently requires an authorized full-write lease. Separate authenticated MCP sessions may continue a transfer only when they know its transfer ID (treat the ID as a short-lived upload secret).
 - Declared size and SHA-256 are required *before* accepting chunks; chunk indexes must be sequential. Invalid Base64, missing/duplicate/out-of-order chunks, truncated data, oversize transfers, path escapes, symlinks, secret-classified paths, and non-identical existing destinations are rejected.
 - Staging is in the project's `.chatgpt2codex/imports/.staging`; `finish` places the file via a non-overwriting hard link on the same filesystem. `abort`, failed integrity checks, and normal finalization delete temporary staged data. Inactive in-process transfers expire after 30 minutes when transfer operations are next invoked.
 - No raw Base64 payload is intentionally included in completion audit records or file-transfer error logs. Do not put private file contents or credentials into transfer metadata or Git commits.
