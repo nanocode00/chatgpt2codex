@@ -248,7 +248,7 @@ describe("Custom GPT action bridge", () => {
     expect(body.info.description).toContain("30 operations");
     expect(body.info.description).toContain("workspace_list_projects");
     expect(body.info.description).toContain("save_chatgpt_image/save_chatgpt_image_from_url");
-    expect(Object.keys(body.paths)).toHaveLength(23);
+    expect(Object.keys(body.paths)).toHaveLength(24);
     expect(body.info["x-chatgpt2codex-tool-proof"]?.namespace).toBe("ChatGPT_To_Codex");
     expect(body.info["x-chatgpt2codex-openapi-operation-count"]).toBeLessThanOrEqual(30);
     expect(body.info["x-chatgpt2codex-tool-names"]).toContain("workspace_list_projects");
@@ -356,6 +356,9 @@ describe("Custom GPT action bridge", () => {
     expect((body.components.schemas.ProjectSkillWriteInput as { properties?: Record<string, { enum?: string[]; pattern?: string; maxLength?: number }> }).properties?.content?.maxLength).toBe(262144);
     expect(body.components.schemas.FileApplyPatchInput.properties.patch).toBeDefined();
     expect(body.components.schemas.FileCreateInput.properties.content).toBeDefined();
+    expect(body.paths["/actions/file-transfer"]).toBeDefined();
+    expect(body.components.schemas.FileTransferInput.required).toEqual(["mode", "projectId"]);
+    expect(body.components.schemas.FileTransferInput.properties.mode.enum).toEqual(["begin", "chunk", "finish", "abort"]);
     expect(body.components.schemas.NotebookPathInput.required).toEqual(["projectId", "path"]);
     expect(body.components.schemas.NotebookPathInput.additionalProperties).toBe(false);
     expect(Object.keys(body.components.schemas.NotebookPathInput.properties)).toEqual(["projectId", "path"]);
@@ -455,10 +458,10 @@ describe("Custom GPT action bridge", () => {
 
   it("keeps the OpenAPI operation budget exact across remote opt-in combinations", async () => {
     const combinations = [
-      { exec: false, e2e: false, expected: 23 },
-      { exec: true, e2e: false, expected: 24 },
-      { exec: false, e2e: true, expected: 24 },
-      { exec: true, e2e: true, expected: 26 },
+      { exec: false, e2e: false, expected: 24 },
+      { exec: true, e2e: false, expected: 25 },
+      { exec: false, e2e: true, expected: 25 },
+      { exec: true, e2e: true, expected: 27 },
     ] as const;
 
     for (const combination of combinations) {
@@ -498,7 +501,7 @@ describe("Custom GPT action bridge", () => {
     expect(body.paths["/actions/e2e-test-and-show-screenshot"]).toBeDefined();
     expect(body.paths["/actions/e2e-screenshot"]).toBeUndefined();
     expect(body.paths["/actions/e2e-open-url-screenshot"]).toBeUndefined();
-        expect(Object.keys(body.paths)).toHaveLength(26);
+        expect(Object.keys(body.paths)).toHaveLength(27);
       }
     }
   });

@@ -26,6 +26,7 @@ import { readSlice } from "../code/read-slice.js";
 import { applyPatch, createFile } from "../code/patch.js";
 import { createCheckpoint, getWorkingDiff, listCheckpoints, readCheckpoint, restoreCheckpoint } from "../state/checkpoints.js";
 import { listImages, retrieveImage, saveImage, writeVersionedImage } from "../assets/images.js";
+import { FileTransferManager, TRANSFER_MAX_BYTES } from "../assets/file-transfer.js";
 import { intakeFromClipboard, intakeFromDownload, intakeFromPath, readClipboardText } from "../assets/image-intake.js";
 import { fetchImageFromUrl } from "../assets/image-url.js";
 import { prepareChatGptImagesApp } from "../assets/chatgpt-images-app.js";
@@ -926,6 +927,10 @@ function projectOperationLockMode(
  * command_*, git_*) against the given server instance, wiring handlers to
  * ctx (PRD §8 full tool catalog).
  */
+// HTTP Actions rebuilds the MCP tool catalog on every request. Keep in-progress
+// uploads for the lifetime of the runtime process, not the tool registration.
+const fileTransfers = new FileTransferManager();
+
 export function registerTools(server: unknown, ctx: ToolContext): void {
   const s = server as McpServer;
   const rawRegisterTool = s.registerTool.bind(s);
@@ -967,7 +972,9 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
           await ctx.ledger.append({
             type: "tool.call.failed",
             tool: name,
-            input: redactUnknown(input),
+            input: name === "file_transfer" && input && typeof input === "object" && !Array.isArray(input)
+              ? redactUnknown({ ...(input as Record<string, unknown>), dataBase64: undefined })
+              : redactUnknown(input),
             code: mapped.structuredContent.code,
             error: mapped.structuredContent.error,
           });
@@ -3347,6 +3354,50 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
         return makeResult(result, result.restored ? `Restored ${input.checkpointId}.` : `Checkpoint ${input.checkpointId} had no diff.`);
       });
     },
+  );
+
+  registerTool(
+    "file_transfer",
+    {
+      title: "Transfer user-selected files into a local C2C project",
+      description: "Only when explicitly requested by the user: begin, upload ordered Base64 chunks, finish with SHA-256 verification, or abort an original binary file transfer. Repeat independently for multiple requested files. Requires full-write authorization; does not access ChatGPT attachments automatically.",
+      annotations: LOCAL_WRITE_ANNOTATIONS,
+      _meta: chatGptToolMeta("Transferring requested file...", "File transfer operation completed"),
+      inputSchema: z.discriminatedUnion("mode", [
+        z.object({
+          mode: z.literal("begin"), projectId: z.string(), filename: z.string().min(1).max(160),
+          sizeBytes: z.number().int().min(1).max(TRANSFER_MAX_BYTES),
+          sha256: z.string().regex(/^[a-fA-F0-9]{64}$/),
+          destPath: z.string().max(4096).optional(),
+        }).strict(),
+        z.object({
+          mode: z.literal("chunk"), projectId: z.string(), transferId: z.string().uuid(),
+          index: z.number().int().min(0), dataBase64: z.string().min(4).max(349528),
+        }).strict(),
+        z.object({ mode: z.literal("finish"), projectId: z.string(), transferId: z.string().uuid() }).strict(),
+        z.object({ mode: z.literal("abort"), projectId: z.string(), transferId: z.string().uuid() }).strict(),
+      ]),
+    },
+    async (input) => withErrorMapping<Record<string, unknown>>(ctx, "file_transfer", { ...input, dataBase64: undefined }, async () => {
+      await requireProjectLease(ctx, input.projectId, "write");
+      const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
+      const common = { projectId: input.projectId, root: entry.root, sessionId: ctx.config.sessionId };
+      if (input.mode === "begin") {
+        const result = await fileTransfers.begin({ ...common, filename: input.filename, sizeBytes: input.sizeBytes, sha256: input.sha256, destPath: input.destPath });
+        return makeResult(result, "Transfer started: " + result.transferId);
+      }
+      if (input.mode === "chunk") {
+        const result = await fileTransfers.chunk({ ...common, transferId: input.transferId, index: input.index, dataBase64: input.dataBase64 });
+        return makeResult(result, "Received " + result.receivedBytes + " bytes.");
+      }
+      if (input.mode === "abort") {
+        const result = await fileTransfers.abort({ ...common, transferId: input.transferId });
+        return makeResult(result, "Transfer aborted.");
+      }
+      const result = await fileTransfers.finish({ ...common, transferId: input.transferId });
+      await ctx.ledger.append({ type: "file.transfer.completed", projectId: input.projectId, path: result.filePath, bytes: result.bytes, sha256: result.sha256 });
+      return makeResult(result, "Verified and saved " + result.filePath);
+    }),
   );
 
   registerTool(
