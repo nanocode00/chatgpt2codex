@@ -15,7 +15,8 @@ You choose the workspace, approve the token, and keep control of what gets
 edited.
 
 [Download v0.2.0](https://github.com/ezBuilder/chatgpt2codex/releases/tag/v0.2.0) ·
-[Beginner installation guide](docs/INSTALL.md)
+[Beginner installation guide](docs/INSTALL.md) ·
+[Roadmap](docs/ROADMAP.md)
 
 > Help us get this in front of more builders: star the repo if you want
 > ChatGPT to stop talking about code and start safely doing the repo loop.
@@ -363,6 +364,24 @@ cloud upload.
 
 This fork keeps the upstream architecture but applies additional fail-closed
 guards for remote sessions.
+
+### On-demand file transfer
+
+This fork provides an explicitly requested `file_transfer` tool for original
+binary files, scoped to the selected local project and an authorized full-write
+lease. For public HTTPS files, `mode=from_url` downloads the source directly
+inside C2C, verifies the exact expected size and SHA-256, and saves it without
+overwriting a different existing file. A real 303,358-byte public-source PDF
+import and duplicate-safe retry have been verified against a running C2C.
+
+Small private files can use verified, chunked Base64 transfer; C2C **cannot**
+directly access private ChatGPT Library paths, and an efficient direct bridge
+for arbitrary private large files has not been implemented. The alternative
+user-approved upload path is deferred under
+[issue #18](https://github.com/nanocode00/chatgpt2codex/issues/18).
+See the [file transfer guide](docs/FILE_TRANSFER.md) for limits and safety details.
+
+### Remote session controls
 
 Remote sessions default to read-only behavior. Higher-impact capabilities must
 be explicitly enabled by the local operator:
