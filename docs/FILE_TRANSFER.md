@@ -26,7 +26,7 @@ The HTTP Action equivalent is `/actions/file-transfer`; it uses the same tool co
 
 If the user explicitly selects a file and there is a byte-identical PUBLIC HTTPS source, use file_transfer mode=from_url with projectId, filename, url, sizeBytes, sha256, and optional destPath. C2C downloads the original bytes directly, rejects unsafe URL schemes/addresses/redirects and private credentials, and matches the exact supplied length and SHA-256 before storing the file. Downloads are limited to 20 MiB.
 
-For example, the user's Library copy of seq2seq-asr-chiu-2018.pdf was confirmed identical to https://arxiv.org/pdf/1712.01769v6 (303358 bytes, SHA-256 687e651bc1461992d6548e48555aae85159c78e2be5d4835042f7facdf268629). The optional public-source verification script in scripts/verify_public_paper_sample.py also downloads and atomically stores this verified fixture in its current C2C test worktree. This demonstrates equivalence to a PUBLIC paper version, not access to the user's private Library through C2C. Actual from_url tool execution against a live server requires publishing this feature and restarting C2C.
+For example, a Library copy of `seq2seq-asr-chiu-2018.pdf` was confirmed byte-identical to the public https://arxiv.org/pdf/1712.01769v6 (303358 bytes; expected SHA-256 verified). After PR #23 was merged and C2C restarted, a real `file_transfer(mode=from_url)` invocation against the live `chatgpt2codex` project returned exactly 303358 bytes and the expected SHA-256 with `deduped=false`; repeating it returned `deduped=true`. The optional `scripts/verify_public_paper_sample.py` independently checks the public fixture. This verifies the public-source import path, not direct access to private ChatGPT Library files.
 
 ## ChatGPT-side source and transport boundary
 
@@ -36,7 +36,7 @@ The initial feature implementation provides a secure **destination/receiver** an
 
 ## Local verification
 
-From this feature worktree with dependencies installed:
+From a local source checkout with dependencies installed:
 
 ```sh
 npm run typecheck
