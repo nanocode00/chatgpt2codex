@@ -30,3 +30,12 @@ jobs:
 
       - name: Test
         run: npm test
+
+      - name: Standalone installer unit tests
+        run: python3 scripts/test_standalone_installer.py
+
+      - name: Build standalone runtime
+        run: npm run build
+
+      - name: Independent runtime integration
+        run: python3 scripts/e2e-standalone-runtime.py
