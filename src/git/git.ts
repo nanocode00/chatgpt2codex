@@ -420,7 +420,9 @@ export async function gitAddLinkedWorktree(
     if (!(await refExists(root, baseRef))) {
       throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Remote base branch does not exist");
     }
-    await runGit(root, ["worktree", "add", "-b", branchName, targetPath, baseRef]);
+    // The remote base supplies the start commit only. An inherited upstream
+    // would point this new feature branch at origin/main and block safe push.
+    await runGit(root, ["worktree", "add", "--no-track", "-b", branchName, targetPath, baseRef]);
   } else {
     if (!(await refExists(root, `refs/heads/${branchName}`))) {
       throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Local branch does not exist");
