@@ -354,6 +354,52 @@ describe("safe git workspace/publish workflow", () => {
     }
   });
 
+  it("creates a linked branch without inheriting the base upstream and safely first-pushes", async () => {
+    const target = dir + "-no-track-linked";
+    const mainBefore = (await execFileAsync("git", ["rev-parse", "refs/remotes/origin/main"], { cwd: dir })).stdout.trim();
+    // Reproduce the auto-track behavior regardless of the CI runner's Git defaults.
+    await execFileAsync("git", ["config", "branch.autoSetupMerge", "always"], { cwd: dir });
+    try {
+      await gitAddLinkedWorktree(dir, target, "feature/no-track-linked", "main");
+      const created = await gitRepositoryStatus(target);
+      expect(created).toMatchObject({ branch: "feature/no-track-linked", upstream: null });
+      expect((await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: target })).stdout.trim()).toBe(mainBefore);
+      await writeFile(join(target, "feature.txt"), "feature\n");
+      await execFileAsync("git", ["add", "feature.txt"], { cwd: target });
+      await execFileAsync("git", ["commit", "-q", "-m", "feature"], { cwd: target });
+
+      const result = await gitPushCurrentBranch(target);
+      expect(result).toMatchObject({ remote: "origin", branch: "feature/no-track-linked" });
+      const published = await gitRepositoryStatus(target);
+      expect(published).toMatchObject({
+        branch: "feature/no-track-linked",
+        upstream: "origin/feature/no-track-linked",
+        ahead: 0, behind: 0, syncState: "up-to-date",
+      });
+      const pushedSha = (await execFileAsync("git", ["rev-parse", "refs/heads/feature/no-track-linked"], { cwd: remoteDir })).stdout.trim();
+      expect(pushedSha).toBe((await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: target })).stdout.trim());
+      const mainAfter = (await execFileAsync("git", ["rev-parse", "refs/heads/main"], { cwd: remoteDir })).stdout.trim();
+      expect(mainAfter).toBe(mainBefore);
+      expect((await gitRepositoryStatus(dir)).upstream).toBe("origin/main");
+    } finally {
+      await gitRemoveLinkedWorktree(dir, target).catch(() => undefined);
+      await rm(target, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves the upstream on an existing local branch added as a worktree", async () => {
+    const target = dir + "-existing-linked";
+    await execFileAsync("git", ["branch", "feature/existing-linked", "main"], { cwd: dir });
+    await execFileAsync("git", ["branch", "--set-upstream-to=origin/main", "feature/existing-linked"], { cwd: dir });
+    try {
+      await gitAddLinkedWorktree(dir, target, "feature/existing-linked");
+      expect((await gitRepositoryStatus(target)).upstream).toBe("origin/main");
+    } finally {
+      await gitRemoveLinkedWorktree(dir, target).catch(() => undefined);
+      await rm(target, { recursive: true, force: true });
+    }
+  });
+
   it("does not remove a dirty linked worktree", async () => {
     const target = `${dir}-dirty-linked`;
     try {
