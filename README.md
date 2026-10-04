@@ -130,6 +130,12 @@ The developer CLI is available as either `c2c` or the longer
 `chatgpt2codex` command. Running `c2c` with no arguments prints the command
 overview.
 
+For a long-lived Linux/WSL runtime that does not depend on this source checkout,
+see the [standalone installation and rollback guide](docs/INSTALL_STANDALONE.md).
+The existing development shortcut (`npm run link:local`) remains source-linked;
+standalone installation instead retains separate versioned releases and reuses
+existing user configuration and tokens without automatically restarting servers.
+
 ```bash
 c2c start
 c2c status
