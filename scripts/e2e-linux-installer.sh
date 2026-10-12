@@ -139,30 +139,30 @@ JSON
 }
 
 install_app() {
-  test -f "$INSTALLER"
-  HOME="$HOME_DIR" bash "$INSTALLER" --prefix "$PREFIX" --no-launch --workspace "$WORKSPACE"
-  test -x "$PREFIX/bin/node"
-  test -x "$PREFIX/bin/cloudflared"
-  test -f "$PREFIX/dist/cli.js"
-  test -x "$PREFIX/chatgpt2codex"
-  test -x "$PREFIX/start-chatgpt2codex.sh"
+  test -f "$INSTALLER" || return
+  HOME="$HOME_DIR" bash "$INSTALLER" --prefix "$PREFIX" --no-launch --workspace "$WORKSPACE" || return
+  test -x "$PREFIX/bin/node" || return
+  test -x "$PREFIX/bin/cloudflared" || return
+  test -f "$PREFIX/dist/cli.js" || return
+  test -x "$PREFIX/chatgpt2codex" || return
+  test -x "$PREFIX/start-chatgpt2codex.sh" || return
   echo "installed=$PREFIX"
 }
 
 init_tokens() {
   local output
-  output="$(HOME="$HOME_DIR" "$PREFIX/bin/node" "$PREFIX/dist/cli.js" init --workspace "$WORKSPACE" --rotate-owner-token 2>&1)"
+  output="$(HOME="$HOME_DIR" "$PREFIX/bin/node" "$PREFIX/dist/cli.js" init --workspace "$WORKSPACE" --rotate-owner-token 2>&1)" || return
   OWNER_TOKEN="$(printf '%s\n' "$output" | sed -n 's/^  \([A-Za-z0-9_-]\{40,\}\)$/\1/p' | sed -n '1p')"
-  test -n "$OWNER_TOKEN"
+  test -n "$OWNER_TOKEN" || return
   export OWNER_TOKEN
   echo "owner token parsed"
 }
 
 doctor_runtime() {
   local output
-  output="$(HOME="$HOME_DIR" PATH="$PREFIX/bin:$PATH" "$PREFIX/bin/node" "$PREFIX/dist/cli.js" doctor)"
-  grep -q "owner token configured" <<<"$output"
-  grep -q "registered tools:" <<<"$output"
+  output="$(HOME="$HOME_DIR" PATH="$PREFIX/bin:$PATH" "$PREFIX/bin/node" "$PREFIX/dist/cli.js" doctor)" || return
+  grep -q "owner token configured" <<<"$output" || return
+  grep -q "registered tools:" <<<"$output" || return
   echo "doctor ok"
 }
 
@@ -321,13 +321,23 @@ const created = await json("POST", `${baseUrl}/actions/file-create`, {
 }, auth);
 assert(created.body.ok === true, "file-create failed");
 assert(await readFile(path.join(projectRoot, "e2e-created.txt"), "utf8") === "created by linux installer e2e\n", "file content mismatch");
+const commandList = await json("POST", `${baseUrl}/actions/command-list`, { projectId: project.projectId }, auth);
+assert(commandList.body.ok === true, "command-list failed");
+const echoCommand = commandList.body.structuredContent.commands.find((command) => command.commandId === "npm:echo");
+assert(echoCommand, "npm:echo was not discovered");
+const commandRun = await json("POST", `${baseUrl}/actions/command-run`, {
+  projectId: project.projectId,
+  commandId: "npm:echo",
+  intent: { needsNetwork: false, expectedDurationSec: 10 },
+}, auth);
+assert(commandRun.body.ok === true && /e2e-command-ok/.test(commandRun.body.structuredContent.stdoutSummary), "command-run failed");
 const shell = await json("POST", `${baseUrl}/actions/local-shell-run`, {
   projectId: project.projectId,
-  command: "echo e2e-shell-ok",
+  command: "echo must-not-run",
   timeoutSec: 10,
-  intent: { reason: "linux e2e", writesWorkspace: false, needsNetwork: false, destructive: false },
+  intent: { reason: "linux e2e arbitrary shell denial", writesWorkspace: false, needsNetwork: false, destructive: false },
 }, auth);
-assert(shell.body.ok === true && /e2e-shell-ok/.test(shell.body.structuredContent.stdoutSummary), "local shell failed");
+assert(shell.body.ok === false && shell.body.structuredContent.code === "ARBITRARY_SHELL_DENIED", "remote arbitrary shell was not denied");
 
 const noAuthMcp = await fetch(`${baseUrl}/mcp`, {
   method: "POST",
@@ -360,29 +370,61 @@ JS
 }
 
 start_http_runtime() {
-  PORT="$(get_free_port)"
+  PORT="$(get_free_port)" || return
   BASE_URL="http://127.0.0.1:$PORT"
-  HOME="$HOME_DIR" PATH="$PREFIX/bin:$PATH" "$PREFIX/bin/node" "$PREFIX/dist/cli.js" serve --http --port "$PORT" --public-url "$BASE_URL" --workspace "$WORKSPACE" --active-project-root "$PROJECT" --active-project-preset full-write >"$RUN_ROOT/server.out.log" 2>"$RUN_ROOT/server.err.log" &
+  HOME="$HOME_DIR" PATH="$PREFIX/bin:$PATH" CHATGPT2CODEX_REMOTE_WRITE=1 CHATGPT2CODEX_REMOTE_EXEC=1 \
+    "$PREFIX/bin/node" "$PREFIX/dist/cli.js" serve --http --port "$PORT" --public-url "$BASE_URL" --workspace "$WORKSPACE" --active-project-root "$PROJECT" --active-project-preset full-write >"$RUN_ROOT/server.out.log" 2>"$RUN_ROOT/server.err.log" &
   SERVER_PID="$!"
   PROCS+=("$SERVER_PID")
-  wait_http "$BASE_URL/healthz" "$TIMEOUT_SEC"
+  if ! wait_http "$BASE_URL/healthz" "$TIMEOUT_SEC"; then
+    echo "installed HTTP runtime did not become healthy" >&2
+    echo "--- server stdout ---" >&2
+    cat "$RUN_ROOT/server.out.log" >&2 2>/dev/null || true
+    echo "--- server stderr ---" >&2
+    cat "$RUN_ROOT/server.err.log" >&2 2>/dev/null || true
+    echo "--- installed bin ---" >&2
+    ls -la "$PREFIX/bin" >&2 2>/dev/null || true
+    echo "--- server process ---" >&2
+    if kill -0 "$SERVER_PID" 2>/dev/null; then
+      echo "pid=$SERVER_PID alive" >&2
+    else
+      echo "pid=$SERVER_PID exited" >&2
+    fi
+    return 1
+  fi
   export PORT BASE_URL SERVER_PID
   echo "port=$PORT"
 }
 
 http_feature_tests() {
-  write_http_harness
-  HOME="$HOME_DIR" "$PREFIX/bin/node" "$RUN_ROOT/http-e2e.mjs" "$BASE_URL" "$OWNER_TOKEN" "$PROJECT"
+  write_http_harness || return
+  HOME="$HOME_DIR" "$PREFIX/bin/node" "$RUN_ROOT/http-e2e.mjs" "$BASE_URL" "$OWNER_TOKEN" "$PROJECT" || return
 }
 
 launcher_test() {
   local port
-  port="$(get_free_port)"
+  port="$(get_free_port)" || return
   HOME="$HOME_DIR" "$PREFIX/start-chatgpt2codex.sh" --no-tunnel --port "$port" --workspace "$WORKSPACE" >"$RUN_ROOT/launcher.out.log" 2>"$RUN_ROOT/launcher.err.log" &
   local pid="$!"
   PROCS+=("$pid")
-  wait_http "http://127.0.0.1:$port/healthz" "$TIMEOUT_SEC"
-  grep -q "chatgpt2codex is ready" "$RUN_ROOT/launcher.out.log"
+  if ! wait_http "http://127.0.0.1:$port/healthz" "$TIMEOUT_SEC"; then
+    cat "$RUN_ROOT/launcher.out.log" "$RUN_ROOT/launcher.err.log" >&2 2>/dev/null || true
+    return 1
+  fi
+  local ready_deadline=$((SECONDS + 5))
+  while [ "$SECONDS" -lt "$ready_deadline" ]; do
+    if grep -q "chatgpt2codex is ready" "$RUN_ROOT/launcher.out.log"; then
+      break
+    fi
+    if ! kill -0 "$pid" 2>/dev/null; then
+      break
+    fi
+    sleep 0.1
+  done
+  grep -q "chatgpt2codex is ready" "$RUN_ROOT/launcher.out.log" || {
+    cat "$RUN_ROOT/launcher.out.log" "$RUN_ROOT/launcher.err.log" >&2 2>/dev/null || true
+    return 1
+  }
   kill "$pid" 2>/dev/null || true
   echo "port=$port"
 }
@@ -393,7 +435,7 @@ tunnel_test() {
     return 0
   fi
   local port pid url deadline body
-  port="$(get_free_port)"
+  port="$(get_free_port)" || return
   HOME="$HOME_DIR" "$PREFIX/start-chatgpt2codex.sh" --port "$port" --workspace "$WORKSPACE" >"$RUN_ROOT/tunnel.out.log" 2>"$RUN_ROOT/tunnel.err.log" &
   pid="$!"
   PROCS+=("$pid")
@@ -406,10 +448,10 @@ tunnel_test() {
     fi
     sleep 1
   done
-  test -n "$url"
-  wait_http "$url/healthz" "$TIMEOUT_SEC"
-  body="$("$PREFIX/bin/node" -e 'fetch(process.argv[1]).then(r=>r.text()).then(t=>process.stdout.write(t)).catch(e=>{console.error(e.message);process.exit(1)})' "$url/healthz")"
-  grep -q '"ok":true' <<<"$body"
+  test -n "$url" || return
+  wait_http "$url/healthz" "$TIMEOUT_SEC" || return
+  body="$("$PREFIX/bin/node" -e 'fetch(process.argv[1]).then(r=>r.text()).then(t=>process.stdout.write(t)).catch(e=>{console.error(e.message);process.exit(1)})' "$url/healthz")" || return
+  grep -q '"ok":true' <<<"$body" || return
   kill "$pid" 2>/dev/null || true
   echo "url=$url"
 }

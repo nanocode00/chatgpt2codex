@@ -12,7 +12,14 @@ resolve_self() {
   cd -P "$(dirname "$src")" && pwd
 }
 
-ROOT="$(cd "$(resolve_self)/.." && pwd)"
+SELF_DIR="$(resolve_self)"
+if [ -f "$SELF_DIR/dist/cli.js" ]; then
+  # Packaged layout: the launcher lives at the application root.
+  ROOT="$SELF_DIR"
+else
+  # Source layout: linux/start-chatgpt2codex.sh lives one level below root.
+  ROOT="$(cd "$SELF_DIR/.." && pwd)"
+fi
 BIN_DIR="$ROOT/bin"
 PATH="$BIN_DIR:$PATH"
 export PATH
@@ -179,7 +186,7 @@ start_logged() {
   local name="$1"
   shift
   "$@" >"$TMP_DIR/$name.out.log" 2>"$TMP_DIR/$name.err.log" &
-  echo "$!"
+  LAST_STARTED_PID="$!"
 }
 
 read_logs() {
@@ -218,7 +225,8 @@ start_quick_tunnel_with_retry() {
       sleep $((attempt < 5 ? attempt * 2 : 10))
     fi
 
-    TUNNEL_PID="$(start_logged cloudflared "$CLOUDFLARED" tunnel --no-autoupdate --url "http://127.0.0.1:$PORT")"
+    start_logged cloudflared "$CLOUDFLARED" tunnel --no-autoupdate --url "http://127.0.0.1:$PORT"
+    TUNNEL_PID="$LAST_STARTED_PID"
     if PUBLIC_URL="$(wait_quick_tunnel_url 45)"; then
       return 0
     fi
@@ -260,14 +268,17 @@ else
     fi
     PUBLIC_URL="https://$PUBLIC_HOSTNAME"
     if [ -n "${CLOUDFLARED_TUNNEL_TOKEN:-}" ]; then
-      TUNNEL_PID="$(start_logged cloudflared "$CLOUDFLARED" tunnel --no-autoupdate run --token "$CLOUDFLARED_TUNNEL_TOKEN")"
+      start_logged cloudflared "$CLOUDFLARED" tunnel --no-autoupdate run --token "$CLOUDFLARED_TUNNEL_TOKEN"
+      TUNNEL_PID="$LAST_STARTED_PID"
     else
-      TUNNEL_PID="$(start_logged cloudflared "$CLOUDFLARED" tunnel --no-autoupdate run --url "http://127.0.0.1:$PORT" "$CLOUDFLARED_TUNNEL_NAME")"
+      start_logged cloudflared "$CLOUDFLARED" tunnel --no-autoupdate run --url "http://127.0.0.1:$PORT" "$CLOUDFLARED_TUNNEL_NAME"
+      TUNNEL_PID="$LAST_STARTED_PID"
     fi
     sleep 3
   elif [ -n "$PUBLIC_HOSTNAME" ]; then
     PUBLIC_URL="https://$PUBLIC_HOSTNAME"
-    TUNNEL_PID="$(start_logged cloudflared "$CLOUDFLARED" tunnel --hostname "$PUBLIC_HOSTNAME" --url "http://127.0.0.1:$PORT" --no-autoupdate)"
+    start_logged cloudflared "$CLOUDFLARED" tunnel --hostname "$PUBLIC_HOSTNAME" --url "http://127.0.0.1:$PORT" --no-autoupdate
+    TUNNEL_PID="$LAST_STARTED_PID"
     sleep 3
   else
     if ! start_quick_tunnel_with_retry 4; then
@@ -285,7 +296,8 @@ if [ -n "${CHATGPT2CODEX_ACTIVE_PROJECT_ROOT:-}" ]; then
   server_args+=(--active-project-root "$CHATGPT2CODEX_ACTIVE_PROJECT_ROOT")
   server_args+=(--active-project-preset "${CHATGPT2CODEX_ACTIVE_PROJECT_PRESET:-full-write}")
 fi
-SERVER_PID="$(start_logged server "${server_args[@]}")"
+start_logged server "${server_args[@]}"
+SERVER_PID="$LAST_STARTED_PID"
 if ! wait_http_ok "http://127.0.0.1:$PORT/healthz" 30 "local server"; then
   read_logs server >&2
   exit 1
