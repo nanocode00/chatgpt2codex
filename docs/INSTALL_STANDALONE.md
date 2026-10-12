@@ -6,7 +6,7 @@ The standalone installer does **not** stop or restart a running instance, migrat
 
 ## Recommended user installation
 
-Starting with a release that publishes `chatgpt2codex-linux-x64.run` and
+Starting with v0.3.0, releases publish `chatgpt2codex-linux-x64.run` and
 `SHA256SUMS`, the user machine does **not** need Python, npm, or system Node.js.
 The release bundle contains its own Node.js, production dependencies,
 `cloudflared`, and optional `rg`.
