@@ -388,6 +388,10 @@ export function createHttpServer(ctx: ToolContext, config: HttpServerConfig): Ru
         const session = await createSessionContext(ctx, newSessionId);
         transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => newSessionId,
+          // Quick Tunnels intentionally do not support SSE. C2C's remote tool
+          // calls are request/response only, so JSON POST responses keep the
+          // modern Streamable HTTP transport while avoiding an SSE dependency.
+          enableJsonResponse: true,
           onsessioninitialized: (newSessionId) => {
             if (transport) {
               lastSessionActivityAtMs = Date.now();

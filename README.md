@@ -6,7 +6,7 @@
 
 **Give ChatGPT real local coding hands.**
 
-ChatGPT To Codex is a local MCP and Actions runtime for macOS and Windows that lets ChatGPT
+ChatGPT To Codex is a local MCP and Actions runtime for macOS, Windows, and Linux/WSL that lets ChatGPT
 work inside the project folder you choose: read files, search code, apply
 patches, run tests, launch E2E checks, and send back screenshot proof.
 
@@ -47,7 +47,31 @@ ChatGPT thinks. Your computer acts. You review the result.
 | --- | --- | --- |
 | macOS | Public release | `chatgpt2codex-0.2.0.pkg` |
 | Windows | Public release | `chatgpt2codex-0.2.0-windows-setup.exe` |
-| Linux | Developer path only | Not published |
+| Linux / WSL | Release bootstrap starting with the next Linux-enabled release | `git clone` + `./install.sh` |
+
+### Linux / WSL one-touch bootstrap
+
+Once a release contains the Linux asset, installation does not require system
+Node.js, npm, or Python. The release bundle carries Node.js, production
+dependencies, `cloudflared`, and optional `rg`:
+
+```bash
+git clone https://github.com/nanocode00/chatgpt2codex.git
+cd chatgpt2codex
+./install.sh
+```
+
+`install.sh` downloads the official `chatgpt2codex-linux-x64.run` and
+`SHA256SUMS`, verifies the checksum, installs a versioned runtime under
+`~/.local/lib/chatgpt2codex/releases/`, and preserves the previous release for
+rollback. Existing C2C config, repository/profile registrations, and Owner Token
+state are reused.
+
+The first-run wizard can configure the ChatGPT web connector. Users without an
+existing Cloudflare Named Tunnel/hostname can choose a temporary Quick Tunnel and do not need a
+Cloudflare account, domain, or Tunnel Token. The resulting
+`*.trycloudflare.com` URL changes when the tunnel restarts and is intended as
+a convenience/development path rather than a stable production hostname.
 
 ### Why PKG Instead Of DMG?
 

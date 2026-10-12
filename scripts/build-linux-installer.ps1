@@ -2,7 +2,8 @@
 param(
   [string]$OutputRun = "",
   [string]$NodeVersion = "",
-  [switch]$SkipRipgrep
+  [switch]$SkipRipgrep,
+  [switch]$SkipRootInstall
 )
 
 Set-StrictMode -Version 2.0
@@ -56,8 +57,10 @@ Assert-UnderPath $PackageDir $BuildRoot
 $Npm = Get-ToolPath @("npm.cmd", "npm")
 $Tar = Get-ToolPath @("tar.exe", "tar")
 
-Write-Host "[chatgpt2codex] installing dependencies..."
-Invoke-Checked $Npm @("install")
+if (-not $SkipRootInstall) {
+  Write-Host "[chatgpt2codex] installing dependencies..."
+  Invoke-Checked $Npm @("install")
+}
 Write-Host "[chatgpt2codex] building TypeScript..."
 Invoke-Checked $Npm @("run", "build")
 

@@ -6,6 +6,7 @@ Download:
 
 - macOS: `chatgpt2codex-0.2.0.pkg`
 - Windows: `chatgpt2codex-0.2.0-windows-setup.exe`
+- Linux/WSL: starting with the next Linux-enabled release, clone this repository and run `./install.sh`. The release asset bundles Node.js and `cloudflared`, so system Python/npm/Node are not required.
 
 Only download installers from the official GitHub release page. Keep the Owner
 Token private; treat it like a password.
@@ -53,6 +54,23 @@ ChatGPT To Codex는 내 Mac 또는 Windows PC에서 실행되는 로컬 코딩 �
 9. ChatGPT의 Apps, Apps & Connectors, 또는 Connectors 설정에서 새 앱/커넥터를 만듭니다.
 10. 복사한 `/mcp` 주소를 붙여넣습니다.
 11. 승인 화면이 나오면 ChatGPT To Codex 앱에서 Owner Token을 복사해 입력합니다.
+
+### Linux / WSL 설치
+
+Linux/WSL 릴리스 asset이 포함된 버전부터는 다음 두 단계로 설치할 수 있습니다.
+
+```bash
+git clone https://github.com/nanocode00/chatgpt2codex.git
+cd chatgpt2codex
+./install.sh
+```
+
+설치 스크립트는 GitHub Release의 Linux 패키지와 `SHA256SUMS`를 받아
+검증하고, Node.js·production dependencies·`cloudflared`가 포함된 독립
+runtime을 설치합니다. Cloudflare 도메인이 없다면 첫 설정에서 Quick
+Tunnel을 선택할 수 있으며 계정, 도메인, Tunnel Token이 필요하지
+않습니다. 대신 `trycloudflare.com` 주소는 터널을 재시작하면 바뀔 수
+있습니다.
 
 ### E2E 스크린샷 사용
 
