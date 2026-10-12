@@ -235,6 +235,40 @@ c2c lock list
 c2c lock release <repository-id-or-path> --force
 ```
 
+For ChatGPT-side lock diagnosis and guarded recovery, prefer the MCP tools:
+
+```text
+workspace_lock_status(projectId)
+-> inspect owner / operation / PID / age / expiry / live-vs-stale state
+-> copy the exact snapshotId
+
+workspace_lock_recovery(
+  mode="recover_stale",
+  projectId=...,
+  expectedSnapshotId=...
+)
+```
+
+`recover_stale` removes only records that are provably stale because their TTL
+expired or their recorded PID is dead. Malformed/ambiguous records and live
+locks are not treated as safely stale. If the lock is still live or ambiguous,
+`force_release` requires the exact inspected `snapshotId`, an explicit
+confirmation, and a reason; if the lock set changed after inspection, recovery
+fails closed. A short recovery guard prevents new workspace operations from
+acquiring a lock while the inspected records are being removed.
+
+Lock records use the long-running C2C runtime PID. Consequently, if a record is
+left behind while that runtime process remains alive, PID liveness alone cannot
+prove that the original operation is still active; the record can remain
+ambiguous until expiry. The diagnostic tool therefore also reports the
+operation, owner, age and expiry instead of silently force-releasing it.
+
+Remote restart is intentionally not exposed as a lock-recovery tool because
+restarting the server handling the current MCP call can sever the response and
+session. If unlock succeeds but the runtime still behaves inconsistently, run
+`c2c restart` locally and reconnect/refresh ChatGPT. A Quick Tunnel URL can
+change after restart.
+
 On Linux/WSL, successful `repository add/remove` and `profile
 add/remove/import-env` changes automatically signal every verified running C2C
 instance to live-reload the shared repository/profile catalogs. If no instance

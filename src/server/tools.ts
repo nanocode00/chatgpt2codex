@@ -966,6 +966,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
             lockMode,
             owner,
             async () => await (handler as (...handlerArgs: unknown[]) => Promise<unknown>)(...args),
+            { operation: name },
           );
         } catch (err) {
           const mapped = mapError(err);
