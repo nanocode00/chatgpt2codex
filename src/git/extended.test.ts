@@ -15,6 +15,7 @@ import {
   gitListBranches,
   gitListBranchArchives,
   gitListIssues,
+  gitListPullRequests,
   gitListStashes,
   gitLog,
   gitRestoreWorktree,
@@ -172,6 +173,49 @@ describe("extended safe git operations", () => {
     });
     expect(result).toMatchObject({ updated: true, number: 9, baseBranch: "main" });
     expect(calls).toContainEqual(["api", "--method", "PATCH", "repos/example/repo/pulls/9", "-f", "base=main"]);
+  });
+
+  it("lists PRs with failed check names for quick CI triage", async () => {
+    await git(root, "remote", "add", "origin", "https://github.com/example/repo.git");
+    const headSha = "b".repeat(40);
+    const calls: string[][] = [];
+    const result = await gitListPullRequests(root, "open", 10, async (_cwd, args) => {
+      calls.push(args);
+      return {
+        stdout: JSON.stringify([
+          {
+            number: 12,
+            title: "Improve CI",
+            url: "https://github.com/example/repo/pull/12",
+            state: "OPEN",
+            isDraft: false,
+            baseRefName: "main",
+            headRefName: "fix/ci",
+            headRefOid: headSha,
+            updatedAt: "2026-10-12T00:00:00Z",
+            statusCheckRollup: [
+              { name: "unit-tests", conclusion: "SUCCESS" },
+              { name: "lint", conclusion: "FAILURE" },
+              { context: "deploy-preview", state: "ERROR" },
+              { name: "build", status: "IN_PROGRESS" },
+            ],
+          },
+        ]),
+        stderr: "",
+      };
+    });
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        number: 12,
+        headSha,
+        failedCheckNames: ["lint", "deploy-preview"],
+      }),
+    ]);
+    expect(calls[0]).toEqual([
+      "pr", "list", "--repo", "example/repo", "--state", "open", "--limit", "10", "--json",
+      "number,title,url,state,isDraft,baseRefName,headRefName,headRefOid,updatedAt,statusCheckRollup",
+    ]);
   });
 
   it("lists issues and updates one only when updatedAt still matches", async () => {

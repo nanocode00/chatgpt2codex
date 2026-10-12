@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { DomainError, ErrorCode } from "../types.js";
 import { redact } from "../policy/secrets.js";
+import { normalizeStatusChecks } from "./pr-checks.js";
 
 const execFileAsync = promisify(execFile);
 const EXEC_OPTS = { windowsHide: true, maxBuffer: 10 * 1024 * 1024 } as const;
@@ -471,20 +472,33 @@ async function originRepository(root: string): Promise<string> {
   return `${parts[0]}/${parts[1]}`;
 }
 
-export interface GitPrListItem { number: number; title: string; url: string; state: string; draft: boolean; baseBranch: string; headBranch: string; headSha: string; updatedAt: string | null }
+export interface GitPrListItem {
+  number: number;
+  title: string;
+  url: string;
+  state: string;
+  draft: boolean;
+  baseBranch: string;
+  headBranch: string;
+  headSha: string;
+  updatedAt: string | null;
+  failedCheckNames: string[];
+}
 
 export async function gitListPullRequests(root: string, state: "open" | "closed" | "merged" | "all" = "open", limit = 20, ghRunner: ProcessRunner = runGh): Promise<GitPrListItem[]> {
   if (!Number.isInteger(limit) || limit < 1 || limit > 50) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Invalid PR list limit");
   const repository = await originRepository(root);
   try {
-    const out = await ghRunner(root, ["pr", "list", "--repo", repository, "--state", state, "--limit", String(limit), "--json", "number,title,url,state,isDraft,baseRefName,headRefName,headRefOid,updatedAt"]);
+    const out = await ghRunner(root, ["pr", "list", "--repo", repository, "--state", state, "--limit", String(limit), "--json", "number,title,url,state,isDraft,baseRefName,headRefName,headRefOid,updatedAt,statusCheckRollup"]);
     const rows = JSON.parse(out.stdout || "[]");
     if (!Array.isArray(rows)) throw new Error("unexpected response");
     return rows.map((row) => {
       const r = row as Record<string, unknown>;
+      const checkRollup = normalizeStatusChecks(r.statusCheckRollup);
       return {
         number: Number(r.number), title: redact(String(r.title ?? "")), url: String(r.url ?? ""), state: String(r.state ?? "").toUpperCase(), draft: Boolean(r.isDraft),
         baseBranch: String(r.baseRefName ?? ""), headBranch: String(r.headRefName ?? ""), headSha: String(r.headRefOid ?? ""), updatedAt: typeof r.updatedAt === "string" ? r.updatedAt : null,
+        failedCheckNames: checkRollup.failedCheckNames,
       };
     }).filter((r) => Number.isInteger(r.number) && r.number > 0 && /^[0-9a-f]{40}$/i.test(r.headSha));
   } catch (err) {

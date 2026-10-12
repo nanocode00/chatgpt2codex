@@ -369,7 +369,7 @@ export function registerExtendedGitTools(server: McpServer, ctx: ToolContext): v
     "git_pr_manage",
     {
       title: "List, comment on, or update GitHub pull requests",
-      description: "List PRs read-only, or comment/update/close/reopen/mark-ready/convert-to-draft with an exact PR head SHA concurrency guard.",
+      description: "List PRs read-only with failed CI/check names for quick triage, or comment/update/close/reopen/mark-ready/convert-to-draft with an exact PR head SHA concurrency guard.",
       annotations: REMOTE_WRITE_ANNOTATIONS,
       _meta: toolMeta("Managing pull request...", "Pull request management completed"),
       inputSchema: z.discriminatedUnion("mode", [
