@@ -81,7 +81,24 @@ case "$cmd" in
     echo '{"ok":true}'
     ;;
   health)
-    if [[ -f "$state/healthy" ]]; then echo '{"healthy":true}'; else echo '{"healthy":false}'; exit 1; fi
+    if [[ ! -f "$state/healthy" ]]; then
+      echo '{"instance":"default","alive":false,"healthy":false,"tunnelAlive":null,"publicHealthy":null}'
+      exit 1
+    fi
+    if [[ -f "$config/tunnel" && "$(cat "$config/tunnel")" == "cloudflare" ]]; then
+      count_file="$state/public-health-count"
+      count=0
+      [[ ! -f "$count_file" ]] || count="$(cat "$count_file")"
+      count=$((count + 1))
+      echo "$count" >"$count_file"
+      if [[ "$count" -lt 3 ]]; then
+        echo '{"instance":"default","alive":true,"healthy":true,"tunnelAlive":true,"publicHealthy":false}'
+        exit 1
+      fi
+      echo '{"instance":"default","alive":true,"healthy":true,"tunnelAlive":true,"publicHealthy":true}'
+    else
+      echo '{"instance":"default","alive":true,"healthy":true,"tunnelAlive":null,"publicHealthy":null}'
+    fi
     ;;
   start|restart)
     touch "$state/healthy"
@@ -122,7 +139,7 @@ make_minimal_path() {
   local dir="$1"
   mkdir -p "$dir"
   local cmd target
-  for cmd in bash env awk tar gzip tail grep sed readlink dirname basename mktemp cp mv rm ln chmod mkdir sha256sum uname rmdir date head cat touch; do
+  for cmd in bash env awk tar gzip tail grep sed readlink dirname basename mktemp cp mv rm ln chmod mkdir sha256sum uname rmdir date head cat touch sleep; do
     target="$(command -v "$cmd")"
     ln -s "$target" "$dir/$cmd"
   done
@@ -155,6 +172,7 @@ cp "$INSTALLER" "$CLONE1/install.sh"; chmod +x "$CLONE1/install.sh"
 quick_output="$(run_install "$HOME1" "$CLONE1" "$ART1" --non-interactive --quick-tunnel 2>&1)"
 grep -q 'configured Cloudflare Quick Tunnel' <<<"$quick_output"
 grep -q 'fixture.trycloudflare.com/mcp' <<<"$quick_output"
+[[ "$(cat "$HOME1/.local/share/chatgpt2codex/public-health-count")" -ge 3 ]]
 grep -q 'CONFIG_SET tunnel=cloudflare' "$HOME1/fake-c2c.log"
 ! grep -q 'CONFIG_SET public-hostname=' "$HOME1/fake-c2c.log"
 ! grep -q 'SECRET_SET cloudflare-token' "$HOME1/fake-c2c.log"
