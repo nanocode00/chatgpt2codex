@@ -70,9 +70,10 @@ Linux/WSL release bootstrap currently targets x86_64/amd64.
 
 ### Desktop installers
 
-The source/runtime version is v0.3.0. The packaged macOS and Windows desktop
-installers are not rebuilt by the Linux release workflow; the last packaged
-desktop installers remain v0.2.0 for this release.
+The source/runtime version is v0.3.0. The Windows tag workflow builds and
+uploads `chatgpt2codex-0.3.0-windows-setup.exe`. The macOS desktop package is
+not rebuilt by these release workflows; the last packaged macOS installer
+remains v0.2.0 for this release.
 
 ### Upgrade and rollback
 

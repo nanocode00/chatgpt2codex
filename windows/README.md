@@ -2,7 +2,7 @@
 
 Beginner install:
 
-1. Download `chatgpt2codex-0.2.0-windows-setup.exe` from the official GitHub release:
+1. Download `chatgpt2codex-0.3.0-windows-setup.exe` from the official GitHub release:
    <https://github.com/ezBuilder/chatgpt2codex/releases/tag/v0.2.0>
 2. Double-click the installer.
 3. If Windows SmartScreen appears, choose **More info** -> **Run anyway** only

@@ -1,11 +1,11 @@
 # ChatGPT To Codex Installation Guide
 
-Release line: Linux/WSL uses the **v0.3.0+** bootstrap. The last packaged macOS/Windows desktop installers remain **v0.2.0** until those desktop packages are rebuilt.
+Release line: Linux/WSL uses the **v0.3.0+** bootstrap. Windows has a **v0.3.0** packaged installer; the last packaged macOS installer remains **v0.2.0**.
 
 Download:
 
 - macOS: `chatgpt2codex-0.2.0.pkg`
-- Windows: `chatgpt2codex-0.2.0-windows-setup.exe`
+- Windows: `chatgpt2codex-0.3.0-windows-setup.exe`
 - Linux/WSL v0.3.0+: clone this repository and run `./install.sh`. The release asset bundles Node.js and `cloudflared`, so system Python/npm/Node are not required.
 
 Only download installers from the official GitHub release page. Keep the Owner
@@ -34,7 +34,7 @@ ChatGPT To Codex는 내 Mac 또는 Windows PC에서 실행되는 로컬 코딩 �
 
 ### Windows 설치
 
-1. 릴리스 페이지에서 `chatgpt2codex-0.2.0-windows-setup.exe`를 다운로드합니다.
+1. 릴리스 페이지에서 `chatgpt2codex-0.3.0-windows-setup.exe`를 다운로드합니다.
 2. 파일을 더블클릭합니다.
 3. Windows SmartScreen이 경고하면 **추가 정보** -> **실행**을 누릅니다. 단, 반드시 이 GitHub 릴리스에서 받은 파일일 때만 진행하세요.
 4. 설치가 끝나면 **ChatGPT To Codex**를 실행합니다.
@@ -115,7 +115,7 @@ PKG is better for this release. A DMG is great for drag-and-drop apps, but this 
 
 ### Install on Windows
 
-1. Download `chatgpt2codex-0.2.0-windows-setup.exe` from the release page.
+1. Download `chatgpt2codex-0.3.0-windows-setup.exe` from the release page.
 2. Double-click the installer.
 3. If Windows SmartScreen appears, choose **More info** -> **Run anyway** only if the file came from this GitHub release.
 4. Open **ChatGPT To Codex**.
@@ -170,7 +170,7 @@ ChatGPT To Codex は、Mac または Windows PC 上で動くローカル開発�
 
 ### Windows インストール
 
-1. リリースページから `chatgpt2codex-0.2.0-windows-setup.exe` をダウンロードします。
+1. リリースページから `chatgpt2codex-0.3.0-windows-setup.exe` をダウンロードします。
 2. インストーラをダブルクリックします。
 3. Windows SmartScreen が表示された場合は、公式 GitHub リリースから取得したファイルであることを確認してから **More info** -> **Run anyway** を選びます。
 4. **ChatGPT To Codex** を起動します。
@@ -220,7 +220,7 @@ ChatGPT To Codex 是一个在 Mac 或 Windows PC 本机运行的开发连接应�
 
 ### Windows 安装
 
-1. 从发布页面下载 `chatgpt2codex-0.2.0-windows-setup.exe`。
+1. 从发布页面下载 `chatgpt2codex-0.3.0-windows-setup.exe`。
 2. 双击安装程序。
 3. 如果 Windows SmartScreen 出现警告，请确认文件来自官方 GitHub Release，然后选择 **More info** -> **Run anyway**。
 4. 打开 **ChatGPT To Codex**。

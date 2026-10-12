@@ -46,7 +46,7 @@ ChatGPT thinks. Your computer acts. You review the result.
 | Platform | Status | Package |
 | --- | --- | --- |
 | macOS | Last packaged desktop installer: v0.2.0 | `chatgpt2codex-0.2.0.pkg` |
-| Windows | Last packaged desktop installer: v0.2.0 | `chatgpt2codex-0.2.0-windows-setup.exe` |
+| Windows | v0.3.0 packaged desktop installer | `chatgpt2codex-0.3.0-windows-setup.exe` |
 | Linux / WSL | v0.3.0+ release bootstrap | `git clone` + `./install.sh` |
 
 ### Linux / WSL one-touch bootstrap
@@ -137,7 +137,7 @@ macOS short version:
 
 Windows short version:
 
-1. Download `chatgpt2codex-0.2.0-windows-setup.exe` from the [latest release](https://github.com/ezBuilder/chatgpt2codex/releases/tag/v0.2.0).
+1. Download `chatgpt2codex-0.3.0-windows-setup.exe` from the [latest release](https://github.com/nanocode00/chatgpt2codex/releases/latest).
 2. Double-click the installer.
 3. If Windows SmartScreen warns, choose **More info** -> **Run anyway** only if
    the file came from this GitHub release.
