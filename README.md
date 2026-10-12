@@ -313,6 +313,8 @@ git_workspace(fetch)
 
 `git_pr(inspect)` also returns `checkDetails` with each check's name, normalized status/classification, workflow name, and GitHub/provider details URL when available, plus `failedCheckNames` for quick triage. `git_pr_manage(list)` includes `failedCheckNames` on each PR summary.
 
+By default, `git_pr(merge)` continues to reject failing or pending checks. If CI is unavailable and the user explicitly authorizes an exception in the current conversation, callers may set `overrideChecks=true` together with a non-empty `overrideReason`. This override still requires the exact inspected head SHA, an approved and mergeable non-draft PR, and no requested changes. It never adds `--admin`, auto-merge, force-push, branch-protection changes, or branch deletion; GitHub can still reject the merge. Successful check overrides are recorded in the local audit ledger with the PR/head/reason and failed/pending check metadata.
+
 Project leases can be auto-selected from each tool's internal capability requirement for ordinary explicit-project calls: `read -> read-only`, `verify -> tests-only`, `image -> image-only`, and `write`/`remote -> full-write`. This does not create a public `auto` preset or capability input. An explicit `project_select` lease remains a permission ceiling and is never auto-upgraded; legacy leases without source metadata are treated as explicit. Auto-selected leases may upgrade only for the same project when a later tool requires a stronger capability, and operator ceilings such as `CHATGPT2CODEX_REMOTE_WRITE` and `CHATGPT2CODEX_REMOTE_EXEC` remain authoritative. Control leases are never auto-selected and still require an explicit local `project_select(preset=control)` grant.
 
 ### Safe adapter/profile framework

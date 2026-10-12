@@ -1348,6 +1348,16 @@ function openApiSpec(publicOrigin: string): Record<string, unknown> {
             prNumber: { type: "integer", minimum: 1 },
             expectedHeadSha: { type: "string", pattern: "^[0-9a-fA-F]{40}$" },
             mergeMethod: { type: "string", enum: ["merge", "squash", "rebase"] },
+            overrideChecks: {
+              type: "boolean",
+              description: "Set true only when the user explicitly authorizes bypassing failing/pending PR checks.",
+            },
+            overrideReason: {
+              type: "string",
+              minLength: 1,
+              maxLength: 1024,
+              description: "Required when overrideChecks=true; explain why CI/checks are being bypassed.",
+            },
             baseBranch: { type: "string", maxLength: 255 },
             title: { type: "string", minLength: 1, maxLength: 256 },
             body: { type: "string", maxLength: 65536 },

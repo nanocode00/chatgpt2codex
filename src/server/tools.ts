@@ -3101,6 +3101,8 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
           prNumber: z.number().int().positive(),
           expectedHeadSha: z.string().regex(/^[0-9a-fA-F]{40}$/),
           mergeMethod: z.enum(["merge", "squash", "rebase"]).optional(),
+          overrideChecks: z.boolean().optional().describe("Set true only when the user explicitly authorizes bypassing failing/pending PR checks in the current conversation."),
+          overrideReason: z.string().min(1).max(1024).optional().describe("Required when overrideChecks=true; explain why CI/checks are being bypassed."),
         }).strict(),
         z.object({
           mode: z.literal("comment"),
@@ -3179,8 +3181,42 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
           return makeResult({ ...result }, `Commented on PR #${input.prNumber}.`);
         }
         if (input.mode === "merge") {
-          const result = await gitMergePullRequest(entry.root, input.prNumber, input.expectedHeadSha, input.mergeMethod);
-          return makeResult({ ...result }, result.alreadyMerged ? `PR #${result.number} was already merged.` : `Merged PR #${result.number}.`);
+          const result = await gitMergePullRequest(
+            entry.root,
+            input.prNumber,
+            input.expectedHeadSha,
+            input.mergeMethod,
+            undefined,
+            undefined,
+            {
+              overrideChecks: input.overrideChecks,
+              overrideReason: input.overrideReason,
+            },
+          );
+          if (result.checkOverride.applied) {
+            await ctx.ledger.append({
+              type: "pr.merge.checks_overridden",
+              projectId: input.projectId,
+              prNumber: result.number,
+              expectedHeadSha: result.expectedHeadSha,
+              mergeMethod: result.mergeMethod,
+              reason: result.checkOverride.reason,
+              failed: result.checkOverride.failed,
+              pending: result.checkOverride.pending,
+              failedCheckNames: result.checkOverride.failedCheckNames,
+              pendingCheckNames: result.checkOverride.pendingCheckNames,
+              remote: ctx.remote === true,
+            });
+          }
+          const overrideNote = result.checkOverride.applied
+            ? ` Overrode ${result.checkOverride.failed} failing and ${result.checkOverride.pending} pending check(s).`
+            : "";
+          return makeResult(
+            { ...result },
+            result.alreadyMerged
+              ? `PR #${result.number} was already merged.`
+              : `Merged PR #${result.number}.${overrideNote}`,
+          );
         }
         if (input.mode === "close" || input.mode === "reopen") {
           const result = await gitUpdatePullRequest(entry.root, input.prNumber, input.expectedHeadSha, {

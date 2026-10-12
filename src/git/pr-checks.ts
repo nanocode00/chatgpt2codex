@@ -21,6 +21,7 @@ export interface GitPrCheckRollup {
   summary: GitPrChecksSummary;
   details: GitPrCheckDetail[];
   failedCheckNames: string[];
+  pendingCheckNames: string[];
 }
 
 const SUCCESSFUL = new Set(["SUCCESS", "NEUTRAL", "SKIPPED"]);
@@ -101,6 +102,11 @@ export function normalizeStatusChecks(value: unknown): GitPrCheckRollup {
     failedCheckNames: [...new Set(
       details
         .filter((check) => check.classification === "failed")
+        .map((check) => check.name),
+    )],
+    pendingCheckNames: [...new Set(
+      details
+        .filter((check) => check.classification === "pending")
         .map((check) => check.name),
     )],
   };
