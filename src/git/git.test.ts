@@ -1279,6 +1279,23 @@ describe("safe git workspace/publish workflow", () => {
         statusCheckRollup: [], mergedAt: null, mergeCommit: null,
       }), stderr: "",
     }))).rejects.toMatchObject({ code: "COMMAND_NOT_ALLOWED", message: "PR head changed; inspect again" });
+
+    await expect(gitMergePullRequest(
+      dir,
+      1,
+      expected,
+      "merge",
+      async () => ({
+        stdout: JSON.stringify({
+          number: 1, url: "https://github.com/example/repo/pull/1", state: "OPEN", isDraft: false,
+          baseRefName: "main", headRefName: "feature/x", headRefOid: actual,
+          mergeable: "MERGEABLE", mergeStateStatus: "CLEAN", reviewDecision: "APPROVED",
+          statusCheckRollup: [{ name: "CI", conclusion: "FAILURE" }], mergedAt: null, mergeCommit: null,
+        }), stderr: "",
+      }),
+      async () => undefined,
+      { overrideChecks: true, overrideReason: "CI unavailable" },
+    )).rejects.toMatchObject({ code: "COMMAND_NOT_ALLOWED", message: "PR head changed; inspect again" });
   });
 
   it.each([
@@ -1301,6 +1318,143 @@ describe("safe git workspace/publish workflow", () => {
     await expect(gitMergePullRequest(dir, 1, headSha, "merge", async () => ({
       stdout: JSON.stringify({ ...base, ...overrides }), stderr: "",
     }))).rejects.toMatchObject({ code: "COMMAND_NOT_ALLOWED", message });
+  });
+
+  it("allows an explicitly reasoned check override only for an approved PR and reports overridden checks", async () => {
+    await execFileAsync("git", ["remote", "set-url", "origin", "https://github.com/example/repo.git"], { cwd: dir });
+    const headSha = "8".repeat(40);
+    const mergeSha = "9".repeat(40);
+    const calls: string[][] = [];
+    let views = 0;
+    const runner = async (_cwd: string, args: string[]) => {
+      calls.push(args);
+      if (args[1] === "merge") return { stdout: "", stderr: "" };
+      views += 1;
+      const merged = views >= 2;
+      return {
+        stdout: JSON.stringify({
+          number: 22,
+          url: "https://github.com/example/repo/pull/22",
+          state: merged ? "MERGED" : "OPEN",
+          isDraft: false,
+          baseRefName: "main",
+          headRefName: "docs/release",
+          headRefOid: headSha,
+          mergeable: "MERGEABLE",
+          mergeStateStatus: "CLEAN",
+          reviewDecision: "APPROVED",
+          statusCheckRollup: [
+            { name: "CI quota", conclusion: "FAILURE" },
+            { name: "external-runner", status: "IN_PROGRESS" },
+          ],
+          mergedAt: merged ? "2026-10-12T00:00:00Z" : null,
+          mergeCommit: merged ? { oid: mergeSha } : null,
+        }),
+        stderr: "",
+      };
+    };
+
+    const result = await gitMergePullRequest(
+      dir,
+      22,
+      headSha,
+      "merge",
+      runner,
+      async () => undefined,
+      {
+        overrideChecks: true,
+        overrideReason: "CI quota unavailable; docs-only; local validation passed",
+      },
+    );
+
+    expect(result).toMatchObject({
+      merged: true,
+      alreadyMerged: false,
+      checkOverride: {
+        requested: true,
+        applied: true,
+        reason: "CI quota unavailable; docs-only; local validation passed",
+        failed: 1,
+        pending: 1,
+        failedCheckNames: ["CI quota"],
+        pendingCheckNames: ["external-runner"],
+      },
+    });
+    const mergeCall = calls.find((args) => args[1] === "merge");
+    expect(mergeCall).toEqual([
+      "pr", "merge", "22", "--repo", "example/repo", "--merge",
+      "--match-head-commit", headSha,
+    ]);
+    expect(mergeCall).not.toContain("--admin");
+    expect(mergeCall).not.toContain("--auto");
+  });
+
+  it("requires a non-empty reason and approval before check override", async () => {
+    await execFileAsync("git", ["remote", "set-url", "origin", "https://github.com/example/repo.git"], { cwd: dir });
+    const headSha = "7".repeat(40);
+    const base = {
+      number: 1,
+      url: "https://github.com/example/repo/pull/1",
+      state: "OPEN",
+      isDraft: false,
+      baseRefName: "main",
+      headRefName: "feature/x",
+      headRefOid: headSha,
+      mergeable: "MERGEABLE",
+      mergeStateStatus: "CLEAN",
+      reviewDecision: null,
+      statusCheckRollup: [{ name: "CI", conclusion: "FAILURE" }],
+      mergedAt: null,
+      mergeCommit: null,
+    };
+
+    await expect(gitMergePullRequest(
+      dir, 1, headSha, "merge",
+      async () => ({ stdout: JSON.stringify(base), stderr: "" }),
+      async () => undefined,
+      { overrideChecks: true, overrideReason: " " },
+    )).rejects.toMatchObject({ code: "COMMAND_NOT_ALLOWED", message: "Invalid check override reason" });
+
+    await expect(gitMergePullRequest(
+      dir, 1, headSha, "merge",
+      async () => ({ stdout: JSON.stringify(base), stderr: "" }),
+      async () => undefined,
+      { overrideChecks: true, overrideReason: "CI unavailable" },
+    )).rejects.toMatchObject({ code: "COMMAND_NOT_ALLOWED", message: "Check override requires an approved PR" });
+  });
+
+  it.each([
+    ["draft", { isDraft: true }, "Draft PR cannot be merged"],
+    ["closed", { state: "CLOSED" }, "PR is not open"],
+    ["changes requested", { reviewDecision: "CHANGES_REQUESTED" }, "PR has requested changes"],
+    ["conflict", { mergeable: "CONFLICTING" }, "PR is not mergeable yet"],
+  ])("check override does not bypass unsafe PR state: %s", async (_label, overrides, message) => {
+    await execFileAsync("git", ["remote", "set-url", "origin", "https://github.com/example/repo.git"], { cwd: dir });
+    const headSha = "6".repeat(40);
+    const base = {
+      number: 1,
+      url: "https://github.com/example/repo/pull/1",
+      state: "OPEN",
+      isDraft: false,
+      baseRefName: "main",
+      headRefName: "feature/x",
+      headRefOid: headSha,
+      mergeable: "MERGEABLE",
+      mergeStateStatus: "CLEAN",
+      reviewDecision: "APPROVED",
+      statusCheckRollup: [{ name: "CI", conclusion: "FAILURE" }],
+      mergedAt: null,
+      mergeCommit: null,
+    };
+    await expect(gitMergePullRequest(
+      dir,
+      1,
+      headSha,
+      "merge",
+      async () => ({ stdout: JSON.stringify({ ...base, ...overrides }), stderr: "" }),
+      async () => undefined,
+      { overrideChecks: true, overrideReason: "CI unavailable" },
+    )).rejects.toMatchObject({ code: "COMMAND_NOT_ALLOWED", message });
   });
 
   it("returns alreadyMerged idempotently without issuing a merge command", async () => {

@@ -723,6 +723,7 @@ export interface GitPrInspection {
   checks: GitPrChecksSummary;
   checkDetails: GitPrCheckDetail[];
   failedCheckNames: string[];
+  pendingCheckNames: string[];
   merged: boolean;
   mergedCommitSha: string | null;
 }
@@ -815,6 +816,7 @@ function normalizeGitPrView(raw: unknown): GitPrInspection {
     checks: checkRollup.summary,
     checkDetails: checkRollup.details,
     failedCheckNames: checkRollup.failedCheckNames,
+    pendingCheckNames: checkRollup.pendingCheckNames,
     merged,
     mergedCommitSha,
   };
@@ -959,6 +961,20 @@ export interface GitPrMergeResult {
   mergedCommitSha: string;
   baseBranch: string;
   headBranch: string;
+  checkOverride: {
+    requested: boolean;
+    applied: boolean;
+    reason: string | null;
+    failed: number;
+    pending: number;
+    failedCheckNames: string[];
+    pendingCheckNames: string[];
+  };
+}
+
+export interface GitPrMergeOptions {
+  overrideChecks?: boolean;
+  overrideReason?: string;
 }
 
 export type GitPrReviewAction = "approve" | "request_changes";
@@ -1057,9 +1073,17 @@ export async function gitMergePullRequest(
   mergeMethod: "merge" | "squash" | "rebase" = "merge",
   ghRunner: GitProcessRunner = runGh,
   sleepFn: SleepFn = sleep,
+  options: GitPrMergeOptions = {},
 ): Promise<GitPrMergeResult> {
   assertPrNumber(prNumber);
   assertFullGitSha(expectedHeadSha);
+  const overrideChecks = options.overrideChecks === true;
+  const overrideReason = options.overrideReason?.trim() ?? "";
+  if (overrideChecks) {
+    assertTextInput(overrideReason, "check override reason", 1024);
+  } else if (options.overrideReason !== undefined) {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Check override reason requires overrideChecks=true");
+  }
   const repository = await githubRepositoryForRoot(root);
   const before = await gitInspectPullRequest(root, prNumber, ghRunner, sleepFn);
   if (before.headSha.toLowerCase() !== expectedHeadSha.toLowerCase()) {
@@ -1079,6 +1103,15 @@ export async function gitMergePullRequest(
       mergedCommitSha: before.mergedCommitSha,
       baseBranch: before.baseBranch,
       headBranch: before.headBranch,
+      checkOverride: {
+        requested: overrideChecks,
+        applied: false,
+        reason: overrideChecks ? overrideReason : null,
+        failed: before.checks.failed,
+        pending: before.checks.pending,
+        failedCheckNames: before.failedCheckNames,
+        pendingCheckNames: before.pendingCheckNames,
+      },
     };
   }
   if (before.state !== "OPEN") throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "PR is not open");
@@ -1088,8 +1121,14 @@ export async function gitMergePullRequest(
   }
   if (before.mergeable !== true) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "PR is not mergeable yet");
   if (before.reviewDecision === "CHANGES_REQUESTED") throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "PR has requested changes");
-  if (before.checks.failed > 0) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "PR has failing checks");
-  if (before.checks.pending > 0) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "PR has pending checks");
+  const hasBlockedChecks = before.checks.failed > 0 || before.checks.pending > 0;
+  if (hasBlockedChecks && !overrideChecks) {
+    if (before.checks.failed > 0) throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "PR has failing checks");
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "PR has pending checks");
+  }
+  if (overrideChecks && before.reviewDecision !== "APPROVED") {
+    throw new DomainError(ErrorCode.COMMAND_NOT_ALLOWED, "Check override requires an approved PR");
+  }
 
   const methodFlag = mergeMethod === "squash" ? "--squash" : mergeMethod === "rebase" ? "--rebase" : "--merge";
   try {
@@ -1115,6 +1154,15 @@ export async function gitMergePullRequest(
     mergedCommitSha: after.mergedCommitSha,
     baseBranch: after.baseBranch,
     headBranch: after.headBranch,
+    checkOverride: {
+      requested: overrideChecks,
+      applied: overrideChecks && hasBlockedChecks,
+      reason: overrideChecks ? overrideReason : null,
+      failed: before.checks.failed,
+      pending: before.checks.pending,
+      failedCheckNames: before.failedCheckNames,
+      pendingCheckNames: before.pendingCheckNames,
+    },
   };
 }
 
