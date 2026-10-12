@@ -180,6 +180,7 @@ c2c profile list
 
 # Register repositories outside the startup workspace
 c2c repository add ~/proj2-3 --id proj2
+c2c repository add .
 c2c repository use proj2 --instance proj2
 
 # Export/import only non-secret runtime configuration
@@ -210,10 +211,18 @@ c2c lock list
 c2c lock release <repository-id-or-path> --force
 ```
 
-`c2c reload` live-reloads repository/profile catalogs on Linux/WSL. Changes to
-the listening host/port or Cloudflare tunnel topology still require
-`c2c restart`. `c2c stop --force` is reserved for a hung runtime and only
-signals a PID after verifying that it still matches the recorded c2c process.
+On Linux/WSL, successful `repository add/remove` and `profile
+add/remove/import-env` changes automatically signal every verified running C2C
+instance to live-reload the shared repository/profile catalogs. If no instance
+is running, the persistent change still succeeds and is picked up on the next
+start. A reload failure is reported as partial success with a non-zero exit
+status; the already-written configuration is not silently rolled back.
+`c2c reload` remains available for explicit manual reloads. On platforms
+without the SIGHUP live-reload path, the mutation result reports that a restart
+is required. Changes to the listening host/port or Cloudflare tunnel topology
+still require `c2c restart`. `c2c stop --force` is reserved for a hung
+runtime and only signals a PID after verifying that it still matches the
+recorded c2c process.
 
 Existing shell-based launcher settings can be migrated explicitly:
 
