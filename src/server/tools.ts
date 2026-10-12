@@ -3068,7 +3068,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
     "git_pr",
     {
       title: "Create, inspect, diff, review, manage, or safely merge a GitHub PR",
-      description: "Create a PR from the current pushed branch, inspect PR state, read its remote patch or review bodies/inline comments, retarget its base, comment, submit approve/request-changes reviews, close/reopen, or merge against an exact inspected head SHA. A dirty local worktree is not a blocker for read-only PR operations.",
+      description: "Create a PR from the current pushed branch, inspect PR state including named CI/check details and diagnostic URLs, read its remote patch or review bodies/inline comments, retarget its base, comment, submit approve/request-changes reviews, close/reopen, or merge against an exact inspected head SHA. A dirty local worktree is not a blocker for read-only PR operations.",
       annotations: COMMAND_RUN_ANNOTATIONS,
       _meta: chatGptToolMeta("Checking pull request...", "Pull request operation completed"),
       inputSchema: z.discriminatedUnion("mode", [
@@ -3167,7 +3167,10 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
             return makeResult({ ...result }, `Read ${result.reviews.length} review(s) and ${result.inlineComments.length} inline comment(s) for PR #${result.number}.`);
           }
           const result = await gitInspectPullRequest(entry.root, input.prNumber);
-          return makeResult({ ...result }, `Inspected PR #${result.number}.`);
+          const failed = result.failedCheckNames.length > 0
+            ? ` Failing checks: ${result.failedCheckNames.join(", ")}.`
+            : "";
+          return makeResult({ ...result }, `Inspected PR #${result.number}.${failed}`);
         }
         await requireProjectLease(ctx, input.projectId, "remote");
         const entry = await resolveOrThrow(ctx, { projectId: input.projectId });

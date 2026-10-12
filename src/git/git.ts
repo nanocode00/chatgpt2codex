@@ -3,6 +3,11 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { DomainError, ErrorCode } from "../types.js";
 import { isSecretPath, redact } from "../policy/secrets.js";
+import {
+  normalizeStatusChecks,
+  type GitPrCheckDetail,
+  type GitPrChecksSummary,
+} from "./pr-checks.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -704,13 +709,6 @@ export interface GitPullRequestResult {
   draft: boolean;
 }
 
-export interface GitPrChecksSummary {
-  total: number;
-  pending: number;
-  successful: number;
-  failed: number;
-}
-
 export interface GitPrInspection {
   number: number;
   url: string;
@@ -723,6 +721,8 @@ export interface GitPrInspection {
   mergeState: string | null;
   reviewDecision: string | null;
   checks: GitPrChecksSummary;
+  checkDetails: GitPrCheckDetail[];
+  failedCheckNames: string[];
   merged: boolean;
   mergedCommitSha: string | null;
 }
@@ -773,26 +773,6 @@ function assertFullGitSha(sha: string): void {
   }
 }
 
-function summarizeStatusChecks(value: unknown): GitPrChecksSummary {
-  const rows = Array.isArray(value) ? value : [];
-  const result: GitPrChecksSummary = { total: rows.length, pending: 0, successful: 0, failed: 0 };
-  const successful = new Set(["SUCCESS", "NEUTRAL", "SKIPPED"]);
-  const failed = new Set(["FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED"]);
-  for (const row of rows) {
-    if (!row || typeof row !== "object") {
-      result.pending += 1;
-      continue;
-    }
-    const record = row as Record<string, unknown>;
-    const raw = [record.conclusion, record.state, record.status].find((item) => typeof item === "string") as string | undefined;
-    const status = raw?.toUpperCase() ?? "UNKNOWN";
-    if (successful.has(status)) result.successful += 1;
-    else if (failed.has(status)) result.failed += 1;
-    else result.pending += 1;
-  }
-  return result;
-}
-
 function normalizeGitPrView(raw: unknown): GitPrInspection {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "GitHub PR inspection returned an unexpected response");
@@ -820,6 +800,7 @@ function normalizeGitPrView(raw: unknown): GitPrInspection {
     : null;
   const stateUpper = state.toUpperCase();
   const merged = stateUpper === "MERGED" || typeof record.mergedAt === "string";
+  const checkRollup = normalizeStatusChecks(record.statusCheckRollup);
   return {
     number,
     url,
@@ -831,7 +812,9 @@ function normalizeGitPrView(raw: unknown): GitPrInspection {
     mergeable: mergeableRaw === "MERGEABLE" ? true : mergeableRaw === "CONFLICTING" ? false : null,
     mergeState: typeof record.mergeStateStatus === "string" ? record.mergeStateStatus : null,
     reviewDecision: typeof record.reviewDecision === "string" && record.reviewDecision.length > 0 ? record.reviewDecision : null,
-    checks: summarizeStatusChecks(record.statusCheckRollup),
+    checks: checkRollup.summary,
+    checkDetails: checkRollup.details,
+    failedCheckNames: checkRollup.failedCheckNames,
     merged,
     mergedCommitSha,
   };
