@@ -1,12 +1,12 @@
 # ChatGPT To Codex Installation Guide
 
-Current release: [v0.2.0](https://github.com/ezBuilder/chatgpt2codex/releases/tag/v0.2.0)
+Release line: Linux/WSL uses the **v0.3.0+** bootstrap. The last packaged macOS/Windows desktop installers remain **v0.2.0** until those desktop packages are rebuilt.
 
 Download:
 
 - macOS: `chatgpt2codex-0.2.0.pkg`
 - Windows: `chatgpt2codex-0.2.0-windows-setup.exe`
-- Linux/WSL: starting with the next Linux-enabled release, clone this repository and run `./install.sh`. The release asset bundles Node.js and `cloudflared`, so system Python/npm/Node are not required.
+- Linux/WSL v0.3.0+: clone this repository and run `./install.sh`. The release asset bundles Node.js and `cloudflared`, so system Python/npm/Node are not required.
 
 Only download installers from the official GitHub release page. Keep the Owner
 Token private; treat it like a password.

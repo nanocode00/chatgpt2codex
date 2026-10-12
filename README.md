@@ -14,7 +14,7 @@ Your source stays on your machine. ChatGPT connects to the local app you run.
 You choose the workspace, approve the token, and keep control of what gets
 edited.
 
-[Download v0.2.0](https://github.com/ezBuilder/chatgpt2codex/releases/tag/v0.2.0) ·
+[Latest release](https://github.com/nanocode00/chatgpt2codex/releases/latest) ·
 [Beginner installation guide](docs/INSTALL.md) ·
 [Roadmap](docs/ROADMAP.md)
 
@@ -45,13 +45,13 @@ ChatGPT thinks. Your computer acts. You review the result.
 
 | Platform | Status | Package |
 | --- | --- | --- |
-| macOS | Public release | `chatgpt2codex-0.2.0.pkg` |
-| Windows | Public release | `chatgpt2codex-0.2.0-windows-setup.exe` |
-| Linux / WSL | Release bootstrap starting with the next Linux-enabled release | `git clone` + `./install.sh` |
+| macOS | Last packaged desktop installer: v0.2.0 | `chatgpt2codex-0.2.0.pkg` |
+| Windows | Last packaged desktop installer: v0.2.0 | `chatgpt2codex-0.2.0-windows-setup.exe` |
+| Linux / WSL | v0.3.0+ release bootstrap | `git clone` + `./install.sh` |
 
 ### Linux / WSL one-touch bootstrap
 
-Once a release contains the Linux asset, installation does not require system
+Starting with v0.3.0, Linux/WSL installation does not require system
 Node.js, npm, or Python. The release bundle carries Node.js, production
 dependencies, `cloudflared`, and optional `rg`:
 
