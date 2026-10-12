@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { createServer } from "./mcp-server.js";
 import { requireProjectLease } from "../workspace/lease-guard.js";
+import { acquireWorkspaceLock } from "../workspace/operation-lock.js";
 import type { Lease, ToolContext } from "../types.js";
 
 let projectRoot: string;
@@ -71,6 +72,64 @@ afterEach(async () => {
 });
 
 describe("remote write safety", () => {
+  it("diagnoses and force-releases only the exact inspected workspace lock snapshot", async () => {
+    const ctx = makeCtx(false);
+    const server = await createServer(ctx);
+    const tools = (
+      server as unknown as {
+        _registeredTools?: Record<string, { handler?: (input: Record<string, unknown>) => Promise<{ isError?: boolean; structuredContent?: Record<string, unknown> }> }>;
+      }
+    )._registeredTools;
+    const lock = await acquireWorkspaceLock(
+      stateDir,
+      projectRoot,
+      "write",
+      "session:test-owner",
+      { waitMs: 0, operation: "file_apply_patch" },
+    );
+
+    const status = await tools?.workspace_lock_status?.handler?.({ projectId: "proj" });
+    expect(status?.isError).not.toBe(true);
+    expect(status?.structuredContent).toMatchObject({
+      locked: true,
+      liveCount: 1,
+      staleCount: 0,
+      writer: {
+        owner: "session:test-owner",
+        operation: "file_apply_patch",
+        state: "live",
+      },
+    });
+    const snapshotId = String(status?.structuredContent?.snapshotId ?? "");
+    expect(snapshotId).toMatch(/^[0-9a-f]{64}$/);
+
+    const staleSnapshot = "a".repeat(64);
+    const rejected = await tools?.workspace_lock_recovery?.handler?.({
+      mode: "force_release",
+      projectId: "proj",
+      expectedSnapshotId: staleSnapshot,
+      confirmActiveLockRelease: true,
+      reason: "Explicit test recovery",
+    });
+    expect(rejected?.isError).toBe(true);
+    expect(rejected?.structuredContent?.code).toBe("COMMAND_NOT_ALLOWED");
+
+    const released = await tools?.workspace_lock_recovery?.handler?.({
+      mode: "force_release",
+      projectId: "proj",
+      expectedSnapshotId: snapshotId,
+      confirmActiveLockRelease: true,
+      reason: "Explicit test recovery",
+    });
+    expect(released?.isError).not.toBe(true);
+    expect(released?.structuredContent).toMatchObject({
+      released: true,
+      liveCount: 1,
+      staleCount: 0,
+    });
+    await lock.release();
+  });
+
   it("blocks reuse of an existing full-write lease from a remote session", async () => {
     const ctx = makeCtx(true);
     const server = await createServer(ctx);

@@ -3,7 +3,11 @@ import path from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { DomainError, ErrorCode, makeResult, type ProjectRegistryEntry, type ToolContext, type ToolResult } from "../types.js";
 import { requireProjectLease } from "../workspace/lease-guard.js";
-import { listWorkspaceLocks } from "../workspace/operation-lock.js";
+import {
+  guardedForceReleaseWorkspaceLock,
+  inspectWorkspaceLock,
+  recoverStaleWorkspaceLock,
+} from "../workspace/operation-lock.js";
 import { redact } from "../policy/secrets.js";
 import { addToolCallProof } from "./tool-proof.js";
 import {
@@ -135,7 +139,7 @@ export function registerExtendedGitTools(server: McpServer, ctx: ToolContext): v
     "workspace_lock_status",
     {
       title: "Diagnose current workspace operation locks",
-      description: "Read active workspace operation locks for one registered project. Stale locks are pruned by the lock manager; this tool cannot release an active lock or restart the server.",
+      description: "Diagnose workspace operation lock records for one registered project, including owner, operation, PID, age/expiry, live/stale classification, and an exact snapshot id for guarded recovery. This read-only call never releases locks or restarts the server.",
       annotations: READ_ONLY_ANNOTATIONS,
       _meta: toolMeta("Checking workspace locks...", "Workspace lock status checked"),
       inputSchema: z.object({ projectId: z.string() }).strict(),
@@ -143,20 +147,135 @@ export function registerExtendedGitTools(server: McpServer, ctx: ToolContext): v
     async (input) => invoke(ctx, "workspace_lock_status", input, async () => {
       await requireProjectLease(ctx, input.projectId, "read");
       const entry = await resolveProject(ctx, input.projectId);
-      const snapshots = await listWorkspaceLocks(ctx.stateDir);
-      const current = snapshots.find((snapshot) => path.resolve(snapshot.projectRoot) === path.resolve(entry.root));
-      const formatHolder = (holder: { owner: string; pid: number; mode: string; createdAt: number; expiresAt: number }) => ({
+      const current = await inspectWorkspaceLock(ctx.stateDir, entry.root);
+      const formatHolder = (holder: {
+        owner: string;
+        pid: number;
+        mode: string;
+        operation: string | null;
+        ageMs: number;
+        expiresInMs: number;
+        state: string;
+        staleReason: string | null;
+      }) => ({
         owner: redact(holder.owner),
         pid: holder.pid,
         mode: holder.mode,
-        ageMs: Math.max(0, Date.now() - holder.createdAt),
-        expiresInMs: Math.max(0, holder.expiresAt - Date.now()),
+        operation: holder.operation ? redact(holder.operation) : null,
+        ageMs: holder.ageMs,
+        expiresInMs: holder.expiresInMs,
+        state: holder.state,
+        staleReason: holder.staleReason,
       });
-      const writer = current?.writer ? formatHolder(current.writer) : null;
-      const readers = current?.readers.map(formatHolder) ?? [];
+      const writer = current.writer ? formatHolder(current.writer) : null;
+      const readers = current.readers.map(formatHolder);
+      const recordsPresent = current.snapshotId !== null;
+      const recovery =
+        current.staleCount > 0
+          ? "Use workspace_lock_recovery mode=recover_stale with this exact snapshotId. It removes only expired/dead-PID records."
+          : current.liveCount > 0 || current.invalidRecords > 0
+            ? "A live or ambiguous lock remains. Wait for the operation, or only with explicit user authorization use force_release with this exact snapshotId, confirmation, and reason."
+            : "No recovery is needed.";
       return makeResult(
-        { locked: Boolean(writer || readers.length), writer, readers },
-        writer || readers.length ? "Active workspace operation locks found; inspect owner before local recovery." : "No active workspace operation locks found.",
+        {
+          locked: current.liveCount > 0,
+          recordsPresent,
+          snapshotId: current.snapshotId,
+          writer,
+          readers,
+          invalidRecords: current.invalidRecords,
+          liveCount: current.liveCount,
+          staleCount: current.staleCount,
+          safeStaleRecoveryAvailable: current.safeStaleRecoveryAvailable,
+          recovery,
+        },
+        recordsPresent
+          ? `Workspace lock records found: ${current.liveCount} live, ${current.staleCount} stale, ${current.invalidRecords} invalid. Inspect before recovery.`
+          : "No workspace operation lock records found.",
+      );
+    }),
+  );
+
+  registerTool(
+    "workspace_lock_recovery",
+    {
+      title: "Recover stale or explicitly authorized workspace locks",
+      description: "Recover only provably stale workspace lock records, or force-release the exact inspected lock snapshot after explicit user authorization. Force release can interrupt a live operation. This tool intentionally does not restart the running MCP server; use local c2c restart only if needed after recovery, then reconnect or refresh ChatGPT if the transport or Quick Tunnel URL changed.",
+      annotations: LOCAL_WRITE_ANNOTATIONS,
+      _meta: toolMeta("Recovering workspace lock...", "Workspace lock recovery completed"),
+      inputSchema: z.discriminatedUnion("mode", [
+        z.object({
+          mode: z.literal("recover_stale"),
+          projectId: z.string(),
+          expectedSnapshotId: z.string().regex(/^[0-9a-fA-F]{64}$/),
+        }).strict(),
+        z.object({
+          mode: z.literal("force_release"),
+          projectId: z.string(),
+          expectedSnapshotId: z.string().regex(/^[0-9a-fA-F]{64}$/),
+          confirmActiveLockRelease: z.literal(true),
+          reason: z.string().min(1).max(1024),
+        }).strict(),
+      ]),
+    },
+    async (input) => invoke(ctx, "workspace_lock_recovery", input, async () => {
+      await requireProjectLease(ctx, input.projectId, "write");
+      const entry = await resolveProject(ctx, input.projectId);
+      if (input.mode === "recover_stale") {
+        const result = await recoverStaleWorkspaceLock(ctx.stateDir, entry.root, input.expectedSnapshotId);
+        await ctx.ledger.append({
+          type: "workspace.lock.stale_recovered",
+          projectId: input.projectId,
+          recovered: result.recovered,
+          expectedSnapshotId: input.expectedSnapshotId,
+          remainingSnapshotId: result.remaining.snapshotId,
+          remainingLive: result.remaining.liveCount,
+          remainingStale: result.remaining.staleCount,
+          remainingInvalid: result.remaining.invalidRecords,
+        });
+        return makeResult(
+          {
+            recovered: result.recovered,
+            remaining: {
+              snapshotId: result.remaining.snapshotId,
+              liveCount: result.remaining.liveCount,
+              staleCount: result.remaining.staleCount,
+              invalidRecords: result.remaining.invalidRecords,
+            },
+            restartRequired: false,
+          },
+          result.recovered > 0
+            ? `Recovered ${result.recovered} provably stale workspace lock record(s).`
+            : "No provably stale workspace lock records were present in the inspected snapshot.",
+        );
+      }
+
+      const before = await inspectWorkspaceLock(ctx.stateDir, entry.root);
+      const result = await guardedForceReleaseWorkspaceLock(ctx.stateDir, entry.root, input.expectedSnapshotId);
+      await ctx.ledger.append({
+        type: "workspace.lock.force_released",
+        projectId: input.projectId,
+        expectedSnapshotId: input.expectedSnapshotId,
+        reason: redact(input.reason),
+        released: result.released,
+        liveCount: result.liveCount,
+        staleCount: result.staleCount,
+        invalidRecords: result.invalidRecords,
+        remote: ctx.remote === true,
+      });
+      return makeResult(
+        {
+          released: result.released,
+          releasedSnapshotId: before.snapshotId,
+          liveCount: result.liveCount,
+          staleCount: result.staleCount,
+          invalidRecords: result.invalidRecords,
+          restartRequired: false,
+          restartGuidance: "If C2C still behaves inconsistently, run c2c restart locally. A restart disconnects the current MCP session; reconnect or refresh ChatGPT afterwards. Quick Tunnel URLs may change.",
+        },
+        result.released
+          ? "Force-released the exact inspected workspace lock snapshot. This may have interrupted a live operation."
+          : "No workspace lock records were released.",
       );
     }),
   );
