@@ -42,6 +42,11 @@ import {
   writeRuntimeInstance,
 } from "./runtime/instances.js";
 import {
+  reloadRunningRuntimeCatalogs,
+  signalRuntimeCatalogReload,
+  type RuntimeCatalogReloadSummary,
+} from "./runtime/live-reload.js";
+import {
   getRuntimeSecret,
   defaultRuntimeConfigDir,
   listRuntimeSecrets,
@@ -327,6 +332,12 @@ function installLiveReloadSignal(ctx: ToolContext): void {
           err instanceof Error ? err.message : String(err),
         ));
   });
+}
+
+async function autoReloadManagedCatalogs(): Promise<RuntimeCatalogReloadSummary> {
+  const result = await reloadRunningRuntimeCatalogs(defaultStateDir());
+  if (result.failed.length > 0) process.exitCode = 1;
+  return result;
 }
 
 function parseLeasePreset(value: string | boolean | undefined): LeasePreset {
@@ -814,7 +825,14 @@ async function cmdProfile(positional: string[], flags: Record<string, string | b
       );
     }
     await writeManagedProfiles(configDir, profiles);
-    console.log(JSON.stringify({ updated: true, alias, python: alias in profiles.python, docker: alias in profiles.docker }));
+    const liveReload = await autoReloadManagedCatalogs();
+    console.log(JSON.stringify({
+      updated: true,
+      alias,
+      python: alias in profiles.python,
+      docker: alias in profiles.docker,
+      liveReload,
+    }));
     return;
   }
 
@@ -828,7 +846,9 @@ async function cmdProfile(positional: string[], flags: Record<string, string | b
       docker: (removeBoth || removeDocker) && delete profiles.docker[alias],
     };
     await writeManagedProfiles(configDir, profiles);
-    console.log(JSON.stringify({ alias, removed }));
+    const changed = Boolean(removed.python || removed.docker);
+    const liveReload = changed ? await autoReloadManagedCatalogs() : null;
+    console.log(JSON.stringify({ alias, removed, liveReload }));
     return;
   }
 
@@ -880,7 +900,8 @@ async function cmdProfile(positional: string[], flags: Record<string, string | b
       imported.push(target);
     }
     await writeManagedProfiles(configDir, profiles);
-    console.log(JSON.stringify({ imported, configDir }, null, 2));
+    const liveReload = imported.length > 0 ? await autoReloadManagedCatalogs() : null;
+    console.log(JSON.stringify({ imported, configDir, liveReload }, null, 2));
     return;
   }
 
@@ -923,7 +944,8 @@ async function cmdRepository(positional: string[], flags: Record<string, string 
     data.repositories.push({ id, name, root });
     data.repositories.sort((a, b) => a.id.localeCompare(b.id));
     await writeManagedRepositories(configDir, data);
-    console.log(JSON.stringify({ added: true, id, name, root }, null, 2));
+    const liveReload = await autoReloadManagedCatalogs();
+    console.log(JSON.stringify({ added: true, id, name, root, liveReload }, null, 2));
     return;
   }
 
@@ -933,7 +955,8 @@ async function cmdRepository(positional: string[], flags: Record<string, string 
     data.repositories = data.repositories.filter((repo) => repo.id !== id);
     const removed = data.repositories.length !== before;
     if (removed) await writeManagedRepositories(configDir, data);
-    console.log(JSON.stringify({ removed, id }));
+    const liveReload = removed ? await autoReloadManagedCatalogs() : null;
+    console.log(JSON.stringify({ removed, id, liveReload }));
     return;
   }
 
@@ -1554,16 +1577,10 @@ async function cmdHealth(flags: Record<string, string | boolean>): Promise<void>
 }
 
 async function cmdReload(flags: Record<string, string | boolean>): Promise<void> {
-  if (process.platform !== "linux") {
-    throw new Error("c2c reload currently requires Linux/WSL; use c2c restart on this platform");
-  }
   const instance = normalizeInstanceName(flags.instance);
   const record = await readRuntimeInstance(defaultStateDir(), instance);
-  if (!record || !isProcessAlive(record.pid)) throw new Error("instance is not running: " + instance);
-  if (!(await runtimeProcessMatchesRecord(record))) {
-    throw new Error("refusing reload because the recorded pid could not be verified as this c2c instance");
-  }
-  process.kill(record.pid, "SIGHUP");
+  if (!record) throw new Error("instance is not running: " + instance);
+  await signalRuntimeCatalogReload(record);
   console.log(JSON.stringify({
     reloaded: true,
     instance,
