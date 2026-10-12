@@ -181,6 +181,37 @@ describe("remote MCP session (/mcp, how ChatGPT connects) marks ctx.remote", () 
     await fs.rm(projectRoot, { recursive: true, force: true });
   }, 15_000);
 
+  it("uses JSON POST responses so Cloudflare Quick Tunnels do not require SSE", async () => {
+    const ctx = makeCtx(stateDir, projectRoot);
+    const app = await startApp(ctx);
+    stop = app.stop;
+
+    const token = await getMcpAccessToken(app.baseUrl);
+    const res = await fetch(`${app.baseUrl}/mcp`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        accept: "application/json, text/event-stream",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-03-26",
+          capabilities: {},
+          clientInfo: { name: "json-response-test", version: "0.0.0" },
+        },
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("application/json");
+    const body = await res.json() as { result?: { protocolVersion?: string } };
+    expect(body.result?.protocolVersion).toBeTruthy();
+  });
+
   it("rejects project_select preset=control over /mcp, even with the ChatGPT-confirm exposure flag on", async () => {
     process.env.CHATGPT2CODEX_CONTROL_CHATGPT = "1";
     const ctx = makeCtx(stateDir, projectRoot);
