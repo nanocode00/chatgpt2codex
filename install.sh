@@ -117,6 +117,48 @@ download_file() {
     die "curl or wget is required"
   fi
 }
+health_has_true() {
+  local json="$1" field="$2"
+  grep -Eq "\"$field\"[[:space:]]*:[[:space:]]*true" <<<"$json"
+}
+health_has_null() {
+  local json="$1" field="$2"
+  grep -Eq "\"$field\"[[:space:]]*:[[:space:]]*null" <<<"$json"
+}
+wait_for_runtime_ready() {
+  local timeout="${C2C_INSTALL_HEALTH_TIMEOUT_SEC:-60}"
+  [[ "$timeout" =~ ^[0-9]+$ && "$timeout" -ge 1 ]] || die "C2C_INSTALL_HEALTH_TIMEOUT_SEC must be a positive integer"
+  local deadline=$((SECONDS + timeout))
+  local health_json=""
+  local waiting_public=0
+  while true; do
+    health_json="$("$C2C" health 2>/dev/null || true)"
+
+    if health_has_true "$health_json" healthy; then
+      if health_has_true "$health_json" publicHealthy || health_has_null "$health_json" publicHealthy; then
+        printf '%s' "$health_json"
+        return 0
+      fi
+      if health_has_true "$health_json" tunnelAlive && [[ "$waiting_public" -eq 0 ]]; then
+        printf '[c2c install] local runtime is healthy; waiting for public tunnel endpoint...\n' >&2
+        waiting_public=1
+      fi
+    fi
+
+    if grep -Eq '"alive"[[:space:]]*:[[:space:]]*false' <<<"$health_json" ||
+       grep -Eq '"healthy"[[:space:]]*:[[:space:]]*false' <<<"$health_json" ||
+       grep -Eq '"tunnelAlive"[[:space:]]*:[[:space:]]*false' <<<"$health_json"; then
+      printf '[c2c install] runtime readiness failed: %s\n' "${health_json:-no health response}" >&2
+      return 1
+    fi
+
+    if (( SECONDS >= deadline )); then
+      printf '[c2c install] runtime readiness timed out after %ss: %s\n' "$timeout" "${health_json:-no health response}" >&2
+      return 1
+    fi
+    sleep 1
+  done
+}
 validate_release_id() {
   [[ "$1" =~ ^[0-9A-Za-z.-]+-[0-9a-f]{16}$ && "$1" != *..* ]] || die "invalid release id: $1"
 }
@@ -173,7 +215,7 @@ case "$(uname -m)" in
   x86_64|amd64) ;;
   *) die "this release bootstrap currently supports Linux x86_64/amd64 only" ;;
 esac
-for cmd in awk tar gzip tail grep sed readlink dirname basename mktemp cp mv rm ln chmod mkdir date head cat; do
+for cmd in awk tar gzip tail grep sed readlink dirname basename mktemp cp mv rm ln chmod mkdir date head cat sleep; do
   command -v "$cmd" >/dev/null 2>&1 || die "required command is missing: $cmd"
 done
 
@@ -347,7 +389,7 @@ if [[ "$START_AFTER" -eq 1 ]]; then
   else
     "$C2C" start --workspace "$WORKSPACE" >/dev/null
   fi
-  "$C2C" health >/dev/null 2>&1 || die "runtime did not become healthy; run: c2c status && c2c logs"
+  health_json="$(wait_for_runtime_ready)" || die "runtime did not become healthy; run: c2c status && c2c logs --component server && c2c logs --component tunnel"
   note "health check passed"
   status_json="$("$C2C" status 2>/dev/null || true)"
   public_url="$(printf '%s\n' "$status_json" | grep -Eo '"publicUrl"[[:space:]]*:[[:space:]]*"[^"]+"' | head -n 1 | sed -E 's/.*"([^"]+)"$/\1/' || true)"
