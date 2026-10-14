@@ -258,6 +258,16 @@ interface StagedWrite {
   abs: string;
   content: string | null; // null => delete
   tempPath?: string;
+  mode?: number; // Preserve permissions when replacing or moving an existing file.
+}
+
+async function existingMode(abs: string): Promise<number | undefined> {
+  try {
+    return (await fs.lstat(abs)).mode & 0o777;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
 }
 
 interface AppliedEntry {
@@ -319,7 +329,7 @@ export async function applyPatch(
       await enforcePrecondition(abs, op.path, preconditionHashes);
       const original = await fs.readFile(abs, "utf8");
       const next = applyHunks(original, op.hunks);
-      staged.push({ abs, content: next });
+      staged.push({ abs, content: next, mode: await existingMode(abs) });
       const delta = countDelta(op.hunks);
       applied.push({ path: op.path, action: "update", added: delta.added, removed: delta.removed });
       continue;
@@ -332,7 +342,7 @@ export async function applyPatch(
       const original = await fs.readFile(abs, "utf8");
       const next = op.hunks.length > 0 ? applyHunks(original, op.hunks) : original;
       staged.push({ abs, content: null }); // remove old location
-      staged.push({ abs: newAbs, content: next }); // write new location
+      staged.push({ abs: newAbs, content: next, mode: await existingMode(abs) }); // preserve source mode
       const delta = countDelta(op.hunks);
       applied.push({ path: op.path, action: "move", added: delta.added, removed: delta.removed });
       continue;
@@ -342,19 +352,20 @@ export async function applyPatch(
   // Transactional commit: write every staged change to a temp file first,
   // then rename into place. If any write fails, roll back everything that
   // already landed.
-  const committed: { finalPath: string; hadPrevious: boolean; prevContent: Buffer | null }[] = [];
+  const committed: { finalPath: string; hadPrevious: boolean; prevContent: Buffer | null; prevMode?: number }[] = [];
   try {
     for (const write of staged) {
       if (write.content === null) {
         // Deletion: capture previous content for rollback, then unlink.
         let prevContent: Buffer | null = null;
+        const prevMode = await existingMode(write.abs);
         try {
           prevContent = await fs.readFile(write.abs);
         } catch {
           prevContent = null;
         }
         await fs.unlink(write.abs);
-        committed.push({ finalPath: write.abs, hadPrevious: prevContent !== null, prevContent });
+        committed.push({ finalPath: write.abs, hadPrevious: prevContent !== null, prevContent, prevMode });
         continue;
       }
 
@@ -364,6 +375,7 @@ export async function applyPatch(
 
       let prevContent: Buffer | null = null;
       let hadPrevious = false;
+      const prevMode = await existingMode(write.abs);
       try {
         prevContent = await fs.readFile(write.abs);
         hadPrevious = true;
@@ -371,9 +383,15 @@ export async function applyPatch(
         hadPrevious = false;
       }
 
-      await fs.writeFile(tempPath, write.content, "utf8");
-      await fs.rename(tempPath, write.abs);
-      committed.push({ finalPath: write.abs, hadPrevious, prevContent });
+      try {
+        await fs.writeFile(tempPath, write.content, "utf8");
+        const mode = write.mode ?? prevMode;
+        if (mode !== undefined) await fs.chmod(tempPath, mode);
+        await fs.rename(tempPath, write.abs);
+      } finally {
+        await fs.rm(tempPath, { force: true });
+      }
+      committed.push({ finalPath: write.abs, hadPrevious, prevContent, prevMode });
     }
   } catch (err) {
     // Roll back everything already committed, best-effort, in reverse order.
@@ -381,6 +399,7 @@ export async function applyPatch(
       try {
         if (c.hadPrevious && c.prevContent !== null) {
           await fs.writeFile(c.finalPath, c.prevContent);
+          if (c.prevMode !== undefined) await fs.chmod(c.finalPath, c.prevMode);
         } else {
           await fs.rm(c.finalPath, { force: true });
         }
@@ -450,8 +469,14 @@ export async function createFile(
   const dir = path.dirname(abs);
   await fs.mkdir(dir, { recursive: true });
   const tempPath = path.join(dir, `.chatgpt2codex.tmp.${randomUUID()}`);
-  await fs.writeFile(tempPath, content, "utf8");
-  await fs.rename(tempPath, abs);
+  const mode = overwrite ? await existingMode(abs) : undefined;
+  try {
+    await fs.writeFile(tempPath, content, "utf8");
+    if (mode !== undefined) await fs.chmod(tempPath, mode);
+    await fs.rename(tempPath, abs);
+  } finally {
+    await fs.rm(tempPath, { force: true });
+  }
 
   const bytes = Buffer.byteLength(content, "utf8");
   return { path: rel, bytes };

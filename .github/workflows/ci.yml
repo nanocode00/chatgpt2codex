@@ -16,6 +16,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Verify installer executable permissions
+        run: |
+          for script in install.sh scripts/e2e-release-bootstrap.sh; do
+            mode="$(git ls-files --stage -- "$script" | awk '{print $1}')"
+            if [ "$mode" != 100755 ]; then
+              echo "::error file=$script::Expected executable Git mode 100755, got ${mode:-untracked}"
+              exit 1
+            fi
+          done
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:

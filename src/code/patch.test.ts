@@ -72,6 +72,50 @@ describe("applyPatch", () => {
     expect(written).toBe("line1\nline2-changed\nline3\n");
   });
 
+  it("preserves executable and restrictive permissions when updating a file", async () => {
+    if (process.platform === "win32") return;
+    for (const mode of [0o755, 0o640]) {
+      const name = `script-${mode.toString(8)}.sh`;
+      const abs = path.join(root, name);
+      await fs.writeFile(abs, "old\n");
+      await fs.chmod(abs, mode);
+      const patch = [
+        "*** Begin Patch", `*** Update File: ${name}`, "@@", "-old", "+new", "*** End Patch",
+      ].join("\n");
+      await applyPatch(root, patch);
+      expect(await fs.readFile(abs, "utf8")).toBe("new\n");
+      expect((await fs.stat(abs)).mode & 0o777).toBe(mode);
+    }
+  });
+
+  it("preserves source executable permissions when moving a file", async () => {
+    if (process.platform === "win32") return;
+    const source = path.join(root, "old.sh");
+    const destination = path.join(root, "new.sh");
+    await fs.writeFile(source, "echo ok\n");
+    await fs.chmod(source, 0o755);
+    await applyPatch(root, [
+      "*** Begin Patch", "*** Update File: old.sh", "*** Move to: new.sh", "*** End Patch",
+    ].join("\n"));
+    await expect(fs.stat(source)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await fs.readFile(destination, "utf8")).toBe("echo ok\n");
+    expect((await fs.stat(destination)).mode & 0o777).toBe(0o755);
+  });
+
+  it("restores contents and permissions after a later patch operation fails", async () => {
+    if (process.platform === "win32") return;
+    const source = path.join(root, "move.sh");
+    await fs.writeFile(source, "echo original\n");
+    await fs.chmod(source, 0o755);
+    await fs.mkdir(path.join(root, "occupied"));
+    await expect(applyPatch(root, [
+      "*** Begin Patch", "*** Update File: move.sh", "*** Move to: occupied", "*** End Patch",
+    ].join("\n"))).rejects.toBeTruthy();
+    expect(await fs.readFile(source, "utf8")).toBe("echo original\n");
+    expect((await fs.stat(source)).mode & 0o777).toBe(0o755);
+    expect((await fs.readdir(root)).some((entry) => entry.startsWith(".chatgpt2codex.tmp."))).toBe(false);
+  });
+
   it("applies add and update together transactionally in a single patch", async () => {
     await fs.writeFile(path.join(root, "existing.txt"), "a\nb\nc\n", "utf8");
 
@@ -206,6 +250,16 @@ describe("createFile", () => {
     const result = await createFile(root, "made.txt", "new content", true);
     expect(result.bytes).toBe("new content".length);
     expect(await fs.readFile(path.join(root, "made.txt"), "utf8")).toBe("new content");
+  });
+
+  it("preserves executable mode when overwriting an existing file", async () => {
+    if (process.platform === "win32") return;
+    const abs = path.join(root, "install.sh");
+    await fs.writeFile(abs, "original");
+    await fs.chmod(abs, 0o755);
+    await createFile(root, "install.sh", "updated", true);
+    expect(await fs.readFile(abs, "utf8")).toBe("updated");
+    expect((await fs.stat(abs)).mode & 0o777).toBe(0o755);
   });
 
   it("rejects paths outside the project root", async () => {
