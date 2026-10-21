@@ -128,13 +128,13 @@ export function splitWindowsCommandLine(commandLine: string): string[] {
   const argv: string[] = [];
   let i = 0;
   while (i < commandLine.length) {
-    while (i < commandLine.length && /\s/.test(commandLine[i])) i++;
+    while (i < commandLine.length && /\s/.test(commandLine[i] ?? "")) i++;
     if (i >= commandLine.length) break;
     let value = "";
     let quoted = false;
     while (i < commandLine.length) {
       const char = commandLine[i];
-      if (!quoted && /\s/.test(char)) break;
+      if (!quoted && /\s/.test(char ?? "")) break;
       if (char === "\\") {
         let slashes = 0;
         while (commandLine[i] === "\\") { slashes++; i++; }
@@ -167,7 +167,7 @@ function commandPathEqual(left: string, right: string, platform: NodeJS.Platform
 function exactlyOneArg(argv: string[], flag: string): string | null {
   const i = argv.indexOf(flag);
   return i >= 0 && i + 1 < argv.length && !argv.includes(flag, i + 1)
-    ? argv[i + 1]
+    ? (argv[i + 1] ?? null)
     : null;
 }
 
@@ -177,7 +177,7 @@ export function runtimeCommandMatchesRecord(
   platform: NodeJS.Platform = process.platform,
 ): boolean {
   if (!record.entrypoint || argv.length < 4 || argv[2] !== "serve" || argv[3] !== "--http") return false;
-  if (!commandPathEqual(argv[1], record.entrypoint, platform)) return false;
+  if (!commandPathEqual(argv[1] ?? "", record.entrypoint, platform)) return false;
   if (exactlyOneArg(argv, "--instance") !== record.name) return false;
   if (exactlyOneArg(argv, "--host") !== record.host) return false;
   if (exactlyOneArg(argv, "--port") !== String(record.port)) return false;
@@ -197,7 +197,7 @@ function expectedExecutable(commandLine: string, executablePath: string, expecte
   const argv = splitWindowsCommandLine(commandLine);
   if (argv.length === 0) return [];
   const executable = path.win32.normalize(executablePath).toLowerCase();
-  if (path.win32.basename(executable) !== expected || !commandPathEqual(argv[0], executable, "win32")) return [];
+  if (path.win32.basename(executable) !== expected || !commandPathEqual(argv[0] ?? "", executable, "win32")) return [];
   return argv;
 }
 
@@ -233,6 +233,7 @@ async function windowsProcessSnapshot(pid: number): Promise<WindowsProcessSnapsh
   // No caller input is interpolated into executable commands or printed to logs.
   const script = [
     "$ErrorActionPreference = 'Stop'",
+    "[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)",
     "$p = Get-CimInstance Win32_Process -Filter ('ProcessId = ' + $env:C2C_VERIFY_PID)",
     "if ($null -eq $p) { exit 2 }",
     "$result = [pscustomobject]@{ commandLine = $p.CommandLine; executablePath = $p.ExecutablePath; creationTimeUtc = $p.CreationDate.ToUniversalTime().ToString('o') }",
