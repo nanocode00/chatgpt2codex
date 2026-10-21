@@ -1,0 +1,99 @@
+use serde::Serialize;
+use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpStream};
+use std::time::Duration;
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeHealth {
+    online: bool,
+    service: String,
+    port: u16,
+    endpoint: String,
+    details: String,
+}
+
+fn probe_local_runtime(port: u16) -> RuntimeHealth {
+    let endpoint = format!("http://127.0.0.1:{port}/mcp");
+    let mut snapshot = RuntimeHealth {
+        online: false,
+        service: "ChatGPT To Codex".into(),
+        port,
+        endpoint,
+        details: "연결되지 않음".into(),
+    };
+
+    // Deliberately limit health probes to localhost. Never accept arbitrary
+    // endpoints or fetch Owner Tokens from a public tunnel.
+    let address = SocketAddr::from(([127, 0, 0, 1], port));
+    let mut stream = match TcpStream::connect_timeout(&address, Duration::from_millis(1100)) {
+        Ok(stream) => stream,
+        Err(_) => {
+            snapshot.details = "해당 포트에서 로컬 C2C 서버를 찾을 수 없습니다.".into();
+            return snapshot;
+        }
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(1100)));
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(1100)));
+    if stream
+        .write_all(b"GET /healthz HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: application/json\r\nConnection: close\r\n\r\n")
+        .is_err()
+    {
+        snapshot.details = "서버에 상태 요청을 보내지 못했습니다.".into();
+        return snapshot;
+    }
+    let mut response = Vec::new();
+    // Bound reads and timeout even if a non-C2C service listens on the port.
+    let mut buf = [0u8; 2048];
+    while response.len() < 8192 {
+        match stream.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => response.extend_from_slice(&buf[..n]),
+            Err(_) => break,
+        }
+    }
+    let raw = String::from_utf8_lossy(&response);
+    if !raw.starts_with("HTTP/1.1 200 ") && !raw.starts_with("HTTP/1.0 200 ") {
+        snapshot.details = "해당 포트의 HTTP 응답이 C2C Health 형식이 아닙니다.".into();
+        return snapshot;
+    }
+    let Some((_, body)) = raw.split_once("\r\n\r\n") else {
+        snapshot.details = "상태 응답을 파싱할 수 없습니다.".into();
+        return snapshot;
+    };
+    match serde_json::from_str::<serde_json::Value>(body) {
+        Ok(value) if value["ok"] == true && value["name"] == "chatgpt2codex" => {
+            snapshot.online = true;
+            snapshot.details = "로컬 MCP 서버가 정상 응답 중입니다.".into();
+        }
+        _ => snapshot.details = "해당 포트는 C2C 서버로 확인되지 않았습니다.".into(),
+    }
+    snapshot
+}
+
+#[tauri::command]
+async fn runtime_health(port: u16) -> Result<RuntimeHealth, String> {
+    // A synchronous TCP probe must not block the Tauri UI event loop.
+    tauri::async_runtime::spawn_blocking(move || probe_local_runtime(port))
+        .await
+        .map_err(|error| format!("로컬 상태 검사에 실패했습니다: {error}"))
+}
+
+pub fn run() {
+    tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![runtime_health])
+        .run(tauri::generate_context!())
+        .expect("failed to start ChatGPT To Codex desktop");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_port_returns_offline() {
+        let result = probe_local_runtime(0);
+        assert!(!result.online);
+        assert!(result.endpoint.contains("127.0.0.1:0"));
+    }
+}

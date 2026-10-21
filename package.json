@@ -31,7 +31,13 @@
     "linux:e2e": "bash scripts/e2e-linux-installer.sh",
     "link:local": "bash scripts/link-local-cli.sh",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "desktop:setup": "npm --prefix desktop install --no-audit --no-fund",
+    "desktop:check": "npm --prefix desktop run typecheck",
+    "desktop:build": "npm --prefix desktop run build",
+    "desktop:dev": "npm --prefix desktop run dev",
+    "desktop:tauri:dev": "npm --prefix desktop run tauri:dev",
+    "desktop:rust:check": "cargo check --manifest-path desktop/src-tauri/Cargo.toml"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
