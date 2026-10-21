@@ -90,15 +90,22 @@ try {
 
     # Simulate a stale/spoofed PID pointing at an unrelated disposable process
     # while the actual C2C health endpoint remains healthy. Stop MUST refuse it.
-    $fake = Start-Process -FilePath $node -ArgumentList @(
-        "-e", "setInterval(function () {}, 10000)"
-    ) -PassThru -WindowStyle Hidden
-    if (-not $fake -or $fake.HasExited) { throw "Unable to spawn disposable foreign fixture" }
+    $foreignScript = Join-Path $root "foreign-fixture.js"
+    Set-Content -LiteralPath $foreignScript -Value "setInterval(function () {}, 10000);" -NoNewline
+    $fake = Start-Process -FilePath $node -ArgumentList ('"' + $foreignScript + '"') -PassThru -WindowStyle Hidden
+    Start-Sleep -Milliseconds 900
+    if (-not $fake) { throw "Unable to spawn disposable foreign fixture" }
+    $fake.Refresh()
+    if ($fake.HasExited) { throw "Disposable foreign fixture exited prematurely" }
     $originalRecord = Get-Content -LiteralPath $recordPath -Raw
     try {
         $forged = $originalRecord | ConvertFrom-Json
         $forged.pid = $fake.Id
         Set-Content -LiteralPath $recordPath -Value ($forged | ConvertTo-Json -Depth 12)
+        $fake.Refresh()
+        if ($fake.HasExited) { throw "Foreign fixture exited before ownership check" }
+        $forgedStatus = Invoke-C2C -CliArgs @("status", "--instance", $instance)
+        if ($forgedStatus.alive -ne $true) { throw "Foreign fixture not alive according to CLI" }
         Invoke-C2C -CliArgs @("stop", "--instance", $instance, "--force") -ExpectFailure
         $fake.Refresh()
         if ($fake.HasExited) { throw "Unsafe: stop signaled unrelated process" }
