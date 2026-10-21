@@ -54,7 +54,16 @@ function Invoke-C2C {
         # CLI errors are printed without the generated owner token.
         throw "C2C $($CliArgs[0]) exit $code : $($lines | Out-String)"
     }
-    $raw = ($lines | Out-String).Trim()
+    # 'restart' currently emits two newline-delimited JSON objects: a
+    # compact stop result followed by a multi-line start result.
+    if ($CliArgs[0] -eq "restart") {
+        if ($lines.Count -lt 2) { throw "Restart returned incomplete results" }
+        $stopEvent = [string]$lines[0] | ConvertFrom-Json
+        if ($stopEvent.stopped -ne $true) { throw "Restart did not stop the prior instance" }
+        $raw = ($lines | Select-Object -Skip 1 | Out-String).Trim()
+    } else {
+        $raw = ($lines | Out-String).Trim()
+    }
     try { return ($raw | ConvertFrom-Json -ErrorAction Stop) }
     catch { throw "CLI $($CliArgs[0]) returned invalid JSON: $raw" }
 }
