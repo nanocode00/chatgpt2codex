@@ -24,3 +24,25 @@ export async function checkRuntime(port: number): Promise<RuntimeHealth> {
   }
   return invoke<RuntimeHealth>("runtime_health", { port });
 }
+
+export interface CliInspection {
+  available: boolean;
+  instance: string;
+  alive: boolean;
+  healthy: boolean;
+  tunnelAlive: boolean | null;
+  publicHealthy: boolean | null;
+  endpoint: string | null;
+  details: string;
+}
+
+export async function inspectInstalledCli(instance = "default"): Promise<CliInspection> {
+  if (!isNativeApp()) {
+    return {
+      available: false, instance, alive: false, healthy: false,
+      tunnelAlive: null, publicHealthy: null, endpoint: null,
+      details: "CLI 인스턴스 조회는 Windows Tauri 앱에서만 지원합니다."
+    };
+  }
+  return invoke<CliInspection>("inspect_cli_health", { instance });
+}
