@@ -1,0 +1,29 @@
+name: Windows CLI Identity
+
+on:
+  pull_request:
+    paths:
+      - "src/runtime/instances.ts"
+      - "src/runtime/instances.test.ts"
+      - "src/cli.ts"
+      - ".github/workflows/windows-cli-identity.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  identity:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Validate TypeScript
+        run: npm run typecheck
+      - name: Verify Windows process identity without terminating processes
+        run: npx vitest run src/runtime/instances.test.ts
