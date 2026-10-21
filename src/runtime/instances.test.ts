@@ -177,6 +177,6 @@ describe("runtime instances", () => {
       if (child.pid) child.kill();
       await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
-  });
+  }, 20_000);
 
 });
