@@ -1,0 +1,58 @@
+name: Windows Installer Payload Smoke
+
+# Run only for Windows packaging changes, or manually. GUI installation
+# has destructive side effects and is deliberately NOT part of this job.
+on:
+  pull_request:
+    paths:
+      - 'windows/**'
+      - 'scripts/build-windows-*.ps1'
+      - 'scripts/test-windows-installer-payload.ps1'
+      - '.github/workflows/release-windows.yml'
+      - '.github/workflows/windows-installer-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  payload-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows installer from checked-out source
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -File scripts/build-windows-installer.ps1 -OutputExe build/windows/branch-smoke.exe
+
+      - name: Verify branch-built installer payload and bundled CLI
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          pwsh -NoProfile -File scripts/test-windows-installer-payload.ps1 -Installer build/windows/branch-smoke.exe -ExpectedVersion $version
+
+      - name: Download official v0.3.1 Windows release (read-only)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $url = 'https://github.com/nanocode00/chatgpt2codex/releases/download/v0.3.1/chatgpt2codex-0.3.1-windows-setup.exe'
+          Invoke-WebRequest -Uri $url -OutFile 'build/windows/official-v0.3.1.exe'
+
+      - name: Verify published v0.3.1 artifact SHA-256 and payload
+        shell: pwsh
+        run: |
+          # SHA-256 reported by GitHub Release asset metadata.
+          $sha256 = '62f7d0ad1915b8b2d1bf86d8e379a265847c792d37d779d0e7a119c9b85f2faf'
+          pwsh -NoProfile -File scripts/test-windows-installer-payload.ps1 -Installer build/windows/official-v0.3.1.exe -ExpectedVersion '0.3.1' -ExpectedSha256 $sha256
