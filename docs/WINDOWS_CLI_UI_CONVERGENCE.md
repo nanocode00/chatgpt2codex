@@ -92,6 +92,20 @@ with a lighter indigo primary action; the header now uses existing localized
 system title bar requests dark mode. Standard WinForms scrollbars and native
 dialog chrome can still follow the user's OS theme; they are not custom drawn.
 
+A subsequent reference screenshot (ChatGPT/Codex desktop UI) clarified the
+visual target: **near-neutral charcoal/black**, not bluish navy or purple.
+The Windows dashboard therefore has a narrow navigation sidebar and a main
+workspace area; the top bar shows the active project, port and current
+runtime status, a compact connection card holds the MCP URL and token controls,
+and the activity log occupies the remainder of the main area. Secondary
+actions use unobtrusive gray surfaces and thin borders. The sidebar buttons
+invoke existing project folder selection, settings, log viewer, local health
+and GitHub actions; they are not fake navigational destinations.
+
+This references the layout and visual hierarchy, rather than reproducing
+ChatGPT trademarks, icons or product-specific chat interaction. Native
+Windows system scrollbars/checkboxes are allowed to follow OS styling.
+
 - **Overview:** current project, runtime instance, port and local/public
   connectivity; show pending/healthy/error states separately.
 - **Connections:** public MCP endpoint, stable-vs-temporary status, copy URL,
