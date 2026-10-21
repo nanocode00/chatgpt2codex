@@ -6,6 +6,7 @@ on:
       - "src/runtime/instances.ts"
       - "src/runtime/instances.test.ts"
       - "src/cli.ts"
+      - "scripts/test-windows-cli-lifecycle-isolated.ps1"
       - ".github/workflows/windows-cli-identity.yml"
   workflow_dispatch:
 
@@ -27,3 +28,19 @@ jobs:
         run: npm run typecheck
       - name: Verify Windows process identity without terminating processes
         run: npx vitest run src/runtime/instances.test.ts
+
+  lifecycle:
+    runs-on: windows-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Build isolated CLI
+        run: npm run build
+      - name: Isolated Windows CLI lifecycle E2E (no installed C2C access)
+        shell: pwsh
+        run: ./scripts/test-windows-cli-lifecycle-isolated.ps1
