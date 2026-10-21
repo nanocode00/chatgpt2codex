@@ -143,8 +143,11 @@ describe("runtime instances", () => {
     expect(windowsTunnelMatchesRecord(record, snapshot)).toBe(true);
     expect(windowsTunnelMatchesRecord(record, { ...snapshot, executablePath: "C:\\Apps\\other.exe" })).toBe(false);
   });
-  it("checks real OS commandline for a disposable fixture; refuses mismatched ownership", async () => {
-    if (process.platform !== "win32" && process.platform !== "linux") return;
+  it("checks Linux /proc commandline on a disposable fixture; refuses mismatched ownership", async () => {
+    // Windows process identity is covered by the isolated CLI lifecycle E2E
+    // with a real server + a forged living PID. Running a duplicate CIM test
+    // concurrently with that job is timing-dependent on hosted runners.
+    if (process.platform !== "linux") return;
     const directory = await mkdtemp(join(tmpdir(), "c2c-identity-fixture-"));
     const file = join(directory, "fixture.js");
     await writeFile(file, "setInterval(() => {}, 10000);\n");
