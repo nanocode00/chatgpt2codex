@@ -6,8 +6,9 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { checkRuntime, inspectInstalledCli, isNativeApp, type CliInspection, type RuntimeHealth } from "./runtime";
+import { ManagementControls, LegacyConnectionControls, LegacyDiagnosticsControls, LegacySettingsControls } from "./LegacyControls";
 
-type Screen = "overview" | "connections" | "diagnostics" | "settings";
+type Screen = "overview" | "manage" | "connections" | "diagnostics" | "settings";
 type ActivityEntry = { time: string; message: string; online: boolean };
 
 function loadPort(): number {
@@ -28,6 +29,7 @@ function timeLabel(): string {
 
 const NAV: { name: Screen; label: string; icon: typeof LayoutDashboard }[] = [
   { name: "overview", label: "개요", icon: LayoutDashboard },
+  { name: "manage", label: "관리", icon: TerminalSquare },
   { name: "connections", label: "연결", icon: PlugZap },
   { name: "diagnostics", label: "진단", icon: Activity },
   { name: "settings", label: "설정", icon: Settings2 }
@@ -206,9 +208,16 @@ function App() {
                 <div className="panel-heading"><div className="panel-title"><span className="icon-tile"><FolderCode size={18}/></span><div><h2>프로젝트 관리</h2><p>CLI 공통 인스턴스 연동 준비 중</p></div></div></div>
                 <p className="description">프로젝트 목록과 프로필은 기존 C2C CLI가 관리합니다. 다음 단계에서 공통 관리 기능을 연결할 예정입니다.</p>
                 <span className="coming-soon">CLI 연동 예정</span>
+                <button type="button" className="text-action legacy-link" onClick={() => setScreen("manage")}>관리 화면 보기 <ChevronRight size={16}/></button>
               </section>
             </div>
           </div>
+        </>}
+
+        {screen === "manage" && <>
+          <div className="page-heading"><div><div className="eyebrow">MANAGEMENT</div><h1>런타임 관리</h1>
+            <p>기존 Windows 런처의 관리 항목을 먼저 배치했어. 실제 서버 제어는 안전성 검증 후 연결해.</p></div></div>
+          <ManagementControls onConnections={() => setScreen("connections")} onSettings={() => setScreen("settings")}/>
         </>}
 
         {screen === "connections" && <>
@@ -239,16 +248,19 @@ function App() {
               </div>
             </div>
           </section>
+          <LegacyConnectionControls />
         </>}
 
         {screen === "diagnostics" && <>
           <div className="page-heading"><div><div className="eyebrow">DIAGNOSTICS</div><h1>진단</h1><p>실제 로컬 Health 요청 결과만 기록합니다. 서버 로그 조회는 다음 단계에서 연결합니다.</p></div><button className="secondary-btn" onClick={() => { void runCheck(); }} disabled={checking}><RefreshCcw size={16}/> 다시 확인</button></div>
           <section className="panel page-panel"><div className="panel-heading"><div className="panel-title"><span className="icon-tile"><Activity size={18}/></span><div><h2>상태 확인 기록</h2><p>현재 세션 · 최근 12건</p></div></div>{statusTag()}</div><div className="event-list">{history.length ? history.map((item, i) => <div className="event" key={item.time + i}><span className={"event-dot " + (item.online ? "ok" : "")}/><div><strong>{item.online ? "Health 확인 성공" : "Health 확인"}</strong><p>{item.message}</p></div><time>{item.time}</time></div>) : <p className="description">아직 검사 기록이 없습니다.</p>}</div></section>
+          <LegacyDiagnosticsControls checking={checking} onLocalHealth={() => { void runCheck(); }}/>
         </>}
 
         {screen === "settings" && <>
           <div className="page-heading"><div><div className="eyebrow">PREFERENCES</div><h1>설정</h1><p>이 프리뷰의 상태 확인 방식만 설정합니다. C2C CLI 설정은 변경하지 않습니다.</p></div></div>
-          <section className="panel page-panel"><div className="panel-heading"><div className="panel-title"><span className="icon-tile"><Settings2 size={18}/></span><div><h2>모니터링</h2><p>조회 대상과 갱신 주기를 관리합니다.</p></div></div></div><form onSubmit={saveSettings} className="settings-form"><label htmlFor="port-setting">로컬 MCP 포트</label><p>상태 확인 요청을 보낼 localhost 포트입니다.</p><div className="setting-control"><input id="port-setting" type="number" min="1" max="65535" value={draftPort} onChange={event => setDraftPort(event.target.value)}/><button type="submit" className="secondary-btn">조회 포트 저장</button></div>{settingError && <p className="form-error" role="alert">{settingError}</p>}{settingsNotice && <p className="form-ok" role="status">{settingsNotice}</p>}</form><div className="settings-row"><div><strong>자동 상태 확인</strong><p>Tauri 앱에서 10초마다 로컬 서버 상태를 조회합니다.</p></div><button type="button" className={"switch " + (autoRefresh ? "enabled" : "")} role="switch" aria-checked={autoRefresh} aria-label="자동 상태 확인" onClick={() => toggleAutoRefresh(!autoRefresh)}><span /></button></div><div className="info-row"><LockKeyhole size={18}/><div><strong>보안</strong><p>이 화면은 읽기 전용입니다. 서버 시작/중지, 원격 쓰기 권한, Owner Token은 건드리지 않습니다.</p></div></div></section>
+          <section className="panel page-panel"><div className="panel-heading"><div className="panel-title"><span className="icon-tile"><Settings2 size={18}/></span><div><h2>모니터링</h2><p>조회 대상과 갱신 주기를 관리합니다.</p></div></div></div><form onSubmit={saveSettings} className="settings-form"><label htmlFor="port-setting">로컬 MCP 포트</label><p>상태 확인 요청을 보낼 localhost 포트입니다.</p><div className="setting-control"><input id="port-setting" type="number" min="1" max="65535" value={draftPort} onChange={event => setDraftPort(event.target.value)}/><button type="submit" className="secondary-btn">조회 포트 저장</button></div>{settingError && <p className="form-error" role="alert">{settingError}</p>}{settingsNotice && <p className="form-ok" role="status">{settingsNotice}</p>}</form><div className="settings-row"><div><strong>자동 상태 확인</strong><p>Tauri 앱에서 10초마다 로컬 서버 상태를 조회합니다.</p></div><button type="button" className={"switch " + (autoRefresh ? "enabled" : "")} role="switch" aria-checked={autoRefresh} aria-label="자동 상태 확인" onClick={() => toggleAutoRefresh(!autoRefresh)}><span /></button></div><div className="info-row"><LockKeyhole size={18}/><div><strong>보안</strong><p>현재 동작하는 것은 모니터링 설정뿐입니다. 서버 시작/중지, 원격 쓰기 권한, Owner Token은 건드리지 않습니다.</p></div></div></section>
+          <LegacySettingsControls />
         </>}
 
         <footer><span>ChatGPT To Codex · desktop preview</span><span><ExternalLink size={13}/> Local-first • Tauri + React</span></footer>
