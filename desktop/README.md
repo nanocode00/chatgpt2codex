@@ -71,6 +71,9 @@ npm run desktop:icon
 
 The scoped **Tauri Desktop Smoke** GitHub Actions job compiles an unsigned
 Windows **debug preview executable** via `tauri build --debug --no-bundle`.
+The Windows binary uses the **GUI subsystem even in debug builds** so
+launching the EXE from Explorer does not open an extra blank command window.
+CI validates the PE header subsystem as well as compiling the executable.
 When that run passes, download the `c2c-tauri-windows-preview` artifact
 from the PR workflow's Artifacts. It is **not a production installer**,
 is not signed and must not replace the installed WinForms app.
