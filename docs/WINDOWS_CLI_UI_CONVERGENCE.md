@@ -83,6 +83,15 @@ The dashboard uses a distinct header for runtime context, a separate activity
 area, high-contrast text, and a single primary Start/Stop button. Settings
 remain a separate dialog. Desktop presentation should ultimately support:
 
+The first Windows screenshot review found that the dark header/activity area
+clashed with a bright lower controls panel, and exposed raw localization keys
+(`projectPrefix` and `portPrefix`) in the header. The visual foundation was
+updated to use **one dark palette across the dashboard, controls and settings**
+with a lighter indigo primary action; the header now uses existing localized
+`projectFolder` and `localPort` labels. Where Windows supports it, the
+system title bar requests dark mode. Standard WinForms scrollbars and native
+dialog chrome can still follow the user's OS theme; they are not custom drawn.
+
 - **Overview:** current project, runtime instance, port and local/public
   connectivity; show pending/healthy/error states separately.
 - **Connections:** public MCP endpoint, stable-vs-temporary status, copy URL,

@@ -5,6 +5,7 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
@@ -30,10 +31,30 @@ internal sealed class LauncherForm : Form
     private const int MaxLauncherLogLinesAfterTrim = 2500;
     private const int MaxVisibleLogCharacters = 200000;
     // Shared visual tokens for the Windows dashboard; no runtime state is stored here.
-    private static readonly Color CanvasColor = Color.FromArgb(246, 248, 252);
-    private static readonly Color HeaderColor = Color.FromArgb(28, 36, 55);
-    private static readonly Color AccentColor = Color.FromArgb(79, 70, 229);
-    private static readonly Color ConsoleColor = Color.FromArgb(24, 31, 47);
+    private static readonly Color CanvasColor = Color.FromArgb(20, 27, 41);
+    private static readonly Color HeaderColor = Color.FromArgb(27, 36, 54);
+    private static readonly Color SurfaceColor = Color.FromArgb(32, 43, 63);
+    private static readonly Color FieldColor = Color.FromArgb(39, 52, 75);
+    private static readonly Color BorderColor = Color.FromArgb(67, 83, 113);
+    private static readonly Color AccentColor = Color.FromArgb(103, 93, 239);
+    private static readonly Color ConsoleColor = Color.FromArgb(16, 23, 37);
+    private static readonly Color MainTextColor = Color.FromArgb(233, 238, 248);
+    private static readonly Color MutedTextColor = Color.FromArgb(176, 189, 212);
+
+    [DllImport("dwmapi.dll", PreserveSig = true)]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+
+    private static void TryUseDarkTitleBar(Form form)
+    {
+        // Windows 10/11 only. Older Windows versions keep their normal title bar.
+        try
+        {
+            var enabled = 1;
+            DwmSetWindowAttribute(form.Handle, 20, ref enabled, sizeof(int));
+        }
+        catch (DllNotFoundException) { }
+        catch (EntryPointNotFoundException) { }
+    }
     private static readonly string[] LanguageCodes = new[]
     {
         "en", "ko", "ja", "zh-Hans", "zh-Hant", "es", "fr", "de", "pt-BR", "it",
@@ -169,8 +190,10 @@ internal sealed class LauncherForm : Form
         MinimumSize = new Size(940, 570);
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = CanvasColor;
+        ForeColor = MainTextColor;
         Font = new Font("Segoe UI", 9F);
         SetWindowIcon(this);
+        HandleCreated += delegate { TryUseDarkTitleBar(this); };
 
         var header = new Panel();
         header.Dock = DockStyle.Top;
@@ -186,7 +209,7 @@ internal sealed class LauncherForm : Form
 
         projectSummaryLabel = new Label();
         projectSummaryLabel.SetBounds(24, 52, 850, 24);
-        projectSummaryLabel.ForeColor = Color.FromArgb(198, 207, 226);
+        projectSummaryLabel.ForeColor = MutedTextColor;
         projectSummaryLabel.BackColor = HeaderColor;
         projectSummaryLabel.AutoEllipsis = true;
 
@@ -195,8 +218,8 @@ internal sealed class LauncherForm : Form
         statusLabel.Dock = DockStyle.Bottom;
         statusLabel.Height = 34;
         statusLabel.Padding = new Padding(24, 8, 12, 0);
-        statusLabel.ForeColor = Color.FromArgb(225, 231, 243);
-        statusLabel.BackColor = Color.FromArgb(43, 53, 76);
+        statusLabel.ForeColor = MainTextColor;
+        statusLabel.BackColor = SurfaceColor;
         statusLabel.AutoEllipsis = true;
         header.Controls.Add(heading);
         header.Controls.Add(projectSummaryLabel);
@@ -211,7 +234,7 @@ internal sealed class LauncherForm : Form
         logBox.Font = new Font("Consolas", 10);
         logBox.BorderStyle = BorderStyle.None;
         logBox.BackColor = ConsoleColor;
-        logBox.ForeColor = Color.FromArgb(222, 230, 242);
+        logBox.ForeColor = MainTextColor;
 
         var activityCard = new Panel();
         activityCard.Dock = DockStyle.Fill;
@@ -223,7 +246,7 @@ internal sealed class LauncherForm : Form
         activityHeading.Height = 30;
         activityHeading.Text = L("activityLog");
         activityHeading.Font = new Font("Segoe UI Semibold", 10F, FontStyle.Bold);
-        activityHeading.ForeColor = Color.FromArgb(172, 185, 213);
+        activityHeading.ForeColor = MutedTextColor;
         activityHeading.BackColor = ConsoleColor;
         activityCard.Controls.Add(logBox);
         activityCard.Controls.Add(activityHeading);
@@ -238,7 +261,7 @@ internal sealed class LauncherForm : Form
         bottomPanel.Dock = DockStyle.Bottom;
         bottomPanel.Height = 128;
         bottomPanel.Padding = new Padding(18, 12, 18, 8);
-        bottomPanel.BackColor = Color.White;
+        bottomPanel.BackColor = SurfaceColor;
         bottomPanel.ColumnCount = 1;
         bottomPanel.RowCount = 2;
         bottomPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
@@ -246,6 +269,7 @@ internal sealed class LauncherForm : Form
 
         var urlPanel = new FlowLayoutPanel();
         urlPanel.Dock = DockStyle.Fill;
+        urlPanel.BackColor = SurfaceColor;
         urlPanel.Padding = new Padding(0, 7, 0, 0);
         urlPanel.FlowDirection = FlowDirection.LeftToRight;
         urlPanel.WrapContents = false;
@@ -265,6 +289,7 @@ internal sealed class LauncherForm : Form
 
         var tokenPanel = new FlowLayoutPanel();
         tokenPanel.Dock = DockStyle.Fill;
+        tokenPanel.BackColor = SurfaceColor;
         tokenPanel.Padding = new Padding(0, 7, 0, 0);
         tokenPanel.FlowDirection = FlowDirection.LeftToRight;
         tokenPanel.WrapContents = false;
@@ -808,6 +833,8 @@ internal sealed class LauncherForm : Form
         var label = new Label();
         label.Text = text;
         label.SetBounds(x, y, width, 22);
+        label.ForeColor = MainTextColor;
+        label.BackColor = Color.Transparent;
         return label;
     }
 
@@ -823,20 +850,33 @@ internal sealed class LauncherForm : Form
     private static void StyleReadOnlyField(TextBox field)
     {
         field.BorderStyle = BorderStyle.FixedSingle;
-        field.BackColor = Color.FromArgb(248, 250, 253);
-        field.ForeColor = Color.FromArgb(48, 59, 81);
+        field.BackColor = FieldColor;
+        field.ForeColor = MainTextColor;
         field.Font = new Font("Segoe UI", 9F);
         field.Margin = new Padding(0, 3, 8, 0);
         field.Height = 31;
+    }
+
+    private static void StyleSettingsInput(Control input)
+    {
+        input.BackColor = FieldColor;
+        input.ForeColor = MainTextColor;
+        input.Font = new Font("Segoe UI", 9F);
+    }
+
+    private static void StyleSettingsCheckBox(CheckBox checkBox)
+    {
+        checkBox.BackColor = CanvasColor;
+        checkBox.ForeColor = MainTextColor;
     }
 
     private static void StyleActionButton(Button button, bool primary)
     {
         button.FlatStyle = FlatStyle.Flat;
         button.FlatAppearance.BorderSize = primary ? 0 : 1;
-        button.FlatAppearance.BorderColor = Color.FromArgb(214, 220, 233);
-        button.BackColor = primary ? AccentColor : Color.White;
-        button.ForeColor = primary ? Color.White : Color.FromArgb(49, 61, 84);
+        button.FlatAppearance.BorderColor = BorderColor;
+        button.BackColor = primary ? AccentColor : FieldColor;
+        button.ForeColor = MainTextColor;
         button.Font = new Font("Segoe UI", 9F, FontStyle.Regular);
         button.Cursor = Cursors.Hand;
         button.Height = 32;
@@ -855,7 +895,9 @@ internal sealed class LauncherForm : Form
             form.MaximizeBox = false;
             form.MinimizeBox = false;
             form.BackColor = CanvasColor;
+            form.ForeColor = MainTextColor;
             form.Font = new Font("Segoe UI", 9F);
+            form.HandleCreated += delegate { TryUseDarkTitleBar(form); };
 
             var title = NewLabel(L("settingsTitle"), 24, 18, 500);
             title.Font = new System.Drawing.Font(title.Font.FontFamily, 14, System.Drawing.FontStyle.Bold);
@@ -868,6 +910,7 @@ internal sealed class LauncherForm : Form
             languageBox.Items.AddRange(LanguageOptionNames.Cast<object>().ToArray());
             languageBox.SetBounds(180, 58, 230, 28);
             languageBox.SelectedIndex = LanguageOptionIndex();
+            StyleSettingsInput(languageBox);
             form.Controls.Add(languageBox);
 
             form.Controls.Add(NewLabel(L("projectFolder"), 24, 102, 150));
@@ -900,35 +943,40 @@ internal sealed class LauncherForm : Form
             launchCheck.Text = L("launchWindowsSetting");
             launchCheck.Checked = launchAtStartup;
             launchCheck.SetBounds(180, 138, 320, 24);
+            StyleSettingsCheckBox(launchCheck);
             form.Controls.Add(launchCheck);
 
             var startCheck = new CheckBox();
             startCheck.Text = L("startOnOpenSetting");
             startCheck.Checked = startMcpOnOpen;
             startCheck.SetBounds(180, 166, 320, 24);
+            StyleSettingsCheckBox(startCheck);
             form.Controls.Add(startCheck);
 
             var updatesCheck = new CheckBox();
             updatesCheck.Text = L("autoUpdatesSetting");
             updatesCheck.Checked = autoCheckUpdates;
             updatesCheck.SetBounds(180, 194, 320, 24);
+            StyleSettingsCheckBox(updatesCheck);
             form.Controls.Add(updatesCheck);
 
             var tunnelCheck = new CheckBox();
             tunnelCheck.Text = L("publicTunnelSetting");
             tunnelCheck.Checked = publicTunnelEnabled;
             tunnelCheck.SetBounds(180, 222, 390, 24);
+            StyleSettingsCheckBox(tunnelCheck);
             form.Controls.Add(tunnelCheck);
 
             form.Controls.Add(NewLabel(L("publicHostname"), 24, 262, 150));
             var hostBox = new TextBox();
             hostBox.Text = configuredPublicHost ?? string.Empty;
             hostBox.SetBounds(180, 258, 342, 24);
+            StyleSettingsInput(hostBox);
             form.Controls.Add(hostBox);
 
             var hostHint = NewLabel(L("publicHostnameHint"), 180, 288, 342);
             hostHint.SetBounds(180, 286, 342, 42);
-            hostHint.ForeColor = System.Drawing.SystemColors.GrayText;
+            hostHint.ForeColor = MutedTextColor;
             form.Controls.Add(hostHint);
 
             form.Controls.Add(NewLabel(L("localPort"), 24, 342, 150));
@@ -937,12 +985,14 @@ internal sealed class LauncherForm : Form
             portBox.Maximum = 65535;
             portBox.Value = Math.Min(65535, Math.Max(1, port));
             portBox.SetBounds(180, 338, 120, 24);
+            StyleSettingsInput(portBox);
             form.Controls.Add(portBox);
 
             form.Controls.Add(NewLabel(L("githubRepositoryURL"), 24, 382, 150));
             var repoBox = new TextBox();
             repoBox.Text = githubRepoUrl ?? string.Empty;
             repoBox.SetBounds(180, 378, 342, 24);
+            StyleSettingsInput(repoBox);
             form.Controls.Add(repoBox);
 
             var copyConnector = NewButton(L("copyConnector"), 24, 426, 156);
@@ -1021,8 +1071,8 @@ internal sealed class LauncherForm : Form
     private void RefreshTrayState()
     {
         var running = IsManagedProcessRunning();
-        projectSummaryLabel.Text = L("projectPrefix") + ": " + ProjectDisplayName() +
-            "   ·   " + L("portPrefix") + ": " + port;
+        projectSummaryLabel.Text = L("projectFolder") + ": " + ProjectDisplayName() +
+            "   ·   " + L("localPort") + ": " + port;
         statusTrayItem.Text = "ChatGPT To Codex: " + (running ? L("statusOn") : L("statusOff"));
         toggleTrayItem.Text = running ? L("stopMCP") : L("startMCP");
         stopButton.Text = running ? L("stopMCP") : L("startMCP");
