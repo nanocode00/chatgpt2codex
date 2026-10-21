@@ -31,5 +31,12 @@ jobs:
         run: npm run desktop:build
       - name: Check Rust toolchain
         run: cargo --version
-      - name: Check Tauri Rust backend (no installation, no app launch)
-        run: cargo check --manifest-path desktop/src-tauri/Cargo.toml
+      - name: Build unsigned Windows desktop preview (no installation)
+        run: npm --prefix desktop run tauri:build -- --debug --no-bundle
+      - name: Publish preview executable for visual review
+        uses: actions/upload-artifact@v4
+        with:
+          name: c2c-tauri-windows-preview
+          path: desktop/src-tauri/target/debug/chatgpt2codex-desktop.exe
+          if-no-files-found: error
+          retention-days: 7

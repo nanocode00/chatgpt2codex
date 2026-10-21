@@ -53,6 +53,18 @@ Rust compilation (requires platform SDK/libraries):
 npm run desktop:rust:check
 ```
 
+To rebuild the desktop icon from the existing project asset:
+
+```bash
+npm run desktop:icon
+```
+
+The scoped **Tauri Desktop Smoke** GitHub Actions job compiles an unsigned
+Windows **debug preview executable** via `tauri build --debug --no-bundle`.
+When that run passes, download the `c2c-tauri-windows-preview` artifact
+from the PR workflow's Artifacts. It is **not a production installer**,
+is not signed and must not replace the installed WinForms app.
+
 For the native real-health check, leave the existing installed C2C MCP
 server running. The app probes localhost port 7979 by default. Change
 **only** the dashboard's monitoring port in Settings if needed. On
