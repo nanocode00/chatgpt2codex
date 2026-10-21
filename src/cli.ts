@@ -39,6 +39,7 @@ import {
   readRuntimeInstance,
   removeRuntimeInstance,
   runtimeProcessMatchesRecord,
+  runtimeTunnelMatchesRecord,
   writeRuntimeInstance,
 } from "./runtime/instances.js";
 import {
@@ -1752,18 +1753,31 @@ async function cmdStop(flags: Record<string, string | boolean>): Promise<void> {
     console.log(JSON.stringify({ stopped: true, stale: true, instance, pid: record.pid }));
     return;
   }
+  // The health endpoint identifies a service on this port, not the process
+  // recorded in our PID file. Check ownership on *all* stop paths, even
+  // healthy ones. --force must never override an identity mismatch.
+  if (!(await runtimeProcessMatchesRecord(record))) {
+    throw new Error(
+      "refusing stop because pid " + record.pid + " could not be verified as instance " + instance,
+    );
+  }
+  const tunnelRunning = record.tunnelPid !== undefined && isProcessAlive(record.tunnelPid);
+  // Preflight the tunnel too, before stopping the server. This avoids
+  // partially stopping an instance that cannot safely clean up its tunnel.
+  if (tunnelRunning && !(await runtimeTunnelMatchesRecord(record))) {
+    throw new Error(
+      "refusing stop because tunnel pid " + record.tunnelPid + " could not be verified as instance " + instance,
+    );
+  }
   const healthy = await runtimeHealth(record);
-  if (!healthy) {
-    if (flags.force !== true) {
-      throw new Error(
-        "refusing to signal pid " + record.pid + " because the recorded instance is alive but its health endpoint is not responding; retry with --force only after verifying the instance identity",
-      );
-    }
-    if (!(await runtimeProcessMatchesRecord(record))) {
-      throw new Error(
-        "refusing forced stop because pid " + record.pid + " could not be verified as this c2c instance",
-      );
-    }
+  if (!healthy && flags.force !== true) {
+    throw new Error(
+      "refusing to signal pid " + record.pid + " because its health endpoint is not responding; retry with --force only after verifying instance identity",
+    );
+  }
+  // Recheck immediately before signalling (processes can exit between probes).
+  if (!(await runtimeProcessMatchesRecord(record))) {
+    throw new Error("runtime process identity changed before stop: " + instance);
   }
   process.kill(record.pid, "SIGTERM");
   for (let i = 0; i < 50 && isProcessAlive(record.pid); i += 1) {
@@ -1780,12 +1794,18 @@ async function cmdStop(flags: Record<string, string | boolean>): Promise<void> {
   }
   if (isProcessAlive(record.pid)) throw new Error("instance " + instance + " did not stop cleanly");
   if (record.tunnelPid && isProcessAlive(record.tunnelPid)) {
+    if (!(await runtimeTunnelMatchesRecord(record))) {
+      throw new Error("refusing tunnel stop because process identity changed: " + instance);
+    }
     process.kill(record.tunnelPid, "SIGTERM");
     for (let i = 0; i < 50 && isProcessAlive(record.tunnelPid); i += 1) {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     if (isProcessAlive(record.tunnelPid)) {
       if (flags.force === true) {
+        if (!(await runtimeTunnelMatchesRecord(record))) {
+          throw new Error("refusing forced tunnel stop because process identity changed: " + instance);
+        }
         process.kill(record.tunnelPid, "SIGKILL");
         for (let i = 0; i < 20 && isProcessAlive(record.tunnelPid); i += 1) {
           await new Promise((resolve) => setTimeout(resolve, 100));
