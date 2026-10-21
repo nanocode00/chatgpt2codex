@@ -1,4 +1,5 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -9,6 +10,7 @@ import {
   readRuntimeInstance,
   removeRuntimeInstance,
   runtimeCommandMatchesRecord,
+  runtimeProcessMatchesRecord,
   splitWindowsCommandLine,
   tunnelCommandMatchesRecord,
   windowsProcessMatchesRecord,
@@ -141,4 +143,40 @@ describe("runtime instances", () => {
     expect(windowsTunnelMatchesRecord(record, snapshot)).toBe(true);
     expect(windowsTunnelMatchesRecord(record, { ...snapshot, executablePath: "C:\\Apps\\other.exe" })).toBe(false);
   });
+  it("checks real OS commandline for a disposable fixture; refuses mismatched ownership", async () => {
+    if (process.platform !== "win32" && process.platform !== "linux") return;
+    const directory = await mkdtemp(join(tmpdir(), "c2c-identity-fixture-"));
+    const file = join(directory, "fixture.js");
+    await writeFile(file, "setInterval(() => {}, 10000);\n");
+    const argv = [
+      file, "serve", "--http", "--instance", "fixture",
+      "--workspace", directory, "--host", "127.0.0.1",
+      "--port", "7990", "--public-url", "http://127.0.0.1:7990",
+    ];
+    const child = spawn(process.execPath, argv, { windowsHide: true, stdio: "ignore" });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        child.once("spawn", resolve);
+        child.once("error", reject);
+      });
+      const record = {
+        ...sample(),
+        name: "fixture",
+        pid: child.pid!,
+        entrypoint: file,
+        workspace: directory,
+        port: 7990,
+        publicUrl: "http://127.0.0.1:7990",
+        startedAt: Date.now(),
+      };
+      expect(await runtimeProcessMatchesRecord(record)).toBe(true);
+      expect(await runtimeProcessMatchesRecord({ ...record, port: 7979 })).toBe(false);
+      expect(await runtimeProcessMatchesRecord({ ...record, name: "another" })).toBe(false);
+      // Critical: no stop/kill command is exercised against actual C2C.
+    } finally {
+      if (child.pid) child.kill();
+      await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  });
+
 });
