@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::io::Read;
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -79,32 +80,41 @@ fn installed_cli_logs(instance: String, component: String) -> CliLogPreview {
         Ok(child) => child,
         Err(_) => return result(instance, component, "CLI 로그 조회를 시작하지 못했습니다."),
     };
-    let deadline = Instant::now() + Duration::from_secs(9);
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(80)),
-            _ => {
-                // Only the child spawned for this one read-only CLI invocation.
-                let _ = child.kill();
-                let _ = child.wait();
-                return result(instance, component, "CLI 로그 조회 시간이 초과됐습니다.");
-            }
+    // Drain the pipe concurrently with process polling; a full Windows
+    // stdout pipe would otherwise deadlock on a normal 80-line log response.
+    // Read at most 256 KiB + 1 byte even if a CLI output is unexpectedly huge.
+    let stdout = child.stdout.take();
+    let reader = thread::spawn(move || {
+        let mut bytes = Vec::new();
+        if let Some(pipe) = stdout {
+            let _ = pipe.take((256 * 1024 + 1) as u64).read_to_end(&mut bytes);
         }
-    }
-    let output = match child.wait_with_output() {
-        Ok(output) => output,
-        Err(_) => return result(instance, component, "CLI 로그를 읽지 못했습니다."),
+        bytes
+    });
+    let deadline = Instant::now() + Duration::from_secs(9);
+    let completed = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Some(status),
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(80)),
+            _ => break None,
+        }
     };
-    if !output.status.success() {
+    if completed.is_none() {
+        // Only the short-lived child spawned by this Tauri inspection.
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    let bytes = reader.join().unwrap_or_default();
+    if completed.is_none() {
+        return result(instance, component, "CLI 로그 조회 시간이 초과됐습니다.");
+    }
+    if !completed.is_some_and(|status| status.success()) {
         return result(instance, component, "이 인스턴스의 로그를 찾지 못했거나 설치된 CLI가 로그 조회를 지원하지 않습니다.");
     }
-    // The CLI itself tails the last 80 lines; reject excessive output rather
-    // than collecting huge amounts of arbitrary content in the WebView.
-    if output.stdout.len() > 256 * 1024 {
+    if bytes.len() > 256 * 1024 {
         return result(instance, component, "로그 출력이 안전한 미리보기 크기를 초과했습니다.");
     }
-    let (content, truncated) = sanitize_preview(&String::from_utf8_lossy(&output.stdout));
+    let (content, truncated) = sanitize_preview(&String::from_utf8_lossy(&bytes));
     CliLogPreview {
         available: true,
         instance,
