@@ -198,3 +198,10 @@ button:focus-visible,input:focus-visible{outline:2px solid #999;outline-offset:2
 .migration-backup-title strong{color:#efefef;font-size:13px;font-weight:650}
 .migration-backup-title p{font-size:11px;line-height:1.7;color:#b7b7b7;margin-top:6px}
 .migration-backup-description{font-size:11px;line-height:1.8;color:#bcbcbc;margin:15px 0}
+
+/* Read-only backup restore rehearsal; encrypted staging only, no live writes. */
+.migration-rehearsal{margin:16px 0 0;padding:15px 16px;border:1px solid #484848;border-radius:10px;background:#202020}
+.migration-rehearsal strong{font-size:12px;color:#ededed;font-weight:650}
+.migration-rehearsal p{font-size:11px;line-height:1.75;color:#bdbdbd;margin:9px 0 14px}
+.migration-rehearsal-result{border-top:1px solid #3f3f3f;padding-top:12px;color:#a7cfb4!important}
+.migration-rehearsal-result span{display:block;margin-top:7px;font-size:11px;line-height:1.75;color:#c0c0c0}
