@@ -244,7 +244,10 @@ async function windowsProcessSnapshot(pid: number): Promise<WindowsProcessSnapsh
       "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64"),
     ], {
       windowsHide: true,
-      timeout: 5_000,
+      // Cold Windows CI hosts can take >5s to initialize CIM / PowerShell.
+      // Give the *verification query* time to succeed without relaxing any
+      // command-line, executable, instance or process-start identity check.
+      timeout: 15_000,
       maxBuffer: 16_384,
       env: { ...process.env, C2C_VERIFY_PID: String(pid) },
     });
