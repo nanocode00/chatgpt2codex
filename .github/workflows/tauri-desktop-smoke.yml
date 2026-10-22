@@ -52,6 +52,12 @@ jobs:
           npm prune --omit=dev --ignore-scripts --no-audit --no-fund
           if ($LASTEXITCODE -ne 0) { throw "CLI runtime pruning failed" }
           ./scripts/package-tauri-cli-preview.ps1
+      - name: E2E the actual bundled CLI with its bundled Node executable
+        shell: pwsh
+        run: |
+          ./scripts/test-windows-cli-lifecycle-isolated.ps1 `
+            -NodeExecutable "desktop/src-tauri/target/debug/c2c-runtime/bin/node.exe" `
+            -CliEntrypoint "desktop/src-tauri/target/debug/c2c-runtime/dist/cli.js"
       - name: Check Rust toolchain
         run: cargo --version
       - name: Unit-test native CLI URL and log safety checks
