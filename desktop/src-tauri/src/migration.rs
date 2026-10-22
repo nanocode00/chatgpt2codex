@@ -6,10 +6,10 @@ use std::net::{Ipv4Addr, SocketAddrV4, TcpStream};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-const MAX_SETTINGS_BYTES: u64 = 128 * 1024;
-const MAX_STATE_BYTES: u64 = 4 * 1024 * 1024;
-const LEGACY_APP_DIR: &str = "ChatGPT To Codex";
-const PREVIEW_APP_DIR: &str = "ChatGPTToCodex-Tauri-Preview";
+pub(crate) const MAX_SETTINGS_BYTES: u64 = 128 * 1024;
+pub(crate) const MAX_STATE_BYTES: u64 = 4 * 1024 * 1024;
+pub(crate) const LEGACY_APP_DIR: &str = "ChatGPT To Codex";
+pub(crate) const PREVIEW_APP_DIR: &str = "ChatGPTToCodex-Tauri-Preview";
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -36,7 +36,7 @@ pub struct LegacyMigrationReport {
     pub warnings: Vec<String>,
 }
 
-fn read_limited(path: &Path, limit: u64) -> Result<Option<Vec<u8>>, String> {
+pub(crate) fn read_limited(path: &Path, limit: u64) -> Result<Option<Vec<u8>>, String> {
     let file = match fs::File::open(path) {
         Ok(file) => file,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -64,7 +64,7 @@ fn base64_value(raw: &str) -> Result<String, String> {
     String::from_utf8(data).map_err(|_| "이전 설정의 UTF-8 인코딩이 잘못됐습니다.".into())
 }
 
-fn parse_ini(text: &str) -> Result<BTreeMap<String, String>, String> {
+pub(crate) fn parse_ini(text: &str) -> Result<BTreeMap<String, String>, String> {
     const ALLOWED: [&str; 10] = [
         "ProjectFolder", "Port", "PublicHostname", "EnablePublicTunnel",
         "LaunchAtStartup", "StartMcpOnOpen", "AutoCheckUpdates",
@@ -86,11 +86,11 @@ fn bool_option(values: &BTreeMap<String, String>, key: &str) -> Option<bool> {
     values.get(key).map(|v| ["1", "true", "yes"].contains(&v.trim().to_ascii_lowercase().as_str()))
 }
 
-fn legacy_state(user_profile: &Path, filename: &str) -> PathBuf {
+pub(crate) fn legacy_state(user_profile: &Path, filename: &str) -> PathBuf {
     user_profile.join(".local").join("share").join("chatgpt2codex").join(filename)
 }
 
-fn owner_hash_record_valid(user_profile: &Path) -> Result<bool, String> {
+pub(crate) fn owner_hash_record_valid(user_profile: &Path) -> Result<bool, String> {
     let Some(bytes) = read_limited(&legacy_state(user_profile, "owner-token.json"), MAX_SETTINGS_BYTES)? else {
         return Ok(false);
     };
@@ -102,7 +102,7 @@ fn owner_hash_record_valid(user_profile: &Path) -> Result<bool, String> {
         && hash.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'))
 }
 
-fn oauth_summary(user_profile: &Path) -> Result<(bool, Option<usize>), String> {
+pub(crate) fn oauth_summary(user_profile: &Path) -> Result<(bool, Option<usize>), String> {
     let Some(bytes) = read_limited(&legacy_state(user_profile, "oauth.json"), MAX_STATE_BYTES)? else {
         return Ok((false, None));
     };
@@ -127,7 +127,7 @@ fn is_listening(port: u16) -> bool {
     ).is_ok()
 }
 
-fn inspect_paths(local: &Path, profile: &Path, preview: &Path) -> Result<LegacyMigrationReport, String> {
+pub(crate) fn inspect_paths(local: &Path, profile: &Path, preview: &Path) -> Result<LegacyMigrationReport, String> {
     let legacy_dir = local.join(LEGACY_APP_DIR);
     let settings_bytes = read_limited(&legacy_dir.join("settings.ini"), MAX_SETTINGS_BYTES)?;
     let settings_found = settings_bytes.is_some();
@@ -184,7 +184,7 @@ fn inspect_paths(local: &Path, profile: &Path, preview: &Path) -> Result<LegacyM
     })
 }
 
-fn os_paths() -> Result<(PathBuf, PathBuf, PathBuf), String> {
+pub(crate) fn os_paths() -> Result<(PathBuf, PathBuf, PathBuf), String> {
     if !cfg!(windows) { return Err("WinForms 마이그레이션은 Windows에서만 지원합니다.".into()); }
     let local = PathBuf::from(std::env::var_os("LOCALAPPDATA").ok_or("LOCALAPPDATA를 찾지 못했습니다.")?);
     let profile = PathBuf::from(std::env::var_os("USERPROFILE").ok_or("USERPROFILE을 찾지 못했습니다.")?);
