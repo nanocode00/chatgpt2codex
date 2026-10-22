@@ -196,3 +196,11 @@ registration or connector authorization state.
 ## Isolated CLI manager
 
 The Management page can now operate an independently bundled, audited Node C2C instance on port 18797. This requires the complete Windows preview ZIP (including c2c-runtime/) and explicit one-time token preparation. The installed WinForms instance, port 7979 and token remain untouched. See [isolated CLI lifecycle notes](../docs/TAURI_OWNED_CLI_PREVIEW.md).
+
+## WinForms migration preflight
+
+**Settings → WinForms → Tauri 전환 준비** is a native read-only inventory of legacy
+WinForms settings, existing hashed Owner Token validity and OAuth client *count*.
+It does not copy secrets or take over port 7979. Optional settings snapshot is
+**non-secret, not a full backup**, and cannot overwrite an earlier snapshot.
+See [migration preflight and gated plan](../docs/TAURI_WINFORMS_MIGRATION_PREFLIGHT.md).
