@@ -685,11 +685,21 @@ try {
 } catch {
     # Fixed stage names only: no Windows user names, paths, token hashes or
     # exception messages are permitted in CI logs.
-    [Console]::Out.WriteLine("F3-ACL-ERROR:$stage")
+    $kind = switch ($_.Exception.GetType().Name) {
+        'CommandNotFoundException' { 'command-not-found' }
+        'ItemNotFoundException' { 'path-not-found' }
+        'DirectoryNotFoundException' { 'path-not-found' }
+        'UnauthorizedAccessException' { 'access-denied' }
+        'SecurityException' { 'security-denied' }
+        'ParameterBindingException' { 'invalid-argument' }
+        default { 'other' }
+    }
+    [Console]::Out.WriteLine("F3-ACL-ERROR:${stage}:$kind")
     exit 1
 }
 "#;
-        let output = Command::new("powershell.exe")
+        // Match the PowerShell 7 runtime used by the Windows CI workflow.
+        let output = Command::new("pwsh.exe")
             .args(["-NoProfile", "-NonInteractive", "-Command", SCRIPT])
             .env("C2C_F3_HOME", home)
             .env("C2C_F3_VERIFY_ONLY", if verify_only { "true" } else { "false" })
@@ -700,7 +710,11 @@ try {
                 .iter()
                 .find(|name| stdout.contains(&format!("F3-ACL-ERROR:{name}")))
                 .copied().unwrap_or("unknown");
-            panic!("fixture home/files ACL restriction failed at safe stage: {stage}");
+            let kind = ["command-not-found", "path-not-found", "access-denied",
+                "security-denied", "invalid-argument", "other"].iter()
+                .find(|kind| stdout.contains(&format!(":{kind}")))
+                .copied().unwrap_or("unknown");
+            panic!("fixture home/files ACL restriction failed at safe stage: {stage} ({kind})");
         }
     }
 
