@@ -168,3 +168,12 @@ button:focus-visible,input:focus-visible{outline:2px solid #999;outline-offset:2
 .tunnel-status.unreachable{border-color:#725442}
 .tunnel-status.unreachable svg{color:#d3a178}
 .tunnel-warning{margin:8px 0 17px;padding:12px 14px;border:1px solid #725442;border-radius:9px;color:#e8c6a5;font-size:11px;line-height:1.7}
+
+/* Isolated Tauri-owned CLI controls: never imply the legacy 7979 server is managed here. */
+.legacy-owned-status{padding:17px;border:1px solid #414141;background:#181818;border-radius:11px;margin:16px 0 18px}
+.legacy-owned-status strong{font-size:14px;font-weight:650;color:#e3e3e3}
+.legacy-owned-status p{margin:9px 0;color:#b3b3b3;font-size:12px;line-height:1.7}
+.legacy-owned-status small{font-size:11px;color:#999}
+.legacy-token-notice{padding:15px 17px;border:1px solid #8a694b;border-radius:10px;margin-top:19px;background:#2c241e}
+.legacy-token-notice strong{font-size:12px;color:#eee}
+.legacy-token-notice p{font-size:11px;line-height:1.8;color:#d3bcad;margin:8px 0 13px}
