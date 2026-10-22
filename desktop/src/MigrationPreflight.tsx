@@ -1,16 +1,21 @@
 import { Archive, CircleAlert, ClipboardCheck, FolderOpen, RefreshCcw, ShieldCheck } from "lucide-react";
-import type { LegacyMigrationReport } from "./runtime";
+import type { CredentialBackupReport, LegacyMigrationReport } from "./runtime";
 
 function StateTag({ ok, missing = "확인 불가" }: { ok: boolean; missing?: string }) {
   return <span className={"migration-status " + (ok ? "present" : "")}>{ok ? "확인됨" : missing}</span>;
 }
 
-export function MigrationPreflight({ report, busy, error, onInspect, onSnapshot }: {
+export function MigrationPreflight({ report, busy, error, onInspect, onSnapshot, backup, backupBusy, backupError, onBackup, onVerifyBackup }: {
   report: LegacyMigrationReport | null;
   busy: boolean;
   error: string;
   onInspect: () => void;
   onSnapshot: () => void;
+  backup: CredentialBackupReport | null;
+  backupBusy: boolean;
+  backupError: string;
+  onBackup: () => void;
+  onVerifyBackup: () => void;
 }) {
   return <section className="panel page-panel legacy-spaced" aria-label="WinForms에서 Tauri로 전환 사전 점검">
     <div className="panel-heading">
@@ -58,6 +63,38 @@ export function MigrationPreflight({ report, busy, error, onInspect, onSnapshot 
         {report.warnings.map((warning, i) =>
           <p className="migration-warning" key={i}><CircleAlert size={14}/>{warning}</p>)}
       </div>}
+      <div className="migration-backup-card">
+        <div className="migration-backup-title"><ShieldCheck size={18}/>
+          <div><strong>인증정보 암호화 백업</strong>
+            <p>Owner Token 해시와 OAuth 기록을 Windows 현재 사용자 계정의 DPAPI로 암호화합니다.</p>
+          </div>
+        </div>
+        <p className="migration-backup-description">
+          생성 버튼을 누를 때만 기존 설정·Owner Token 해시·OAuth 데이터를 읽습니다.
+          백업 내용은 화면에 노출하지 않으며 원본을 수정하지 않습니다.
+          생성 이후에는 복호화·체크섬·형식을 검사해 검증합니다.
+        </p>
+        <div className="legacy-actions">
+          <button className="legacy-action available" type="button"
+            disabled={backupBusy || !report?.ownerHashValid || !report?.oauthValid || !report?.settingsFound || backup?.exists}
+            onClick={onBackup}><Archive size={16}/>
+            {backupBusy ? "작업 중..." : backup?.exists ? "암호화 백업 존재" : "인증정보 보안 백업 생성"}
+          </button>
+          <button className="legacy-action available" type="button" disabled={backupBusy || !backup?.exists}
+            onClick={onVerifyBackup}><RefreshCcw size={16}/>백업 복호화·무결성 재검사</button>
+        </div>
+        {backupError && <p className="tunnel-warning" role="alert">{backupError}</p>}
+        <p className="migration-backup-description" role="status">
+          {backup?.verified ? "현재 Windows 사용자 계정으로 복호화·무결성 검사 통과" : backup?.exists ? "백업이 있으나 검증되지 않았습니다" : "암호화 백업을 만들지 않았습니다"}
+          {backup?.verified && backup.oauthClients !== null ? " · OAuth 클라이언트 " + backup.oauthClients + "개" : ""}
+        </p>
+        {backup?.path && <p className="migration-path"><FolderOpen size={14}/>{backup.path}</p>}
+        <p className="legacy-footnote">
+          백업은 이 Windows 로그인 환경에 묶여 있으며 서버 중지 시점의 일관성을 보장하지 않습니다.
+          디스크 오류·Windows 계정 손실 시 복원할 수 있다는 보증이 아니고,
+          서버 전환이나 원본 파일에 실제 복원하는 기능은 아직 없습니다.
+        </p>
+      </div>
       <p className="legacy-footnote">
         이 단계는 전환 가능 여부를 조사하는 작업이며, 실제 인계와 롤백용 전체 백업은 아닙니다.
         기존 Owner Token 해시·OAuth 데이터는 새로운 앱으로 복사하지 않습니다.
