@@ -190,3 +190,11 @@ button:focus-visible,input:focus-visible{outline:2px solid #999;outline-offset:2
 .migration-warning{font-size:11px;line-height:1.65;color:#beb8ae;margin:11px 0 0;display:flex;align-items:start;gap:8px}
 .migration-warning svg{flex:none;margin-top:2px;color:#c8a27e}
 @media(max-width:760px){.migration-row{flex-direction:column;gap:5px}.migration-row span{text-align:left;max-width:100%}}
+
+/* Explicit, current-user encrypted credential backup section. */
+.migration-backup-card{margin-top:19px;padding:20px;border:1px solid #454545;border-radius:12px;background:#1e1e1e}
+.migration-backup-title{display:flex;align-items:flex-start;gap:12px}
+.migration-backup-title svg{color:#8abe9f;flex:none}
+.migration-backup-title strong{color:#efefef;font-size:13px;font-weight:650}
+.migration-backup-title p{font-size:11px;line-height:1.7;color:#b7b7b7;margin-top:6px}
+.migration-backup-description{font-size:11px;line-height:1.8;color:#bcbcbc;margin:15px 0}
