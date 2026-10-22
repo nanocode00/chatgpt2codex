@@ -136,3 +136,21 @@ export async function inspectLegacyMigration(): Promise<LegacyMigrationReport> {
 export async function saveLegacySettingsSnapshot(): Promise<LegacyMigrationReport> {
   return invoke<LegacyMigrationReport>("save_legacy_settings_snapshot");
 }
+
+export interface CredentialBackupReport {
+  exists: boolean;
+  verified: boolean;
+  encrypted: boolean;
+  path: string | null;
+  createdAtUnix: number | null;
+  oauthClients: number | null;
+  details: string;
+}
+
+export async function inspectCredentialBackup(): Promise<CredentialBackupReport> {
+  return invoke<CredentialBackupReport>("inspect_credential_backup");
+}
+
+export async function createCredentialBackup(): Promise<CredentialBackupReport> {
+  return invoke<CredentialBackupReport>("create_credential_backup");
+}
