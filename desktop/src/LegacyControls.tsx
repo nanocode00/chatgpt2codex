@@ -155,11 +155,14 @@ export function LegacyConnectionControls({ publicConnector, publicState, onCopyP
   </>;
 }
 
-export function LegacyDiagnosticsControls({ onLocalHealth, checking }: {
+export function LegacyDiagnosticsControls({ onLocalHealth, checking, onViewLogs, logsChecking, logResult }: {
   onLocalHealth: () => void; checking: boolean;
+  onViewLogs: (component: CliLogComponent) => void;
+  logsChecking: boolean;
+  logResult: CliLogPreview | null;
 }) {
   return <section className="panel page-panel legacy-spaced">
-    <SectionHeading title="진단 도구" icon={<HeartPulse size={18}/>}
+    <SectionHeading title="진단 도구" icon={<HeartPulse size={18}/>} status="일부 연결"
       description="기존 Windows 앱의 상태·로그·업데이트 바로가기" />
     <div className="legacy-body">
       <div className="legacy-actions">
@@ -167,12 +170,24 @@ export function LegacyDiagnosticsControls({ onLocalHealth, checking }: {
           <Wifi size={16}/>{checking ? "확인 중..." : "로컬 상태 확인"}
         </button>
         <PendingButton label="공개 상태 확인" icon={<Globe2 size={16}/>} />
-        <PendingButton label="로그 보기" icon={<FileText size={16}/>} />
+        <button type="button" className="legacy-action available" onClick={() => onViewLogs("server")} disabled={logsChecking}>
+          <FileText size={16}/>{logsChecking ? "읽는 중..." : "서버 로그 보기"}
+        </button>
+        <button type="button" className="legacy-action available" onClick={() => onViewLogs("tunnel")} disabled={logsChecking}>
+          <FileText size={16}/>터널 로그 보기
+        </button>
         <PendingButton label="업데이트 확인" icon={<Download size={16}/>} />
         <PendingButton label="GitHub 저장소 열기" icon={<ExternalLink size={16}/>} />
         <PendingButton label="개발자 정보" icon={<Settings2 size={16}/>} />
       </div>
-      <p className="legacy-footnote">로컬 상태 확인만 현재 작동합니다. 위의 진단 기록은 실제 서버 로그가 아닙니다.</p>
+      <p className="legacy-footnote">서버·터널 로그는 설치된 CLI 기록을 읽어오는 실제 로그 미리보기입니다. 안전을 위해 민감한 로그 행은 숨기며, 공개 상태·업데이트 항목은 아직 연동 예정입니다.</p>
+      {logResult && <div className="legacy-log-viewer" role="region" aria-label="C2C CLI 로그 미리보기">
+        <div className="legacy-log-caption">{logResult.component === "server" ? "서버 로그" : "터널 로그"} · {logResult.details}</div>
+        {logResult.available && logResult.content
+          ? <pre>{logResult.content}</pre>
+          : <p className="legacy-footnote">{logResult.details}</p>}
+        {logResult.truncated && <p className="legacy-footnote">최신 내용 일부만 표시하고 있습니다.</p>}
+      </div>}
     </div>
   </section>;
 }
