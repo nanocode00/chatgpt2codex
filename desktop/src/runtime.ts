@@ -154,3 +154,17 @@ export async function inspectCredentialBackup(): Promise<CredentialBackupReport>
 export async function createCredentialBackup(): Promise<CredentialBackupReport> {
   return invoke<CredentialBackupReport>("create_credential_backup");
 }
+
+export interface RestoreRehearsalReport {
+  passed: boolean;
+  restoredFiles: number;
+  oauthClients: number;
+  originalFilesModified: boolean;
+  temporaryDirectoryRetained: boolean;
+  details: string;
+}
+
+/** Does not restore into any running or installed WinForms runtime. */
+export async function rehearseCredentialRestore(): Promise<RestoreRehearsalReport> {
+  return invoke<RestoreRehearsalReport>("rehearse_credential_restore");
+}
