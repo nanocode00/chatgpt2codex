@@ -75,7 +75,7 @@ fn public_connector_url(endpoint: &str) -> Option<String> {
     Some(format!("https://{host}/mcp"))
 }
 
-fn inspect_local_cli(instance: String) -> CliInspection {
+pub(crate) fn inspect_local_cli(instance: String) -> CliInspection {
     let Some((node, cli)) = installed_windows_cli() else {
         return unavailable(instance, "설치된 Windows C2C CLI를 찾지 못했습니다. 현재 Windows 공식 설치본에서만 지원합니다.");
     };
