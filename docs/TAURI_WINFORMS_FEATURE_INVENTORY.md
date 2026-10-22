@@ -22,7 +22,7 @@ to reflect the installed WinForms preferences.
 | Owner Token 자동 생성 | 연결 → Owner Token | Disabled; no token rotation |
 | 로컬 상태 확인 | 진단 → 진단 도구 | **Working**, reuses native health probe |
 | 공개 상태 열기 | 진단 → 진단 도구 | Disabled until tunnel health contract |
-| 서버·터널 로그 보기 | 진단 → 진단 도구 | **Working**, installed CLI last 80 lines, secret-bearing lines hidden, bounded output |
+| 서버·터널 로그 보기 | 진단 → 진단 도구 | **Working**, CLI-managed logs first; fixed WinForms temp-log fallback for healthy default instance, with stale-file warning, bounded/redacted output |
 | 업데이트 확인 | 진단 → 진단 도구 / 설정 | Disabled |
 | GitHub 저장소 / 개발자 정보 | 진단 → 진단 도구 | Disabled pending trusted URL policy |
 | 언어 | 설정 → Windows 런처 설정 | Disabled, default selection not implied |
