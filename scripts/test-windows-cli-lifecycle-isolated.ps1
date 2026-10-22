@@ -1,5 +1,7 @@
 # Explicitly destructive only to ephemeral, scoped processes on a fresh GitHub-hosted
 # Windows runner. Never invoke from a user's installed C2C environment.
+[CmdletBinding()]
+param([string]$NodeExecutable = "", [string]$CliEntrypoint = "")
 $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $false
 if ($env:GITHUB_ACTIONS -ne "true" -or $env:CI -ne "true" -or
@@ -9,8 +11,20 @@ if ($env:GITHUB_ACTIONS -ne "true" -or $env:CI -ne "true" -or
 
 $repo = Resolve-Path (Join-Path $PSScriptRoot "..")
 $cli = Join-Path $repo "dist\cli.js"
-if (-not (Test-Path -LiteralPath $cli)) { throw "Build dist/cli.js before lifecycle smoke" }
 $node = (Get-Command node.exe -ErrorAction Stop).Source
+if ($NodeExecutable -or $CliEntrypoint) {
+    if (-not $NodeExecutable -or -not $CliEntrypoint) { throw "Both packaged inputs required" }
+    $packRoot = Join-Path $repo "desktop/src-tauri/target/debug/c2c-runtime"
+    $fixedNode = Join-Path $packRoot "bin/node.exe"
+    $fixedCli = Join-Path $packRoot "dist/cli.js"
+    if (-not [string]::Equals([IO.Path]::GetFullPath($NodeExecutable), [IO.Path]::GetFullPath($fixedNode), [StringComparison]::OrdinalIgnoreCase) -or
+        -not [string]::Equals([IO.Path]::GetFullPath($CliEntrypoint), [IO.Path]::GetFullPath($fixedCli), [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to use anything other than the fixed packaged preview CLI"
+    }
+    $node = $fixedNode
+    $cli = $fixedCli
+}
+if (-not (Test-Path -LiteralPath $cli)) { throw "Missing CLI executable" }
 $root = Join-Path $env:RUNNER_TEMP ("c2c-cli-isolated-" + [Guid]::NewGuid().ToString("N"))
 $fake = $null
 $instance = "ciisolated"
