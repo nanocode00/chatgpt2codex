@@ -77,8 +77,8 @@ fn inspect_public_tunnel(instance: String) -> PublicTunnelHealth {
         );
     };
 
-    // Native Rust HTTPS request. No Owner Token, no redirects, no proxy env
-    // override and no arbitrary URL from JavaScript. A DNS failure after
+    // Native Rust HTTPS request. No Owner Token, no redirects, and no
+    // arbitrary URL from JavaScript. A DNS failure after
     // laptop sleep is a real *public* failure even if localhost is healthy.
     let agent = ureq::AgentBuilder::new()
         .redirects(0)
