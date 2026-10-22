@@ -136,11 +136,19 @@ otherwise the UI warns that the recorded legacy tunnel address has not
 been externally verified and may have changed. This reads existing state; it does not
 start Cloudflare, edit a registered ChatGPT plugin or update a hostname.
 
-**Diagnostics → 서버 로그 보기 / 터널 로그 보기:** The fixed installed
-Node + CLI run `logs --instance default --component server|tunnel --lines
-80`, with an eight-to-nine-second timeout. Only a bounded snippet reaches
-the React WebView; likely token/authorization/secret-bearing lines are
-hidden. These are actual CLI log files, not synthesized health events.
+**Diagnostics → 서버 로그 보기 / 터널 로그 보기:** First run the fixed
+installed Node + CLI `logs --instance default --component server|tunnel
+--lines 80`, with a nine-second timeout. Legacy WinForms launcher instances
+may have healthy CLI state but **no recorded log paths**. In that case, if
+`default` currently passes installed CLI health, read only the *fixed*
+WinForms PowerShell log names under `%TEMP%\\chatgpt2codex`:
+`server.out.log`, `server.err.log`, `cloudflared.out.log`, or
+`cloudflared.err.log`. Each file is tailed with a 64 KiB maximum read;
+a 16 KiB/80-line preview is shown, with likely token-bearing lines hidden.
+This **legacy fallback is not tied to a specific runtime PID**, so its UI
+message warns that files may be from an earlier execution. If no actual
+log file is available, the UI reports that instead of inventing entries.
+Only one known directory and four constant filenames are allowed.
 Do not use the log viewer as a secure secret classifier: sensitive data
 in unusual formats may still appear. Do not paste logs into issue comments
 without inspecting them.
