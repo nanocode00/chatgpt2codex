@@ -647,37 +647,61 @@ mod fixture_cli_restore_e2e {
         const SCRIPT: &str = r#"
 $ErrorActionPreference = 'Stop'
 $path = $env:C2C_F3_HOME
-$me = [Security.Principal.WindowsIdentity]::GetCurrent().User
-$system = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
-if ($env:C2C_F3_VERIFY_ONLY -ne 'true') {
-    $acl = [Security.AccessControl.DirectorySecurity]::new()
-    $acl.SetAccessRuleProtection($true, $false)
-    foreach ($who in @($me, $system)) {
-        $rule = [Security.AccessControl.FileSystemAccessRule]::new($who, 'FullControl', 'ContainerInherit, ObjectInherit', 'None', 'Allow')
-        $acl.AddAccessRule($rule)
+$stage = 'identity'
+try {
+    $me = [Security.Principal.WindowsIdentity]::GetCurrent().User
+    $system = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+    if ($env:C2C_F3_VERIFY_ONLY -ne 'true') {
+        $stage = 'read-acl'
+        # Start with the filesystem's existing descriptor rather than an
+        # ownerless DirectorySecurity object: Set-Acl may reject that object.
+        $acl = Get-Acl -LiteralPath $path
+        $stage = 'restrict-acl'
+        $acl.SetAccessRuleProtection($true, $false)
+        foreach ($existing in @($acl.Access)) {
+            $acl.RemoveAccessRuleSpecific($existing)
+        }
+        $acl.SetOwner($me)
+        foreach ($who in @($me, $system)) {
+            $rule = [Security.AccessControl.FileSystemAccessRule]::new($who, 'FullControl', 'ContainerInherit, ObjectInherit', 'None', 'Allow')
+            $acl.AddAccessRule($rule)
+        }
+        $stage = 'apply-acl'
+        Set-Acl -LiteralPath $path -AclObject $acl
     }
-    Set-Acl -LiteralPath $path -AclObject $acl
-}
-$items = @($path) + @(Get-ChildItem -LiteralPath $path -Recurse -Force | ForEach-Object FullName)
-foreach ($item in $items) {
-    $acl = Get-Acl -LiteralPath $item
-    if ($item -eq $path -and -not $acl.AreAccessRulesProtected) { throw 'Inherited ACL on fixture home' }
-    foreach ($ace in $acl.Access) {
-        if ($ace.AccessControlType -ne 'Allow') { continue }
-        $sid = $ace.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
-        if ($sid -ne $me.Value -and $sid -ne $system.Value) {
-            throw 'Fixture ACL grants another identity access'
+    $stage = 'verify-acl'
+    $items = @($path) + @(Get-ChildItem -LiteralPath $path -Recurse -Force | ForEach-Object FullName)
+    foreach ($item in $items) {
+        $acl = Get-Acl -LiteralPath $item
+        if ($item -eq $path -and -not $acl.AreAccessRulesProtected) { throw 'Inherited ACL on fixture home' }
+        foreach ($ace in $acl.Access) {
+            if ($ace.AccessControlType -ne 'Allow') { continue }
+            $sid = $ace.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+            if ($sid -ne $me.Value -and $sid -ne $system.Value) {
+                throw 'Fixture ACL grants another identity access'
+            }
         }
     }
+} catch {
+    # Fixed stage names only: no Windows user names, paths, token hashes or
+    # exception messages are permitted in CI logs.
+    [Console]::Out.WriteLine("F3-ACL-ERROR:$stage")
+    exit 1
 }
 "#;
-        let status = Command::new("powershell.exe")
+        let output = Command::new("powershell.exe")
             .args(["-NoProfile", "-NonInteractive", "-Command", SCRIPT])
             .env("C2C_F3_HOME", home)
             .env("C2C_F3_VERIFY_ONLY", if verify_only { "true" } else { "false" })
-            .stdout(Stdio::null()).stderr(Stdio::null())
-            .status().expect("Windows ACL tool unavailable");
-        assert!(status.success(), "fixture home/files must be owner-and-SYSTEM only");
+            .output().expect("Windows ACL tool unavailable");
+        if !output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stage = ["identity", "read-acl", "restrict-acl", "apply-acl", "verify-acl"]
+                .iter()
+                .find(|name| stdout.contains(&format!("F3-ACL-ERROR:{name}")))
+                .copied().unwrap_or("unknown");
+            panic!("fixture home/files ACL restriction failed at safe stage: {stage}");
+        }
     }
 
     fn restored_fixture_file(path: &Path, entry: &BackupEntry) {
