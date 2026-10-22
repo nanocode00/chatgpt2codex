@@ -64,14 +64,18 @@ fn installed_cli_logs(instance: String, component: String) -> CliLogPreview {
     let Some((node, cli)) = installed_windows_cli() else {
         return result(instance, component, "Windows C2C 설치본에서 CLI를 찾지 못했습니다.");
     };
-    let mut child = match Command::new(node)
-        .arg(cli)
+    let mut command = Command::new(node);
+    command.arg(cli)
         .args(["logs", "--instance", &instance, "--component", &component, "--lines", "80"])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
+        .stderr(Stdio::null());
+    #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    let mut child = match command.spawn() {
         Ok(child) => child,
         Err(_) => return result(instance, component, "CLI 로그 조회를 시작하지 못했습니다."),
     };
