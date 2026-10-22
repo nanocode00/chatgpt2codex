@@ -104,9 +104,12 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
   </>;
 }
 
-export function LegacyConnectionControls({ publicConnector, publicState, onCopyPublic, onRefreshPublic, publicCopied, checking }: {
+export function LegacyConnectionControls({ publicConnector, publicState, publicVerified, publicOffline, publicNotice, onCopyPublic, onRefreshPublic, publicCopied, checking }: {
   publicConnector: string | null;
   publicState: string;
+  publicVerified: boolean;
+  publicOffline: boolean;
+  publicNotice: string;
   onCopyPublic: () => void;
   onRefreshPublic: () => void;
   publicCopied: boolean;
@@ -121,7 +124,14 @@ export function LegacyConnectionControls({ publicConnector, publicState, onCopyP
         <FormRow label="본인 소유 고정 도메인 (선택)" help="빈 값일 때 Quick Tunnel을 사용하던 기존 설정을 이관할 예정입니다.">
           <LockedField placeholder="터널 설정을 조회하지 않았습니다"/>
         </FormRow>
-        <FormRow label="공개 커넥터 URL" help={publicState}>
+        <div className={"tunnel-status " + (publicVerified ? "healthy" : publicOffline ? "unreachable" : "")} role="status">
+          <Globe2 size={17}/>
+          <div><strong>{publicVerified ? "공개 터널 정상" : publicOffline ? "공개 터널 연결 실패" : "공개 연결 미확인"}</strong>
+            <p>{publicState}</p>
+          </div>
+        </div>
+        {publicNotice && <p className="tunnel-warning" role="alert">{publicNotice}</p>}
+        <FormRow label="공개 커넥터 URL" help={publicOffline ? "해당 주소로 현재 외부 연결이 확인되지 않습니다. 재연결 뒤 다시 조회하세요." : publicState}>
           <input className="legacy-field" type="text" readOnly
             value={publicConnector ?? ""} placeholder="CLI에서 확인된 공개 주소 없음"
             aria-label="CLI에서 확인한 공개 MCP 주소" />
@@ -130,11 +140,11 @@ export function LegacyConnectionControls({ publicConnector, publicState, onCopyP
           <button type="button" className="legacy-action available" onClick={onRefreshPublic} disabled={checking}>
             <Globe2 size={16}/>{checking ? "조회 중..." : "공개 상태 확인"}
           </button>
-          <button type="button" className="legacy-action available" onClick={onCopyPublic} disabled={!publicConnector}>
+          <button type="button" className="legacy-action available" onClick={onCopyPublic} disabled={!publicConnector || publicOffline}>
             <Copy size={16}/>{publicCopied ? "복사 완료" : "공개 커넥터 URL 복사"}
           </button>
         </div>
-        <p className="legacy-footnote">공개 주소는 설치된 CLI가 정상이라고 보고한 HTTPS 연결에서만 가져옵니다. Quick Tunnel 재시작 시 주소가 바뀌므로 새로 조회하세요. 이 화면에서 터널을 시작·종료하지는 않습니다.</p>
+        <p className="legacy-footnote">공개 상태는 로컬 Health와 별도로 Quick Tunnel의 HTTPS /healthz를 직접 검사합니다. 절전 복귀 후 자동 재검사하지만 터널을 시작·종료하거나 ChatGPT의 주소를 자동 변경하지 않습니다.</p>
       </div>
     </section>
     <section className="panel page-panel legacy-spaced">
@@ -155,8 +165,11 @@ export function LegacyConnectionControls({ publicConnector, publicState, onCopyP
   </>;
 }
 
-export function LegacyDiagnosticsControls({ onLocalHealth, checking, onViewLogs, logsChecking, logResult }: {
+export function LegacyDiagnosticsControls({ onLocalHealth, checking, onPublicHealth, tunnelChecking, tunnelStatus, onViewLogs, logsChecking, logResult }: {
   onLocalHealth: () => void; checking: boolean;
+  onPublicHealth: () => void;
+  tunnelChecking: boolean;
+  tunnelStatus: string;
   onViewLogs: (component: CliLogComponent) => void;
   logsChecking: boolean;
   logResult: CliLogPreview | null;
@@ -169,7 +182,9 @@ export function LegacyDiagnosticsControls({ onLocalHealth, checking, onViewLogs,
         <button type="button" className="legacy-action available" onClick={onLocalHealth} disabled={checking}>
           <Wifi size={16}/>{checking ? "확인 중..." : "로컬 상태 확인"}
         </button>
-        <PendingButton label="공개 상태 확인" icon={<Globe2 size={16}/>} />
+        <button type="button" className="legacy-action available" onClick={onPublicHealth} disabled={tunnelChecking}>
+          <Globe2 size={16}/>{tunnelChecking ? "확인 중..." : "공개 상태 확인"}
+        </button>
         <button type="button" className="legacy-action available" onClick={() => onViewLogs("server")} disabled={logsChecking}>
           <FileText size={16}/>{logsChecking ? "읽는 중..." : "서버 로그 보기"}
         </button>
@@ -180,7 +195,8 @@ export function LegacyDiagnosticsControls({ onLocalHealth, checking, onViewLogs,
         <PendingButton label="GitHub 저장소 열기" icon={<ExternalLink size={16}/>} />
         <PendingButton label="개발자 정보" icon={<Settings2 size={16}/>} />
       </div>
-      <p className="legacy-footnote">서버·터널 로그는 설치된 CLI 기록을 읽어오는 실제 로그 미리보기입니다. 안전을 위해 민감한 로그 행은 숨기며, 공개 상태·업데이트 항목은 아직 연동 예정입니다.</p>
+      <p className="legacy-footnote">공개 Quick Tunnel Health는 독립적으로 검사합니다. 로그는 설치된 CLI 및 기존 WinForms 임시 기록에서 읽으며 민감한 행을 숨깁니다. 업데이트 기능은 아직 연동 예정입니다.</p>
+      <p className="legacy-footnote">공개 연결: {tunnelStatus}</p>
       {logResult && <div className="legacy-log-viewer" role="region" aria-label="C2C CLI 로그 미리보기">
         <div className="legacy-log-caption">{logResult.component === "server" ? "서버 로그" : "터널 로그"} · {logResult.details}</div>
         {logResult.available && logResult.content
