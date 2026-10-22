@@ -342,6 +342,132 @@ pub async fn create_credential_backup() -> Result<CredentialBackupReport, String
     }).await.map_err(|_| "인증정보 백업 생성 실패".to_string())?
 }
 
+
+/// Outcome metadata only: no decrypted Owner Token hashes, OAuth credentials,
+/// client identifiers, settings contents, or absolute source paths leave Rust.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreRehearsalReport {
+    pub passed: bool,
+    pub restored_files: usize,
+    pub oauth_clients: usize,
+    pub original_files_modified: bool,
+    pub temporary_directory_retained: bool,
+    pub details: String,
+}
+
+struct EncryptedDrillDirectory {
+    path: PathBuf,
+}
+
+impl Drop for EncryptedDrillDirectory {
+    fn drop(&mut self) {
+        // This directory contains only *DPAPI-encrypted* shadow copies.
+        // If the process crashes, no plaintext credentials remain on disk.
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+fn drill_root(preview: &Path) -> Result<EncryptedDrillDirectory, String> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NONCE: AtomicU64 = AtomicU64::new(0);
+
+    let parent = preview.join("migration").join("restore-drills");
+    fs::create_dir_all(&parent)
+        .map_err(|_| "격리 복원 디렉터리를 준비하지 못했습니다.")?;
+    // Deny the simplest preexisting symlink/junction substitution.
+    if fs::symlink_metadata(&parent).map_err(|_| "격리 복원 경로를 확인하지 못했습니다.")?.file_type().is_symlink() {
+        return Err("격리 복원 폴더가 링크이므로 안전하게 사용할 수 없습니다.".into());
+    }
+    for _ in 0..8 {
+        let since_epoch = SystemTime::now().duration_since(UNIX_EPOCH)
+            .map_err(|_| "시스템 시간이 유효하지 않습니다.")?;
+        let unique = format!("drill-{}-{}-{}", std::process::id(),
+            since_epoch.as_nanos(), NONCE.fetch_add(1, Ordering::Relaxed));
+        let path = parent.join(unique);
+        match fs::create_dir(&path) {
+            Ok(()) => return Ok(EncryptedDrillDirectory { path }),
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(_) => return Err("격리 복원 작업 공간을 만들지 못했습니다.".into()),
+        }
+    }
+    Err("중복되지 않는 격리 복원 경로를 확보하지 못했습니다.".into())
+}
+
+/// Write the restored entry as DPAPI-protected ciphertext in a *dedicated*
+/// fixture file, read it back, decrypt in memory, and verify its bytes/hash.
+/// Never write a plaintext OAuth or owner-token file even temporarily.
+fn shadow_restore_one(dir: &Path, entry: &BackupEntry) -> Result<(), String> {
+    let (safe_filename, bound) = match entry.name.as_str() {
+        "owner-token.json" => ("owner-token.shadow.dpapi", MAX_SETTINGS_BYTES),
+        "oauth.json" => ("oauth.shadow.dpapi", MAX_STATE_BYTES),
+        "settings.ini" => ("settings.shadow.dpapi", MAX_SETTINGS_BYTES),
+        "selected-project.txt" => ("selected-project.shadow.dpapi", MAX_SETTINGS_BYTES),
+        _ => return Err("허용되지 않은 복원 파일명입니다.".into()),
+    };
+    if entry.data.len() as u64 > bound || digest(&entry.data) != entry.sha256 {
+        return Err("복원 파일의 체크섬 또는 크기가 일치하지 않습니다.".into());
+    }
+    let protected = dpapi::encrypt(&entry.data)?;
+    let path = dir.join(safe_filename);
+    let mut file = OpenOptions::new().write(true).create_new(true).open(&path)
+        .map_err(|_| "격리된 암호화 복원 파일을 생성하지 못했습니다.")?;
+    file.write_all(&protected).and_then(|_| file.sync_all())
+        .map_err(|_| "암호화 복원 파일을 기록하지 못했습니다.")?;
+    drop(file);
+    let reread = read_limited(&path, bound + 4096)?
+        .ok_or("격리 복원 파일을 다시 열지 못했습니다.")?;
+    if reread != protected {
+        return Err("격리 복원 파일이 기록 중 변경됐습니다.".into());
+    }
+    let restored = dpapi::decrypt(&reread)?;
+    if restored.len() != entry.data.len() || digest(&restored) != entry.sha256 {
+        return Err("복원 파일을 복호화한 결과가 원본 백업과 다릅니다.".into());
+    }
+    Ok(())
+}
+
+fn restore_rehearsal_from_archive(preview: &Path) -> Result<RestoreRehearsalReport, String> {
+    // Does not access live WinForms sources. Any subsequent updates to
+    // oauth.json after the snapshot are explicitly out of scope.
+    let bytes = read_limited(&archive_path(preview), MAX_ARCHIVE_BYTES)?
+        .ok_or("복원할 암호화 인증정보 백업을 찾지 못했습니다.")?;
+    let payload = decode_encrypted(&bytes)?;
+    let clients = validate_payload(&payload)?;
+    let temporary = drill_root(preview)?;
+
+    shadow_restore_one(&temporary.path, &payload.owner)?;
+    shadow_restore_one(&temporary.path, &payload.oauth)?;
+    shadow_restore_one(&temporary.path, &payload.settings)?;
+    let mut count = 3;
+    if let Some(project) = &payload.selected_project {
+        shadow_restore_one(&temporary.path, project)?;
+        count += 1;
+    }
+
+    // Existing serialized backup validates format once more after a complete
+    // encrypted write/read roundtrip; nothing is imported into live CLI.
+    validate_payload(&payload)?;
+    drop(temporary); // guaranteed best-effort cleanup before success result
+
+    Ok(RestoreRehearsalReport {
+        passed: true,
+        restored_files: count,
+        oauth_clients: clients,
+        original_files_modified: false,
+        temporary_directory_retained: false,
+        details: "격리된 임시 폴더에 DPAPI 암호화 파일을 복원한 뒤 다시 읽고 해시·형식을 확인했습니다. 평문 인증 파일은 디스크에 쓰지 않았으며 기존 WinForms 및 MCP 설정을 변경하지 않았습니다.".into(),
+    })
+}
+
+#[tauri::command]
+pub async fn rehearse_credential_restore() -> Result<RestoreRehearsalReport, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let (_, _, preview) = os_paths()?;
+        restore_rehearsal_from_archive(&preview)
+    }).await.map_err(|_| "인증정보 격리 복원 리허설 작업이 실패했습니다.".to_owned())?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -384,6 +510,65 @@ mod tests {
         fs::write(archive_path(&preview), tampered).unwrap();
         assert!(inspect_backup(&preview).is_err());
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn encrypted_shadow_restore_isolated_and_cleaned_without_live_writes() {
+        let root = std::env::temp_dir().join(format!("c2c-restore-drill-{}", std::process::id()));
+        if root.exists() { fs::remove_dir_all(&root).unwrap(); }
+        let (local, profile, preview) = fixture(&root);
+        let original_oauth = fs::read(legacy_state(&profile, "oauth.json")).unwrap();
+        let original_owner = fs::read(legacy_state(&profile, "owner-token.json")).unwrap();
+        let original_settings = fs::read(local.join(LEGACY_APP_DIR).join("settings.ini")).unwrap();
+
+        save_backup(&local, &profile, &preview).unwrap();
+        // An independent, encrypted file read/decrypt/restore roundtrip.
+        let report = restore_rehearsal_from_archive(&preview).unwrap();
+        assert!(report.passed);
+        assert_eq!(report.restored_files, 3);
+        assert_eq!(report.oauth_clients, 1);
+        assert!(!report.original_files_modified);
+        assert!(!report.temporary_directory_retained);
+        let drill_base = preview.join("migration").join("restore-drills");
+        assert_eq!(fs::read_dir(&drill_base).unwrap().count(), 0);
+        assert_eq!(fs::read(legacy_state(&profile, "oauth.json")).unwrap(), original_oauth);
+        assert_eq!(fs::read(legacy_state(&profile, "owner-token.json")).unwrap(), original_owner);
+        assert_eq!(fs::read(local.join(LEGACY_APP_DIR).join("settings.ini")).unwrap(), original_settings);
+        // The first archive also remains valid and unchanged.
+        assert!(inspect_backup(&preview).unwrap().verified);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn tampered_archive_refuses_restore_and_does_not_create_shadow_dir() {
+        let root = std::env::temp_dir().join(format!("c2c-restore-deny-{}", std::process::id()));
+        if root.exists() { fs::remove_dir_all(&root).unwrap(); }
+        let (local, profile, preview) = fixture(&root);
+        save_backup(&local, &profile, &preview).unwrap();
+        let archive_path = archive_path(&preview);
+        let mut archive = fs::read(&archive_path).unwrap();
+        *archive.last_mut().unwrap() ^= 0x1b;
+        fs::write(archive_path, archive).unwrap();
+        assert!(restore_rehearsal_from_archive(&preview).is_err());
+        assert!(!preview.join("migration").join("restore-drills").exists());
+        assert!(legacy_state(&profile, "oauth.json").is_file());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn shadow_filename_allowlist_rejects_traversal_and_mismatched_digest() {
+        let root = std::env::temp_dir().join(format!("c2c-restore-path-test-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let mut record = secure_entry("../owner-token.json", b"secret-fixture".to_vec());
+        assert!(shadow_restore_one(&root, &record).is_err());
+        record.name = "owner-token.json".into();
+        record.sha256 = "forged".into();
+        assert!(shadow_restore_one(&root, &record).is_err());
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 0);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
