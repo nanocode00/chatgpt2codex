@@ -109,7 +109,9 @@ function App() {
   const publicState = !cliInspection
     ? "설치된 CLI에서 공개 연결 정보를 확인합니다."
     : publicConnector
-      ? "CLI가 공개 Health를 정상으로 확인했습니다. 주소가 변경되면 다시 조회하세요."
+      ? (cliInspection?.publicHealthy === true
+        ? "설치된 CLI가 공개 Health를 정상으로 확인했습니다. 주소가 변경되면 다시 조회하세요."
+        : "CLI에 기록된 공개 주소입니다. 현재 외부 연결은 미검증이므로 재시작 후 주소가 바뀌지 않았는지 확인하세요.")
       : cliInspection.available
         ? "공개 연결이 확인되지 않았습니다. 터널이나 CLI 상태를 확인해 주세요."
         : cliInspection.details;
