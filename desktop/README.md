@@ -23,8 +23,9 @@ install, start, stop, kill, or migrate an existing C2C MCP runtime.
   **does not change the real CLI's port or server configuration**.
 - **Connected WinForms-era controls (first safe slice):** the Connections
   screen can re-query public health from the installed CLI and copy its
-  **HTTPS public /mcp URL only when CLI health reports healthy + live tunnel
-  + publicHealthy**. Diagnostics can request the last 80 server/tunnel log
+  **HTTPS public /mcp URL from a healthy CLI instance**. It explicitly
+  distinguishes a verified public tunnel from a legacy WinForms-managed
+  tunnel with unknown public health. Diagnostics can request the last 80 server/tunnel log
   lines through the installed CLI; output is length-limited and lines
   containing likely credentials are redacted. Management `앱 종료` now
   closes only the Tauri preview (never the MCP server). All destructive
@@ -129,9 +130,10 @@ Node CLI comes later.
 **Connections → 공개 상태 확인 / 공개 커넥터 URL 복사:** The fixed
 installed CLI `health --instance default` returns an HTTPS health endpoint
 only after it checks the current Cloudflare tunnel. We derive a copyable
-`https://hostname/mcp` only if the CLI reports `healthy=true`,
-`tunnelAlive=true` and `publicHealthy=true` and the URL is a strict
-HTTPS host ending in `/healthz`. This reads existing state; it does not
+`https://hostname/mcp` only if the CLI reports local `healthy=true` and a strict HTTPS host
+ending in `/healthz`. We show **verified** only when `publicHealthy=true`;
+otherwise the UI warns that the recorded legacy tunnel address has not
+been externally verified and may have changed. This reads existing state; it does not
 start Cloudflare, edit a registered ChatGPT plugin or update a hostname.
 
 **Diagnostics → 서버 로그 보기 / 터널 로그 보기:** The fixed installed
