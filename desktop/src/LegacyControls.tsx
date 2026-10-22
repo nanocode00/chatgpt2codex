@@ -1,19 +1,20 @@
 import type { ReactNode } from "react";
+import type { CliLogComponent, CliLogPreview } from "./runtime";
 import {
   ArrowRight, Cloud, Copy, Download, ExternalLink, FileText, FolderOpen,
   Globe2, HeartPulse, KeyRound, Monitor, Play, Power, RefreshCcw,
   RotateCw, Settings2, ShieldCheck, Square, TerminalSquare, Wifi
 } from "lucide-react";
 
-function SectionHeading({ title, description, icon }: {
-  title: string; description: string; icon: ReactNode;
+function SectionHeading({ title, description, icon, status = "연동 예정" }: {
+  title: string; description: string; icon: ReactNode; status?: string;
 }) {
   return <div className="panel-heading legacy-heading">
     <div className="panel-title">
       <span className="icon-tile">{icon}</span>
       <div><h2>{title}</h2><p>{description}</p></div>
     </div>
-    <span className="legacy-pending">연동 예정</span>
+    <span className="legacy-pending">{status}</span>
   </div>;
 }
 
@@ -48,8 +49,9 @@ function LockedField({ placeholder = "CLI 설정을 연결한 후 표시됩니�
     aria-label={placeholder} />;
 }
 
-export function ManagementControls({ onConnections, onSettings }: {
+export function ManagementControls({ onConnections, onSettings, onExit, exitError }: {
   onConnections: () => void; onSettings: () => void;
+  onExit: () => void; exitError: string;
 }) {
   return <>
     <section className="panel page-panel">
@@ -85,14 +87,15 @@ export function ManagementControls({ onConnections, onSettings }: {
       </div>
     </section>
     <section className="panel page-panel legacy-spaced">
-      <SectionHeading title="앱·트레이" icon={<Monitor size={18}/>}
+      <SectionHeading title="앱·트레이" icon={<Monitor size={18}/>} status="일부 연결"
         description="작업 표시줄 및 트레이에서의 앱 동작을 관리합니다." />
       <div className="legacy-body">
         <div className="legacy-actions">
           <PendingButton label="트레이로 숨기기" icon={<Monitor size={16}/>} />
-          <PendingButton label="앱 종료" icon={<Power size={16}/>} />
+          <button type="button" className="legacy-action available" onClick={onExit}><Power size={16}/>앱 종료</button>
         </div>
-        <p className="legacy-footnote">트레이 기능은 아직 구현되지 않았습니다. 현재 프리뷰 창은 일반 창 닫기 기능을 사용합니다.</p>
+        <p className="legacy-footnote">앱 종료는 이 프리뷰 창만 닫으며 기존 MCP 서버를 중지하지 않습니다. 트레이 숨기기는 추후 연결합니다.</p>
+        {exitError && <p role="alert" className="form-error">{exitError}</p>}
         <button type="button" className="text-action legacy-link" onClick={onSettings}>
           시작 옵션 및 설정 보기 <ArrowRight size={16}/>
         </button>
