@@ -104,21 +104,37 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
   </>;
 }
 
-export function LegacyConnectionControls() {
+export function LegacyConnectionControls({ publicConnector, publicState, onCopyPublic, onRefreshPublic, publicCopied, checking }: {
+  publicConnector: string | null;
+  publicState: string;
+  onCopyPublic: () => void;
+  onRefreshPublic: () => void;
+  publicCopied: boolean;
+  checking: boolean;
+}) {
   return <>
     <section className="panel page-panel legacy-spaced">
-      <SectionHeading title="외부 ChatGPT 연결" icon={<Cloud size={18}/>}
+      <SectionHeading title="외부 ChatGPT 연결" icon={<Cloud size={18}/>} status="일부 연결"
         description="Cloudflare Quick Tunnel / Named Tunnel 구성" />
       <div className="legacy-body">
         <DisabledChoice label="ChatGPT 웹 커넥터 사용" description="활성화 여부와 실제 터널 상태는 CLI 통합 후 조회합니다."/>
         <FormRow label="본인 소유 고정 도메인 (선택)" help="빈 값일 때 Quick Tunnel을 사용하던 기존 설정을 이관할 예정입니다.">
           <LockedField placeholder="터널 설정을 조회하지 않았습니다"/>
         </FormRow>
+        <FormRow label="공개 커넥터 URL" help={publicState}>
+          <input className="legacy-field" type="text" readOnly
+            value={publicConnector ?? ""} placeholder="CLI에서 확인된 공개 주소 없음"
+            aria-label="CLI에서 확인한 공개 MCP 주소" />
+        </FormRow>
         <div className="legacy-actions">
-          <PendingButton label="공개 상태 열기" icon={<Globe2 size={16}/>} />
-          <PendingButton label="공개 커넥터 URL 복사" icon={<Copy size={16}/>} />
+          <button type="button" className="legacy-action available" onClick={onRefreshPublic} disabled={checking}>
+            <Globe2 size={16}/>{checking ? "조회 중..." : "공개 상태 확인"}
+          </button>
+          <button type="button" className="legacy-action available" onClick={onCopyPublic} disabled={!publicConnector}>
+            <Copy size={16}/>{publicCopied ? "복사 완료" : "공개 커넥터 URL 복사"}
+          </button>
         </div>
-        <p className="legacy-footnote">표시 중인 로컬 URL과 실제 공개 터널 URL은 다릅니다. 고정 도메인과 Quick Tunnel은 이 화면에서 아직 변경할 수 없습니다.</p>
+        <p className="legacy-footnote">공개 주소는 설치된 CLI가 정상이라고 보고한 HTTPS 연결에서만 가져옵니다. Quick Tunnel 재시작 시 주소가 바뀌므로 새로 조회하세요. 이 화면에서 터널을 시작·종료하지는 않습니다.</p>
       </div>
     </section>
     <section className="panel page-panel legacy-spaced">
