@@ -770,20 +770,25 @@ foreach ($item in $items) {
             thread::sleep(Duration::from_millis(150));
         }
         let action = format!("{base}/actions/agent-guide");
-        assert!(matches!(ureq::post(&action).send_json(json!({})), Err(ureq::Error::Status(401, _))));
+        assert!(matches!(ureq::post(&action).set("content-type", "application/json")
+            .send_string("{}"), Err(ureq::Error::Status(401, _))));
         assert!(matches!(ureq::post(&action).set("authorization", "Bearer invalid-fixture")
-            .send_json(json!({})), Err(ureq::Error::Status(401, _))));
+            .set("content-type", "application/json").send_string("{}"),
+            Err(ureq::Error::Status(401, _))));
         assert!(ureq::post(&action).set("authorization", &format!("Bearer {bearer}"))
-            .send_json(json!({})).is_ok(), "restored owner hash must authenticate");
+            .set("content-type", "application/json").send_string("{}").is_ok(),
+            "restored owner hash must authenticate");
         let mcp = format!("{base}/mcp");
         let request = json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
             "protocolVersion":"2025-06-18","capabilities":{},
             "clientInfo":{"name":"c2c-f3-fixture","version":"1.0"}}});
         assert!(matches!(ureq::post(&mcp).set("accept", "application/json, text/event-stream")
-            .send_json(request.clone()), Err(ureq::Error::Status(401, _))));
+            .set("content-type", "application/json").send_string(&request.to_string()),
+            Err(ureq::Error::Status(401, _))));
         let authorized = ureq::post(&mcp).set("authorization", &format!("Bearer {oauth_token}"))
             .set("accept", "application/json, text/event-stream")
-            .send_json(request).expect("restored OAuth hash must authorize isolated MCP");
+            .set("content-type", "application/json")
+            .send_string(&request.to_string()).expect("restored OAuth hash must authorize isolated MCP");
         assert!(authorized.status() < 300);
         assert_eq!(fs::read(archive_path(&archive_preview)).unwrap(), archive_before);
         assert_eq!(fs::read(legacy_state(&source_profile,"oauth.json")).unwrap(), oauth);
