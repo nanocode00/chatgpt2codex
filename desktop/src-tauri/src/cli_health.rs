@@ -134,10 +134,11 @@ fn inspect_local_cli(instance: String) -> CliInspection {
         healthy,
         tunnel_alive: payload["tunnelAlive"].as_bool(),
         public_healthy: payload["publicHealthy"].as_bool(),
-        public_connector: if healthy
-            && payload["tunnelAlive"] == true
-            && payload["publicHealthy"] == true
-        {
+        // A legacy WinForms launcher can own cloudflared separately and
+        // legitimately leave tunnelAlive/publicHealthy unknown in CLI state.
+        // Allow copying its recorded HTTPS address *only when the local CLI
+        // instance is healthy*, but do not label it publicly verified.
+        public_connector: if healthy {
             payload["endpoint"].as_str().and_then(public_connector_url)
         } else {
             None
