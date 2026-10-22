@@ -408,7 +408,12 @@ fn shadow_restore_one(dir: &Path, entry: &BackupEntry) -> Result<(), String> {
     if entry.data.len() as u64 > bound || digest(&entry.data) != entry.sha256 {
         return Err("복원 파일의 체크섬 또는 크기가 일치하지 않습니다.".into());
     }
-    let protected = dpapi::encrypt(&entry.data)?;
+    // Non-empty, filename-bound frame also handles an optional empty
+    // selected-project file. Never place the framed plaintext on disk.
+    let prefix = format!("C2C-RESTORE-SHADOW:{}\\n", entry.name);
+    let mut framed = prefix.as_bytes().to_vec();
+    framed.extend_from_slice(&entry.data);
+    let protected = dpapi::encrypt(&framed)?;
     let path = dir.join(safe_filename);
     let mut file = OpenOptions::new().write(true).create_new(true).open(&path)
         .map_err(|_| "격리된 암호화 복원 파일을 생성하지 못했습니다.")?;
@@ -420,8 +425,10 @@ fn shadow_restore_one(dir: &Path, entry: &BackupEntry) -> Result<(), String> {
     if reread != protected {
         return Err("격리 복원 파일이 기록 중 변경됐습니다.".into());
     }
-    let restored = dpapi::decrypt(&reread)?;
-    if restored.len() != entry.data.len() || digest(&restored) != entry.sha256 {
+    let framed = dpapi::decrypt(&reread)?;
+    let restored = framed.strip_prefix(prefix.as_bytes())
+        .ok_or("격리 복원 파일 이름의 무결성이 일치하지 않습니다.")?;
+    if restored.len() != entry.data.len() || digest(restored) != entry.sha256 {
         return Err("복원 파일을 복호화한 결과가 원본 백업과 다릅니다.".into());
     }
     Ok(())
@@ -448,7 +455,11 @@ fn restore_rehearsal_from_archive(preview: &Path) -> Result<RestoreRehearsalRepo
     // Existing serialized backup validates format once more after a complete
     // encrypted write/read roundtrip; nothing is imported into live CLI.
     validate_payload(&payload)?;
-    drop(temporary); // guaranteed best-effort cleanup before success result
+    let completed_dir = temporary.path.clone();
+    drop(temporary); // best-effort cleanup, then verify before success
+    if completed_dir.exists() {
+        return Err("격리 복원 임시 파일을 정리하지 못했습니다. 별도 임시 폴더를 점검해야 합니다.".into());
+    }
 
     Ok(RestoreRehearsalReport {
         passed: true,
