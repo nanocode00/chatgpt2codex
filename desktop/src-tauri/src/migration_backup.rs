@@ -724,7 +724,7 @@ foreach ($item in $items) {
                 "token_endpoint_auth_method":"none", "grant_types":["authorization_code"],
                 "response_types":["code"]},"issuedAt":now}],
             "accessTokens":[{"tokenHash":b64hash(oauth_token),"clientId":"ci-f3-client",
-                "scopes":[],"expiresAt":now+3600,"resource":resource}],
+                "scopes":["chatgpt2codex"],"expiresAt":now+3600,"resource":resource}],
             "refreshTokens":[]
         })).unwrap();
         fs::write(legacy_state(&source_profile, "owner-token.json"), &owner).unwrap();
