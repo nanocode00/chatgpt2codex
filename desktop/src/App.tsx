@@ -5,7 +5,7 @@ import {
   Settings2, ShieldCheck, TerminalSquare, Wifi, WifiOff
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { checkRuntime, inspectInstalledCli, inspectInstalledCliLogs, inspectPublicTunnel, closePreviewWindow, isNativeApp, type CliInspection, type CliLogPreview, type CliLogComponent, type PublicTunnelHealth, type RuntimeHealth } from "./runtime";
+import { checkRuntime, inspectInstalledCli, inspectInstalledCliLogs, inspectPublicTunnel, manageOwnedCli, closePreviewWindow, isNativeApp, type CliInspection, type CliLogPreview, type CliLogComponent, type ManagedAction, type ManagedResult, type PublicTunnelHealth, type RuntimeHealth } from "./runtime";
 import { ManagementControls, LegacyConnectionControls, LegacyDiagnosticsControls, LegacySettingsControls } from "./LegacyControls";
 
 type Screen = "overview" | "manage" | "connections" | "diagnostics" | "settings";
@@ -52,6 +52,10 @@ function App() {
   const [logsChecking, setLogsChecking] = useState(false);
   const [publicCopied, setPublicCopied] = useState(false);
   const [exitError, setExitError] = useState("");
+  const [owned, setOwned] = useState<ManagedResult | null>(null);
+  const [ownedBusy, setOwnedBusy] = useState(false);
+  const [ownedError, setOwnedError] = useState("");
+  const [ownedToken, setOwnedToken] = useState<string | null>(null);
   const [history, setHistory] = useState<ActivityEntry[]>([]);
   const [copied, setCopied] = useState(false);
   const [settingError, setSettingError] = useState("");
@@ -90,6 +94,38 @@ function App() {
     return () => clearInterval(interval);
   }, [autoRefresh, native, runCheck]);
 
+
+  const runOwnedAction = useCallback(async (action: ManagedAction) => {
+    setOwnedBusy(true);
+    setOwnedError("");
+    try {
+      const next = await manageOwnedCli(action);
+      if (next.oneTimeOwnerToken) {
+        setOwnedToken(next.oneTimeOwnerToken);
+        setOwned({ ...next, oneTimeOwnerToken: undefined });
+      } else {
+        setOwned(next);
+      }
+    } catch (error) {
+      setOwnedError(error instanceof Error ? error.message : "전용 CLI 작업에 실패했습니다.");
+    } finally {
+      setOwnedBusy(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (screen === "manage") void runOwnedAction("status");
+  }, [screen, runOwnedAction]);
+
+  async function copyOwnedToken() {
+    if (!ownedToken) return;
+    try {
+      await navigator.clipboard.writeText(ownedToken);
+      setOwnedToken(null);
+    } catch {
+      setOwnedError("클립보드 복사에 실패했습니다. 토큰을 표시하지 않았으므로 별도 초기화 절차가 필요합니다.");
+    }
+  }
 
   const runCliInspection = useCallback(async () => {
     setCliChecking(true);
@@ -320,7 +356,9 @@ function App() {
         {screen === "manage" && <>
           <div className="page-heading"><div><div className="eyebrow">MANAGEMENT</div><h1>런타임 관리</h1>
             <p>기존 Windows 런처의 관리 항목을 먼저 배치했어. 실제 서버 제어는 안전성 검증 후 연결해.</p></div></div>
-          <ManagementControls onConnections={() => setScreen("connections")} onSettings={() => setScreen("settings")} onExit={() => { void exitPreview(); }} exitError={exitError}/>
+          <ManagementControls onConnections={() => setScreen("connections")} onSettings={() => setScreen("settings")} onExit={() => { void exitPreview(); }} exitError={exitError}
+            owned={owned} ownedBusy={ownedBusy} ownedError={ownedError} ownedToken={ownedToken}
+            onOwnedAction={(action) => { void runOwnedAction(action); }} onCopyToken={() => { void copyOwnedToken(); }}/>
         </>}
 
         {screen === "connections" && <>
