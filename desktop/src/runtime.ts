@@ -105,3 +105,34 @@ export async function manageOwnedCli(action: ManagedAction): Promise<ManagedResu
   }
   return invoke<ManagedResult>("manage_owned_cli", { action });
 }
+
+export interface LegacyMigrationReport {
+  sourceFound: boolean;
+  settingsFound: boolean;
+  selectedProject: string | null;
+  projectExists: boolean;
+  port: number | null;
+  tunnelEnabled: boolean | null;
+  customHostnameConfigured: boolean;
+  launchAtStartup: boolean | null;
+  startMcpOnOpen: boolean | null;
+  autoCheckUpdates: boolean | null;
+  language: string | null;
+  ownerHashValid: boolean;
+  oauthValid: boolean;
+  oauthClientCount: number | null;
+  runtimeRecordFound: boolean;
+  localPortListening: boolean;
+  canTransitionNow: boolean;
+  snapshotSaved: boolean;
+  snapshotPath: string | null;
+  warnings: string[];
+}
+
+export async function inspectLegacyMigration(): Promise<LegacyMigrationReport> {
+  return invoke<LegacyMigrationReport>("inspect_legacy_migration");
+}
+
+export async function saveLegacySettingsSnapshot(): Promise<LegacyMigrationReport> {
+  return invoke<LegacyMigrationReport>("save_legacy_settings_snapshot");
+}
