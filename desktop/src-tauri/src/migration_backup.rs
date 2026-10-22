@@ -275,7 +275,7 @@ fn report(backup: Option<(&Path, &BackupPayload)>) -> CredentialBackupReport {
             exists: true, verified: true, encrypted: true,
             path: Some(path.to_string_lossy().into_owned()),
             created_at_unix: Some(value.created_at_unix),
-            oauth_clients: Some(value.oauth.data.len().min(0)), // replaced from validated OAuth below
+            oauth_clients: None,
             details: "Windows DPAPI 복호화 및 내부 SHA-256/형식 검증에 통과했습니다. 원본 파일은 변경하지 않았습니다.".into(),
         },
     }
