@@ -17,7 +17,7 @@ to reflect the installed WinForms preferences.
 | 커넥터 URL 복사 | 연결 → 로컬 MCP URL | **Working** local-only copy, not public URL |
 | ChatGPT 웹 커넥터 사용 | 연결 → 외부 ChatGPT 연결 | Disabled; existing setting not imported |
 | 본인 소유 고정 도메인 | 연결 → 외부 ChatGPT 연결 | Disabled, no fake tunnel hostname |
-| 공개 상태 확인 / 공개 URL 복사 | 연결 → 외부 ChatGPT 연결 | **Working** only for installed CLI healthy/live/publicly healthy HTTPS tunnel; refreshes before copying |
+| 공개 상태 확인 / 공개 URL 복사 | 연결 → 외부 ChatGPT 연결 | **Working** for recorded HTTPS address from a healthy installed CLI; labels it unverified when legacy tunnel health is unknown |
 | Owner Token 복사 | 연결 → Owner Token | Disabled, secret never shown or cached |
 | Owner Token 자동 생성 | 연결 → Owner Token | Disabled; no token rotation |
 | 로컬 상태 확인 | 진단 → 진단 도구 | **Working**, reuses native health probe |
