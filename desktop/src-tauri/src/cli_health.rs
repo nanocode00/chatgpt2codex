@@ -14,6 +14,7 @@ pub struct CliInspection {
     pub tunnel_alive: Option<bool>,
     pub public_healthy: Option<bool>,
     pub endpoint: Option<String>,
+    pub public_connector: Option<String>,
     pub details: String,
 }
 
@@ -26,11 +27,12 @@ fn unavailable(instance: String, details: &str) -> CliInspection {
         tunnel_alive: None,
         public_healthy: None,
         endpoint: None,
+        public_connector: None,
         details: details.into(),
     }
 }
 
-fn valid_instance(name: &str) -> bool {
+pub(crate) fn valid_instance(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
         && name.bytes().all(|c| c.is_ascii_alphanumeric() || b"_.-".contains(&c))
@@ -39,7 +41,7 @@ fn valid_instance(name: &str) -> bool {
 // The current preview *only* trusts the existing official Windows install.
 // Do not resolve a CLI from PATH, accept an arbitrary executable from JS,
 // run a shell or upgrade/rewrite any runtime files.
-fn installed_windows_cli() -> Option<(PathBuf, PathBuf)> {
+pub(crate) fn installed_windows_cli() -> Option<(PathBuf, PathBuf)> {
     if !cfg!(target_os = "windows") {
         return None;
     }
@@ -53,6 +55,24 @@ fn installed_windows_cli() -> Option<(PathBuf, PathBuf)> {
         return None;
     }
     Some((node, cli))
+}
+
+/// Derive a copyable *public* MCP URL only from a successfully checked
+/// HTTPS /healthz result. Refuse local, relative, credential, and malformed URLs.
+fn public_connector_url(endpoint: &str) -> Option<String> {
+    let rest = endpoint.strip_prefix("https://")?;
+    let (host, suffix) = rest.split_once('/')?;
+    if suffix != "healthz"
+        || !host.contains('.')
+        || host.starts_with('.')
+        || host.ends_with('.')
+        || host.len() > 253
+        || !host.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'.' || c == b'-')
+        || host.eq_ignore_ascii_case("localhost")
+    {
+        return None;
+    }
+    Some(format!("https://{host}/mcp"))
 }
 
 fn inspect_local_cli(instance: String) -> CliInspection {
@@ -114,6 +134,14 @@ fn inspect_local_cli(instance: String) -> CliInspection {
         healthy,
         tunnel_alive: payload["tunnelAlive"].as_bool(),
         public_healthy: payload["publicHealthy"].as_bool(),
+        public_connector: if healthy
+            && payload["tunnelAlive"] == true
+            && payload["publicHealthy"] == true
+        {
+            payload["endpoint"].as_str().and_then(public_connector_url)
+        } else {
+            None
+        },
         endpoint: payload["endpoint"].as_str().map(str::to_owned),
         details: if healthy {
             "설치된 C2C CLI 인스턴스가 정상 응답 중입니다.".into()
@@ -136,6 +164,29 @@ pub async fn inspect_cli_health(instance: String) -> Result<CliInspection, Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_verified_https_health_endpoint_can_be_copied_as_public_mcp() {
+        assert_eq!(
+            public_connector_url("https://example.trycloudflare.com/healthz"),
+            Some("https://example.trycloudflare.com/mcp".into())
+        );
+        assert_eq!(
+            public_connector_url("https://c2c.example.org/healthz"),
+            Some("https://c2c.example.org/mcp".into())
+        );
+        for candidate in [
+            "http://127.0.0.1:7979/healthz",
+            "https://example.org/mcp",
+            "https://user@host.example/healthz",
+            "https://host.example/healthz?x=1",
+            "https://localhost/healthz",
+            "https://host.example:8443/healthz",
+            "https://.example.org/healthz",
+        ] {
+            assert_eq!(public_connector_url(candidate), None, "{candidate}");
+        }
+    }
 
     #[test]
     fn only_simple_instance_names_are_allowed() {
