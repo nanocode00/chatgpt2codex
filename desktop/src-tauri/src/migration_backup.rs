@@ -595,3 +595,198 @@ mod tests {
         assert_eq!(ARCHIVE_NAME, "legacy-auth-backup.dpapi");
     }
 }
+
+// F3 release gate: synthetic credentials only, never the real archived OAuth
+// state. The real archived owner record contains a HASH, not the bearer secret.
+// Running this test outside an ephemeral Windows CI runner is intentionally a
+// no-op, so it cannot accidentally spawn a CLI against a user's real profile.
+#[cfg(all(test, windows))]
+mod fixture_cli_restore_e2e {
+    use super::*;
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    use serde_json::json;
+    use std::net::{Ipv4Addr, TcpListener};
+    use std::process::{Child, Command, Stdio};
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    struct Sandbox {
+        path: PathBuf,
+        child: Option<Child>,
+    }
+
+    impl Drop for Sandbox {
+        fn drop(&mut self) {
+            if let Some(child) = self.child.as_mut() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn new_ci_sandbox() -> Option<Sandbox> {
+        if std::env::var("GITHUB_ACTIONS").ok().as_deref() != Some("true") ||
+            std::env::var("CI").ok().as_deref() != Some("true") ||
+            std::env::var("C2C_F3_E2E").ok().as_deref() != Some("true") {
+            return None;
+        }
+        let base = PathBuf::from(std::env::var_os("RUNNER_TEMP")?);
+        let meta = fs::symlink_metadata(&base).expect("CI runner temp is missing");
+        assert!(meta.is_dir() && !meta.file_type().is_symlink());
+        let unique = format!("c2c-f3-private-{}-{}", std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos());
+        let path = base.join(unique);
+        fs::create_dir(&path).expect("create new CI-only fixture sandbox");
+        Some(Sandbox { path, child: None })
+    }
+
+    // Restrict the directory BEFORE materializing any plaintext fixture. ACLs
+    // must not be inherited from a runner's more permissive temp directory.
+    fn enforce_private_acl(home: &Path, verify_only: bool) {
+        const SCRIPT: &str = r#"
+$ErrorActionPreference = 'Stop'
+$path = $env:C2C_F3_HOME
+$me = [Security.Principal.WindowsIdentity]::GetCurrent().User
+$system = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+if ($env:C2C_F3_VERIFY_ONLY -ne 'true') {
+    $acl = [Security.AccessControl.DirectorySecurity]::new()
+    $acl.SetAccessRuleProtection($true, $false)
+    foreach ($who in @($me, $system)) {
+        $rule = [Security.AccessControl.FileSystemAccessRule]::new($who, 'FullControl', 'ContainerInherit, ObjectInherit', 'None', 'Allow')
+        $acl.AddAccessRule($rule)
+    }
+    Set-Acl -LiteralPath $path -AclObject $acl
+}
+$items = @($path) + @(Get-ChildItem -LiteralPath $path -Recurse -Force | ForEach-Object FullName)
+foreach ($item in $items) {
+    $acl = Get-Acl -LiteralPath $item
+    if ($item -eq $path -and -not $acl.AreAccessRulesProtected) { throw 'Inherited ACL on fixture home' }
+    foreach ($ace in $acl.Access) {
+        if ($ace.AccessControlType -ne 'Allow') { continue }
+        $sid = $ace.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+        if ($sid -ne $me.Value -and $sid -ne $system.Value) {
+            throw 'Fixture ACL grants another identity access'
+        }
+    }
+}
+"#;
+        let status = Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command", SCRIPT])
+            .env("C2C_F3_HOME", home)
+            .env("C2C_F3_VERIFY_ONLY", if verify_only { "true" } else { "false" })
+            .stdout(Stdio::null()).stderr(Stdio::null())
+            .status().expect("Windows ACL tool unavailable");
+        assert!(status.success(), "fixture home/files must be owner-and-SYSTEM only");
+    }
+
+    fn restored_fixture_file(path: &Path, entry: &BackupEntry) {
+        assert_eq!(digest(&entry.data), entry.sha256);
+        let mut file = OpenOptions::new().write(true).create_new(true)
+            .open(path).expect("create fresh isolated fixture entry");
+        file.write_all(&entry.data).expect("write verified fixture bytes");
+        file.sync_all().expect("persist isolated fixture bytes");
+        assert_eq!(digest(&fs::read(path).unwrap()), entry.sha256);
+    }
+
+    #[test]
+    fn encrypted_fixture_restores_to_disposable_cli_and_authenticates() {
+        let Some(mut sandbox) = new_ci_sandbox() else { return };
+        let (local, source_profile, archive_preview) = (
+            sandbox.path.join("source-local"), sandbox.path.join("source-profile"),
+            sandbox.path.join("archive-preview"),
+        );
+        let home = sandbox.path.join("disposable-cli-home");
+        let workspace = sandbox.path.join("workspace");
+        fs::create_dir(&home).unwrap();
+        enforce_private_acl(&home, false);
+        fs::create_dir(&workspace).unwrap();
+        fs::write(workspace.join("package.json"), "{\"private\":true,\"name\":\"c2c-f3-ci-fixture\"}").unwrap();
+
+        let socket = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = socket.local_addr().unwrap().port();
+        assert!(port > 1024 && port != 7979 && port != 18797);
+        drop(socket);
+        let resource = format!("http://127.0.0.1:{port}/mcp");
+        let bearer = "ci-f3-disposable-owner-bearer-not-a-real-credential";
+        let oauth_token = "ci-f3-disposable-oauth-access-not-a-real-credential";
+        let b64hash = |v: &str| URL_SAFE_NO_PAD.encode(Sha256::digest(v.as_bytes()));
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+
+        fs::create_dir_all(local.join(LEGACY_APP_DIR)).unwrap();
+        fs::create_dir_all(legacy_state(&source_profile, "oauth.json").parent().unwrap()).unwrap();
+        fs::write(local.join(LEGACY_APP_DIR).join("settings.ini"), "Port=Nzk3OQ==\nEnablePublicTunnel=ZmFsc2U=\n").unwrap();
+        let owner = serde_json::to_vec(&json!({"version":1,"createdAt":now,"tokenHash":b64hash(bearer)})).unwrap();
+        let oauth = serde_json::to_vec(&json!({
+            "version":1,"updatedAt":now*1000,
+            "clients":[{"clientId":"ci-f3-client","clientJson":{
+                "client_id":"ci-f3-client","redirect_uris":["http://127.0.0.1/callback"],
+                "token_endpoint_auth_method":"none", "grant_types":["authorization_code"],
+                "response_types":["code"]},"issuedAt":now}],
+            "accessTokens":[{"tokenHash":b64hash(oauth_token),"clientId":"ci-f3-client",
+                "scopes":[],"expiresAt":now+3600,"resource":resource}],
+            "refreshTokens":[]
+        })).unwrap();
+        fs::write(legacy_state(&source_profile, "owner-token.json"), &owner).unwrap();
+        fs::write(legacy_state(&source_profile, "oauth.json"), &oauth).unwrap();
+        save_backup(&local, &source_profile, &archive_preview).unwrap();
+        let archive_before = fs::read(archive_path(&archive_preview)).unwrap();
+        let payload = decode_encrypted(&archive_before).unwrap();
+        assert_eq!(validate_payload(&payload).unwrap(), 1);
+
+        let state = legacy_state(&home, "owner-token.json");
+        fs::create_dir_all(state.parent().unwrap()).unwrap();
+        restored_fixture_file(&state, &payload.owner);
+        restored_fixture_file(&legacy_state(&home, "oauth.json"), &payload.oauth);
+        restored_fixture_file(&home.join("settings.ini"), &payload.settings);
+        enforce_private_acl(&home, true);
+        assert_eq!(fs::read(legacy_state(&source_profile,"oauth.json")).unwrap(), oauth);
+        assert_eq!(fs::read(legacy_state(&source_profile,"owner-token.json")).unwrap(), owner);
+        assert_eq!(fs::read(archive_path(&archive_preview)).unwrap(), archive_before);
+
+        let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+        let cli = repo.join("dist").join("cli.js");
+        assert!(cli.is_file(), "CI must build the actual CLI before F3 E2E");
+        let mut proc = Command::new("node");
+        proc.arg(cli).args(["serve", "--http", "--host", "127.0.0.1", "--port", &port.to_string(),
+            "--workspace", workspace.to_str().unwrap(), "--instance", "f3-private-restore",
+            "--public-url", &format!("http://127.0.0.1:{port}")]);
+        proc.current_dir(&workspace).env_clear();
+        for key in ["PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP"] {
+            if let Some(value) = std::env::var_os(key) { proc.env(key, value); }
+        }
+        proc.env("HOME", &home).env("USERPROFILE", &home)
+            .env("XDG_CONFIG_HOME", home.join(".config"))
+            .stdout(Stdio::null()).stderr(Stdio::null());
+        sandbox.child = Some(proc.spawn().expect("launch isolated CI fixture CLI"));
+
+        let base = format!("http://127.0.0.1:{port}");
+        let deadline = Instant::now() + Duration::from_secs(16);
+        loop {
+            assert!(sandbox.child.as_mut().unwrap().try_wait().unwrap().is_none(), "isolated CLI exited early");
+            if ureq::get(&format!("{base}/healthz")).timeout(Duration::from_secs(1))
+                .call().is_ok() { break; }
+            assert!(Instant::now() < deadline, "isolated CLI health timed out");
+            thread::sleep(Duration::from_millis(150));
+        }
+        let action = format!("{base}/actions/agent-guide");
+        assert!(matches!(ureq::post(&action).send_json(json!({})), Err(ureq::Error::Status(401, _))));
+        assert!(matches!(ureq::post(&action).set("authorization", "Bearer invalid-fixture")
+            .send_json(json!({})), Err(ureq::Error::Status(401, _))));
+        assert!(ureq::post(&action).set("authorization", &format!("Bearer {bearer}"))
+            .send_json(json!({})).is_ok(), "restored owner hash must authenticate");
+        let mcp = format!("{base}/mcp");
+        let request = json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+            "protocolVersion":"2025-06-18","capabilities":{},
+            "clientInfo":{"name":"c2c-f3-fixture","version":"1.0"}}});
+        assert!(matches!(ureq::post(&mcp).set("accept", "application/json, text/event-stream")
+            .send_json(request.clone()), Err(ureq::Error::Status(401, _))));
+        let authorized = ureq::post(&mcp).set("authorization", &format!("Bearer {oauth_token}"))
+            .set("accept", "application/json, text/event-stream")
+            .send_json(request).expect("restored OAuth hash must authorize isolated MCP");
+        assert!(authorized.status() < 300);
+        assert_eq!(fs::read(archive_path(&archive_preview)).unwrap(), archive_before);
+        assert_eq!(fs::read(legacy_state(&source_profile,"oauth.json")).unwrap(), oauth);
+        assert_eq!(fs::read(legacy_state(&source_profile,"owner-token.json")).unwrap(), owner);
+    }
+}
