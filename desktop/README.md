@@ -161,3 +161,34 @@ ownership checks; for that reason Start, Stop, Restart and Owner Token
 rotation remain **disabled** until the audited CLI is packaged and
 isolated lifecycle/tunnel E2E passes. The preview does not attempt to
 migrate or take over a running legacy C2C process.
+
+## Public Quick Tunnel monitoring (read-only)
+
+Tauri checks the **local MCP** separately from the **public Cloudflare
+Quick Tunnel**. The native Rust public probe:
+
+1. Reads the installed CLI `default` instance's recorded public address
+   without accessing the Owner Token.
+2. Accepts only an exact `https://<subdomain>.trycloudflare.com/mcp`
+   URL, then sends a bounded unauthenticated HTTPS GET to `/healthz`
+   (4-second connect/read timeout, no redirects).
+3. Verifies HTTP 200 and `{"ok":true,"name":"chatgpt2codex"}`.
+   DNS failure, expired tunnel or wrong service is **Offline**, even if
+   `127.0.0.1:7979` is healthy.
+4. Refreshes every 60 seconds and on window focus/visibility/online events,
+   so returning from laptop sleep triggers a new external probe.
+5. Shows a warning if this session observes a tunnel go from Online to
+   Offline or its Quick Tunnel hostname change. It never automatically
+   restarts a process, rotates a token or edits a ChatGPT plugin.
+
+The new **Overview** third metric and **Connections → public tunnel status**
+show the independent result. **Diagnostics → 공개 상태 확인** now runs the
+real public probe. When an endpoint is confirmed Offline, copying the stale
+URL is disabled until the user refreshes after recovery.
+
+Only Cloudflare Quick Tunnel is probed in this first security-scoped
+implementation. Named Tunnel and arbitrary custom domains are **unsupported,
+not marked Offline**; their trust policy must be reviewed separately to
+avoid probing localhost/private networks through a configurable hostname.
+The UI does not currently claim that it knows the user's ChatGPT plugin
+registration or connector authorization state.
