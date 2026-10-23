@@ -152,3 +152,8 @@ button:focus-visible,input:focus-visible{outline:2px solid #999;outline-offset:2
 
 /* Keep the overview's management link aligned with its card contents. */
 .project-panel .legacy-link{margin:17px 22px 0}
+
+/* Real, bounded CLI log preview: prevent large lines from overflowing cards. */
+.legacy-log-viewer{margin-top:18px;border:1px solid #424242;background:#171717;border-radius:11px;padding:15px;min-width:0}
+.legacy-log-caption{font-size:11px;line-height:1.6;color:#bdbdbd;margin-bottom:11px}
+.legacy-log-viewer pre{margin:0;max-height:325px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;line-height:1.6;color:#c4c4c4;font-family:Consolas,ui-monospace,monospace;tab-size:2}

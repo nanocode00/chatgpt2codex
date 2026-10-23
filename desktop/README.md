@@ -21,6 +21,15 @@ install, start, stop, kill, or migrate an existing C2C MCP runtime.
 - Copy the **local-only** MCP address; session-only history of health checks.
 - Local UI preference for the health-check port and periodic refresh; this
   **does not change the real CLI's port or server configuration**.
+- **Connected WinForms-era controls (first safe slice):** the Connections
+  screen can re-query public health from the installed CLI and copy its
+  **HTTPS public /mcp URL from a healthy CLI instance**. It explicitly
+  distinguishes a verified public tunnel from a legacy WinForms-managed
+  tunnel with unknown public health. Diagnostics can request the last 80 server/tunnel log
+  lines through the installed CLI; output is length-limited and lines
+  containing likely credentials are redacted. Management `앱 종료` now
+  closes only the Tauri preview (never the MCP server). All destructive
+  or configuration-changing controls stay disabled.
 - The Connections screen can **read the installed Windows C2C CLI's default
   instance health** via the bundled `bin/node.exe` and `dist/cli.js`.
   The Rust host invokes only the fixed `health --instance default` command,
@@ -115,3 +124,40 @@ If the installed CLI isn't found, the app returns an explicit unavailable
 message. It never searches PATH, downloads Node, rotates tokens, modifies
 the runtime or sends a stop/restart signal. Linux support for a packaged
 Node CLI comes later.
+
+## Function wiring stage: public URL, logs, Exit
+
+**Connections → 공개 상태 확인 / 공개 커넥터 URL 복사:** The fixed
+installed CLI `health --instance default` returns an HTTPS health endpoint
+only after it checks the current Cloudflare tunnel. We derive a copyable
+`https://hostname/mcp` only if the CLI reports local `healthy=true` and a strict HTTPS host
+ending in `/healthz`. We show **verified** only when `publicHealthy=true`;
+otherwise the UI warns that the recorded legacy tunnel address has not
+been externally verified and may have changed. This reads existing state; it does not
+start Cloudflare, edit a registered ChatGPT plugin or update a hostname.
+
+**Diagnostics → 서버 로그 보기 / 터널 로그 보기:** First run the fixed
+installed Node + CLI `logs --instance default --component server|tunnel
+--lines 80`, with a nine-second timeout. Legacy WinForms launcher instances
+may have healthy CLI state but **no recorded log paths**. In that case, if
+`default` currently passes installed CLI health, read only the *fixed*
+WinForms PowerShell log names under `%TEMP%\\chatgpt2codex`:
+`server.out.log`, `server.err.log`, `cloudflared.out.log`, or
+`cloudflared.err.log`. Each file is tailed with a 64 KiB maximum read;
+a 16 KiB/80-line preview is shown, with likely token-bearing lines hidden.
+This **legacy fallback is not tied to a specific runtime PID**, so its UI
+message warns that files may be from an earlier execution. If no actual
+log file is available, the UI reports that instead of inventing entries.
+Only one known directory and four constant filenames are allowed.
+Do not use the log viewer as a secure secret classifier: sensitive data
+in unusual formats may still appear. Do not paste logs into issue comments
+without inspecting them.
+
+**Management → 앱 종료:** Closes only the Tauri preview. Existing
+WinForms-managed Node and Cloudflare processes remain running.
+
+The installed v0.3.1 CLI does not contain #54's newer verified process
+ownership checks; for that reason Start, Stop, Restart and Owner Token
+rotation remain **disabled** until the audited CLI is packaged and
+isolated lifecycle/tunnel E2E passes. The preview does not attempt to
+migrate or take over a running legacy C2C process.

@@ -1,19 +1,20 @@
 import type { ReactNode } from "react";
+import type { CliLogComponent, CliLogPreview } from "./runtime";
 import {
   ArrowRight, Cloud, Copy, Download, ExternalLink, FileText, FolderOpen,
   Globe2, HeartPulse, KeyRound, Monitor, Play, Power, RefreshCcw,
   RotateCw, Settings2, ShieldCheck, Square, TerminalSquare, Wifi
 } from "lucide-react";
 
-function SectionHeading({ title, description, icon }: {
-  title: string; description: string; icon: ReactNode;
+function SectionHeading({ title, description, icon, status = "연동 예정" }: {
+  title: string; description: string; icon: ReactNode; status?: string;
 }) {
   return <div className="panel-heading legacy-heading">
     <div className="panel-title">
       <span className="icon-tile">{icon}</span>
       <div><h2>{title}</h2><p>{description}</p></div>
     </div>
-    <span className="legacy-pending">연동 예정</span>
+    <span className="legacy-pending">{status}</span>
   </div>;
 }
 
@@ -48,8 +49,9 @@ function LockedField({ placeholder = "CLI 설정을 연결한 후 표시됩니�
     aria-label={placeholder} />;
 }
 
-export function ManagementControls({ onConnections, onSettings }: {
+export function ManagementControls({ onConnections, onSettings, onExit, exitError }: {
   onConnections: () => void; onSettings: () => void;
+  onExit: () => void; exitError: string;
 }) {
   return <>
     <section className="panel page-panel">
@@ -85,14 +87,15 @@ export function ManagementControls({ onConnections, onSettings }: {
       </div>
     </section>
     <section className="panel page-panel legacy-spaced">
-      <SectionHeading title="앱·트레이" icon={<Monitor size={18}/>}
+      <SectionHeading title="앱·트레이" icon={<Monitor size={18}/>} status="일부 연결"
         description="작업 표시줄 및 트레이에서의 앱 동작을 관리합니다." />
       <div className="legacy-body">
         <div className="legacy-actions">
           <PendingButton label="트레이로 숨기기" icon={<Monitor size={16}/>} />
-          <PendingButton label="앱 종료" icon={<Power size={16}/>} />
+          <button type="button" className="legacy-action available" onClick={onExit}><Power size={16}/>앱 종료</button>
         </div>
-        <p className="legacy-footnote">트레이 기능은 아직 구현되지 않았습니다. 현재 프리뷰 창은 일반 창 닫기 기능을 사용합니다.</p>
+        <p className="legacy-footnote">앱 종료는 이 프리뷰 창만 닫으며 기존 MCP 서버를 중지하지 않습니다. 트레이 숨기기는 추후 연결합니다.</p>
+        {exitError && <p role="alert" className="form-error">{exitError}</p>}
         <button type="button" className="text-action legacy-link" onClick={onSettings}>
           시작 옵션 및 설정 보기 <ArrowRight size={16}/>
         </button>
@@ -101,21 +104,37 @@ export function ManagementControls({ onConnections, onSettings }: {
   </>;
 }
 
-export function LegacyConnectionControls() {
+export function LegacyConnectionControls({ publicConnector, publicState, onCopyPublic, onRefreshPublic, publicCopied, checking }: {
+  publicConnector: string | null;
+  publicState: string;
+  onCopyPublic: () => void;
+  onRefreshPublic: () => void;
+  publicCopied: boolean;
+  checking: boolean;
+}) {
   return <>
     <section className="panel page-panel legacy-spaced">
-      <SectionHeading title="외부 ChatGPT 연결" icon={<Cloud size={18}/>}
+      <SectionHeading title="외부 ChatGPT 연결" icon={<Cloud size={18}/>} status="일부 연결"
         description="Cloudflare Quick Tunnel / Named Tunnel 구성" />
       <div className="legacy-body">
         <DisabledChoice label="ChatGPT 웹 커넥터 사용" description="활성화 여부와 실제 터널 상태는 CLI 통합 후 조회합니다."/>
         <FormRow label="본인 소유 고정 도메인 (선택)" help="빈 값일 때 Quick Tunnel을 사용하던 기존 설정을 이관할 예정입니다.">
           <LockedField placeholder="터널 설정을 조회하지 않았습니다"/>
         </FormRow>
+        <FormRow label="공개 커넥터 URL" help={publicState}>
+          <input className="legacy-field" type="text" readOnly
+            value={publicConnector ?? ""} placeholder="CLI에서 확인된 공개 주소 없음"
+            aria-label="CLI에서 확인한 공개 MCP 주소" />
+        </FormRow>
         <div className="legacy-actions">
-          <PendingButton label="공개 상태 열기" icon={<Globe2 size={16}/>} />
-          <PendingButton label="공개 커넥터 URL 복사" icon={<Copy size={16}/>} />
+          <button type="button" className="legacy-action available" onClick={onRefreshPublic} disabled={checking}>
+            <Globe2 size={16}/>{checking ? "조회 중..." : "공개 상태 확인"}
+          </button>
+          <button type="button" className="legacy-action available" onClick={onCopyPublic} disabled={!publicConnector}>
+            <Copy size={16}/>{publicCopied ? "복사 완료" : "공개 커넥터 URL 복사"}
+          </button>
         </div>
-        <p className="legacy-footnote">표시 중인 로컬 URL과 실제 공개 터널 URL은 다릅니다. 고정 도메인과 Quick Tunnel은 이 화면에서 아직 변경할 수 없습니다.</p>
+        <p className="legacy-footnote">공개 주소는 설치된 CLI가 정상이라고 보고한 HTTPS 연결에서만 가져옵니다. Quick Tunnel 재시작 시 주소가 바뀌므로 새로 조회하세요. 이 화면에서 터널을 시작·종료하지는 않습니다.</p>
       </div>
     </section>
     <section className="panel page-panel legacy-spaced">
@@ -136,11 +155,14 @@ export function LegacyConnectionControls() {
   </>;
 }
 
-export function LegacyDiagnosticsControls({ onLocalHealth, checking }: {
+export function LegacyDiagnosticsControls({ onLocalHealth, checking, onViewLogs, logsChecking, logResult }: {
   onLocalHealth: () => void; checking: boolean;
+  onViewLogs: (component: CliLogComponent) => void;
+  logsChecking: boolean;
+  logResult: CliLogPreview | null;
 }) {
   return <section className="panel page-panel legacy-spaced">
-    <SectionHeading title="진단 도구" icon={<HeartPulse size={18}/>}
+    <SectionHeading title="진단 도구" icon={<HeartPulse size={18}/>} status="일부 연결"
       description="기존 Windows 앱의 상태·로그·업데이트 바로가기" />
     <div className="legacy-body">
       <div className="legacy-actions">
@@ -148,12 +170,24 @@ export function LegacyDiagnosticsControls({ onLocalHealth, checking }: {
           <Wifi size={16}/>{checking ? "확인 중..." : "로컬 상태 확인"}
         </button>
         <PendingButton label="공개 상태 확인" icon={<Globe2 size={16}/>} />
-        <PendingButton label="로그 보기" icon={<FileText size={16}/>} />
+        <button type="button" className="legacy-action available" onClick={() => onViewLogs("server")} disabled={logsChecking}>
+          <FileText size={16}/>{logsChecking ? "읽는 중..." : "서버 로그 보기"}
+        </button>
+        <button type="button" className="legacy-action available" onClick={() => onViewLogs("tunnel")} disabled={logsChecking}>
+          <FileText size={16}/>터널 로그 보기
+        </button>
         <PendingButton label="업데이트 확인" icon={<Download size={16}/>} />
         <PendingButton label="GitHub 저장소 열기" icon={<ExternalLink size={16}/>} />
         <PendingButton label="개발자 정보" icon={<Settings2 size={16}/>} />
       </div>
-      <p className="legacy-footnote">로컬 상태 확인만 현재 작동합니다. 위의 진단 기록은 실제 서버 로그가 아닙니다.</p>
+      <p className="legacy-footnote">서버·터널 로그는 설치된 CLI 기록을 읽어오는 실제 로그 미리보기입니다. 안전을 위해 민감한 로그 행은 숨기며, 공개 상태·업데이트 항목은 아직 연동 예정입니다.</p>
+      {logResult && <div className="legacy-log-viewer" role="region" aria-label="C2C CLI 로그 미리보기">
+        <div className="legacy-log-caption">{logResult.component === "server" ? "서버 로그" : "터널 로그"} · {logResult.details}</div>
+        {logResult.available && logResult.content
+          ? <pre>{logResult.content}</pre>
+          : <p className="legacy-footnote">{logResult.details}</p>}
+        {logResult.truncated && <p className="legacy-footnote">최신 내용 일부만 표시하고 있습니다.</p>}
+      </div>}
     </div>
   </section>;
 }

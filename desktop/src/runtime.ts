@@ -33,6 +33,7 @@ export interface CliInspection {
   tunnelAlive: boolean | null;
   publicHealthy: boolean | null;
   endpoint: string | null;
+  publicConnector: string | null;
   details: string;
 }
 
@@ -40,9 +41,33 @@ export async function inspectInstalledCli(instance = "default"): Promise<CliInsp
   if (!isNativeApp()) {
     return {
       available: false, instance, alive: false, healthy: false,
-      tunnelAlive: null, publicHealthy: null, endpoint: null,
+      tunnelAlive: null, publicHealthy: null, endpoint: null, publicConnector: null,
       details: "CLI 인스턴스 조회는 Windows Tauri 앱에서만 지원합니다."
     };
   }
   return invoke<CliInspection>("inspect_cli_health", { instance });
+}
+
+export type CliLogComponent = "server" | "tunnel";
+
+export interface CliLogPreview {
+  available: boolean;
+  instance: string;
+  component: CliLogComponent;
+  content: string;
+  details: string;
+  truncated: boolean;
+}
+
+export async function inspectInstalledCliLogs(component: CliLogComponent, instance = "default"): Promise<CliLogPreview> {
+  if (!isNativeApp()) {
+    return { available: false, instance, component, content: "", truncated: false,
+      details: "로그 조회는 Windows 네이티브 프리뷰에서만 지원합니다." };
+  }
+  return invoke<CliLogPreview>("inspect_cli_logs", { instance, component });
+}
+
+export async function closePreviewWindow(): Promise<void> {
+  if (!isNativeApp()) return;
+  await invoke<void>("close_preview_window");
 }

@@ -31,6 +31,8 @@ jobs:
         run: npm run desktop:build
       - name: Check Rust toolchain
         run: cargo --version
+      - name: Unit-test native CLI URL and log safety checks
+        run: cargo test --manifest-path desktop/src-tauri/Cargo.toml --lib
       - name: Build unsigned Windows desktop preview (no installation)
         run: npm --prefix desktop run tauri:build -- --debug --no-bundle
       - name: Verify Windows GUI subsystem (no console window)

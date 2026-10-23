@@ -5,7 +5,7 @@ import {
   Settings2, ShieldCheck, TerminalSquare, Wifi, WifiOff
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { checkRuntime, inspectInstalledCli, isNativeApp, type CliInspection, type RuntimeHealth } from "./runtime";
+import { checkRuntime, inspectInstalledCli, inspectInstalledCliLogs, closePreviewWindow, isNativeApp, type CliInspection, type CliLogPreview, type CliLogComponent, type RuntimeHealth } from "./runtime";
 import { ManagementControls, LegacyConnectionControls, LegacyDiagnosticsControls, LegacySettingsControls } from "./LegacyControls";
 
 type Screen = "overview" | "manage" | "connections" | "diagnostics" | "settings";
@@ -45,6 +45,10 @@ function App() {
   const [checking, setChecking] = useState(false);
   const [cliChecking, setCliChecking] = useState(false);
   const [cliInspection, setCliInspection] = useState<CliInspection | null>(null);
+  const [logResult, setLogResult] = useState<CliLogPreview | null>(null);
+  const [logsChecking, setLogsChecking] = useState(false);
+  const [publicCopied, setPublicCopied] = useState(false);
+  const [exitError, setExitError] = useState("");
   const [history, setHistory] = useState<ActivityEntry[]>([]);
   const [copied, setCopied] = useState(false);
   const [settingError, setSettingError] = useState("");
@@ -89,7 +93,7 @@ function App() {
     } catch {
       setCliInspection({
         available: false, instance: "default", alive: false, healthy: false,
-        tunnelAlive: null, publicHealthy: null, endpoint: null,
+        tunnelAlive: null, publicHealthy: null, endpoint: null, publicConnector: null,
         details: "설치된 CLI 상태 조회가 실패했습니다."
       });
     } finally {
@@ -100,6 +104,49 @@ function App() {
   useEffect(() => {
     if (screen === "connections") void runCliInspection();
   }, [screen, runCliInspection]);
+
+  const publicConnector = cliInspection?.available ? cliInspection.publicConnector : null;
+  const publicState = !cliInspection
+    ? "설치된 CLI에서 공개 연결 정보를 확인합니다."
+    : publicConnector
+      ? (cliInspection?.publicHealthy === true
+        ? "설치된 CLI가 공개 Health를 정상으로 확인했습니다. 주소가 변경되면 다시 조회하세요."
+        : "CLI에 기록된 공개 주소입니다. 현재 외부 연결은 미검증이므로 재시작 후 주소가 바뀌지 않았는지 확인하세요.")
+      : cliInspection.available
+        ? "공개 연결이 확인되지 않았습니다. 터널이나 CLI 상태를 확인해 주세요."
+        : cliInspection.details;
+
+  async function copyPublicConnector() {
+    if (!publicConnector) return;
+    try {
+      await navigator.clipboard.writeText(publicConnector);
+      setPublicCopied(true);
+      window.setTimeout(() => setPublicCopied(false), 1500);
+    } catch { setPublicCopied(false); }
+  }
+
+  async function loadCliLogs(component: CliLogComponent) {
+    setLogsChecking(true);
+    setLogResult(null);
+    try {
+      setLogResult(await inspectInstalledCliLogs(component));
+    } catch {
+      setLogResult({
+        available: false, instance: "default", component, truncated: false, content: "",
+        details: "CLI 로그 조회 중 오류가 발생했습니다."
+      });
+    } finally {
+      setLogsChecking(false);
+    }
+  }
+
+  async function exitPreview() {
+    try {
+      await closePreviewWindow();
+    } catch {
+      setExitError("Tauri 창을 닫지 못했습니다. 창의 X 버튼으로 종료해 주세요.");
+    }
+  }
 
   const endpoint = useMemo(() => "http://127.0.0.1:" + port + "/mcp", [port]);
   const serverOnline = native && !!status?.online;
@@ -217,7 +264,7 @@ function App() {
         {screen === "manage" && <>
           <div className="page-heading"><div><div className="eyebrow">MANAGEMENT</div><h1>런타임 관리</h1>
             <p>기존 Windows 런처의 관리 항목을 먼저 배치했어. 실제 서버 제어는 안전성 검증 후 연결해.</p></div></div>
-          <ManagementControls onConnections={() => setScreen("connections")} onSettings={() => setScreen("settings")}/>
+          <ManagementControls onConnections={() => setScreen("connections")} onSettings={() => setScreen("settings")} onExit={() => { void exitPreview(); }} exitError={exitError}/>
         </>}
 
         {screen === "connections" && <>
@@ -248,13 +295,13 @@ function App() {
               </div>
             </div>
           </section>
-          <LegacyConnectionControls />
+          <LegacyConnectionControls publicConnector={publicConnector ?? null} publicState={publicState} onCopyPublic={() => { void copyPublicConnector(); }} publicCopied={publicCopied} onRefreshPublic={() => { void runCliInspection(); }} checking={cliChecking}/>
         </>}
 
         {screen === "diagnostics" && <>
-          <div className="page-heading"><div><div className="eyebrow">DIAGNOSTICS</div><h1>진단</h1><p>실제 로컬 Health 요청 결과만 기록합니다. 서버 로그 조회는 다음 단계에서 연결합니다.</p></div><button className="secondary-btn" onClick={() => { void runCheck(); }} disabled={checking}><RefreshCcw size={16}/> 다시 확인</button></div>
+          <div className="page-heading"><div><div className="eyebrow">DIAGNOSTICS</div><h1>진단</h1><p>로컬 Health 검사 기록과 설치된 CLI의 서버·터널 로그를 확인합니다.</p></div><button className="secondary-btn" onClick={() => { void runCheck(); }} disabled={checking}><RefreshCcw size={16}/> 다시 확인</button></div>
           <section className="panel page-panel"><div className="panel-heading"><div className="panel-title"><span className="icon-tile"><Activity size={18}/></span><div><h2>상태 확인 기록</h2><p>현재 세션 · 최근 12건</p></div></div>{statusTag()}</div><div className="event-list">{history.length ? history.map((item, i) => <div className="event" key={item.time + i}><span className={"event-dot " + (item.online ? "ok" : "")}/><div><strong>{item.online ? "Health 확인 성공" : "Health 확인"}</strong><p>{item.message}</p></div><time>{item.time}</time></div>) : <p className="description">아직 검사 기록이 없습니다.</p>}</div></section>
-          <LegacyDiagnosticsControls checking={checking} onLocalHealth={() => { void runCheck(); }}/>
+          <LegacyDiagnosticsControls checking={checking} onLocalHealth={() => { void runCheck(); }} onViewLogs={(component) => { void loadCliLogs(component); }} logsChecking={logsChecking} logResult={logResult}/>
         </>}
 
         {screen === "settings" && <>
