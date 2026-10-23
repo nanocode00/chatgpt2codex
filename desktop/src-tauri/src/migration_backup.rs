@@ -297,6 +297,50 @@ fn inspect_backup(preview: &Path) -> Result<CredentialBackupReport, String> {
     verified_report(&path, &payload)
 }
 
+/// Read-only F4-B input. A checksum match is a point-in-time observation,
+/// never proof that a concurrent legacy OAuth writer has been quiesced.
+/// Never expose archive entries, paths, digests or credential contents.
+pub(crate) fn inspect_backup_readiness(
+    local: &Path, profile: &Path, preview: &Path,
+) -> (bool, bool, bool) {
+    let path = archive_path(preview);
+    if fs::symlink_metadata(&path).map_or(true, |m| !m.is_file() || m.file_type().is_symlink()) {
+        return (false, false, false);
+    }
+    let Ok(Some(bytes)) = read_limited(&path, MAX_ARCHIVE_BYTES) else {
+        return (true, false, false);
+    };
+    let Ok(payload) = decode_encrypted(&bytes) else {
+        return (true, false, false);
+    };
+    let pairs: Vec<(PathBuf, &BackupEntry, u64)> = [
+        (legacy_state(profile, "owner-token.json"), &payload.owner, MAX_SETTINGS_BYTES),
+        (legacy_state(profile, "oauth.json"), &payload.oauth, MAX_STATE_BYTES),
+        (local.join(LEGACY_APP_DIR).join("settings.ini"), &payload.settings, MAX_SETTINGS_BYTES),
+    ].into_iter().chain(payload.selected_project.as_ref().map(|entry| (
+        local.join(LEGACY_APP_DIR).join("selected-project.txt"), entry, MAX_SETTINGS_BYTES,
+    ))).collect();
+    for (source, entry, max) in pairs {
+        if fs::symlink_metadata(&source).map_or(true, |m| !m.is_file() || m.file_type().is_symlink()) {
+            return (true, true, false);
+        }
+        // Reading twice narrows races but does NOT make this an atomic snapshot.
+        for _ in 0..2 {
+            let Ok(Some(current)) = read_limited(&source, max) else {
+                return (true, true, false);
+            };
+            if current.len() != entry.data.len() || digest(&current) != entry.sha256 {
+                return (true, true, false);
+            }
+        }
+    }
+    if payload.selected_project.is_none()
+        && local.join(LEGACY_APP_DIR).join("selected-project.txt").exists() {
+        return (true, true, false);
+    }
+    (true, true, true)
+}
+
 fn save_backup(local: &Path, profile: &Path, preview: &Path) -> Result<CredentialBackupReport, String> {
     let dest = archive_path(preview);
     if dest.exists() {
@@ -495,6 +539,28 @@ mod tests {
         fs::write(legacy_state(&profile, "oauth.json"),
             "{\"version\":1,\"clients\":[{\"clientId\":\"secret-fixture-client\"}],\"accessTokens\":[],\"refreshTokens\":[]}").unwrap();
         (local, profile, preview)
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn readiness_detects_changed_and_corrupt_archives_without_any_writes() {
+        let root = std::env::temp_dir().join(format!("c2c-readiness-{}-{}",
+            std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        let (local, profile, preview) = fixture(&root);
+        assert_eq!(inspect_backup_readiness(&local, &profile, &preview), (false, false, false));
+        save_backup(&local, &profile, &preview).unwrap();
+        let archive = fs::read(archive_path(&preview)).unwrap();
+        assert_eq!(inspect_backup_readiness(&local, &profile, &preview), (true, true, true));
+        let source = legacy_state(&profile, "oauth.json");
+        fs::write(&source, "{\"version\":1,\"clients\":[],\"accessTokens\":[],\"refreshTokens\":[]}").unwrap();
+        assert_eq!(inspect_backup_readiness(&local, &profile, &preview), (true, true, false));
+        let mut damaged = archive.clone();
+        *damaged.last_mut().unwrap() ^= 0x44;
+        fs::write(archive_path(&preview), damaged).unwrap();
+        assert_eq!(inspect_backup_readiness(&local, &profile, &preview), (true, false, false));
+        // The read-only inspection never repaired or replaced the archive.
+        assert_ne!(fs::read(archive_path(&preview)).unwrap(), archive);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(windows)]
