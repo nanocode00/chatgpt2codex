@@ -212,3 +212,12 @@ current-user DPAPI-encrypted **Owner Token hash + OAuth state + settings** backu
 with immediate read-back/integrity validation. It cannot restore to the live
 WinForms location, rotate a token, stop a server or take over port 7979.
 See [DPAPI credential backup limitations](../docs/TAURI_DPAPI_CREDENTIAL_BACKUP.md).
+
+## Encrypted restore rehearsal
+
+After creating/verifying the DPAPI credential backup, use
+**Settings → WinForms → Tauri 전환 준비 → 격리 복원 리허설 실행**
+to test a temporary, **encrypted-only shadow restoration** of the
+archive's owner/OAuth/settings entries. This does not write plaintext
+credential JSON to disk and does not affect WinForms or its port 7979.
+See [rehearsal limitations](../docs/TAURI_ENCRYPTED_RESTORE_REHEARSAL.md).

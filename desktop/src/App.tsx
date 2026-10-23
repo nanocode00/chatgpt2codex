@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { checkRuntime, inspectInstalledCli, inspectInstalledCliLogs, inspectPublicTunnel, manageOwnedCli, closePreviewWindow, isNativeApp, type CliInspection, type CliLogPreview, type CliLogComponent, type ManagedAction, type ManagedResult, type PublicTunnelHealth, type RuntimeHealth } from "./runtime";
 import { ManagementControls, LegacyConnectionControls, LegacyDiagnosticsControls, LegacySettingsControls } from "./LegacyControls";
 import { MigrationPreflight } from "./MigrationPreflight";
-import { inspectLegacyMigration, saveLegacySettingsSnapshot, inspectCredentialBackup, createCredentialBackup, type LegacyMigrationReport, type CredentialBackupReport } from "./runtime";
+import { inspectLegacyMigration, saveLegacySettingsSnapshot, inspectCredentialBackup, createCredentialBackup, rehearseCredentialRestore, type LegacyMigrationReport, type CredentialBackupReport, type RestoreRehearsalReport } from "./runtime";
 
 type Screen = "overview" | "manage" | "connections" | "diagnostics" | "settings";
 type ActivityEntry = { time: string; message: string; online: boolean };
@@ -64,6 +64,9 @@ function App() {
   const [credentialBackup, setCredentialBackup] = useState<CredentialBackupReport | null>(null);
   const [backupBusy, setBackupBusy] = useState(false);
   const [backupError, setBackupError] = useState("");
+  const [rehearsal, setRehearsal] = useState<RestoreRehearsalReport | null>(null);
+  const [rehearsalBusy, setRehearsalBusy] = useState(false);
+  const [rehearsalError, setRehearsalError] = useState("");
   const [history, setHistory] = useState<ActivityEntry[]>([]);
   const [copied, setCopied] = useState(false);
   const [settingError, setSettingError] = useState("");
@@ -160,6 +163,21 @@ function App() {
       setBackupError(error instanceof Error ? error.message : "암호화 백업 확인에 실패했습니다.");
     } finally {
       setBackupBusy(false);
+    }
+  }, [native]);
+
+  const runRestoreRehearsal = useCallback(async () => {
+    if (!native) return;
+    if (!window.confirm("암호화 백업을 별도 임시 폴더에서 복원·검증할까요? 평문 인증 파일은 저장하지 않으며 WinForms와 현재 MCP 서버는 그대로 둡니다.")) return;
+    setRehearsalBusy(true);
+    setRehearsalError("");
+    setRehearsal(null);
+    try {
+      setRehearsal(await rehearseCredentialRestore());
+    } catch (error) {
+      setRehearsalError(error instanceof Error ? error.message : "격리 복원 리허설에 실패했습니다.");
+    } finally {
+      setRehearsalBusy(false);
     }
   }, [native]);
 
@@ -448,7 +466,9 @@ function App() {
           <MigrationPreflight report={migrationReport} busy={migrationBusy} error={migrationError}
             onInspect={() => { void runMigrationCheck(); }} onSnapshot={() => { void runMigrationCheck(true); }}
             backup={credentialBackup} backupBusy={backupBusy} backupError={backupError}
-            onBackup={() => { void runBackupCheck(true); }} onVerifyBackup={() => { void runBackupCheck(false); }}/>
+            onBackup={() => { void runBackupCheck(true); }} onVerifyBackup={() => { void runBackupCheck(false); }}
+            rehearsal={rehearsal} rehearsalBusy={rehearsalBusy} rehearsalError={rehearsalError}
+            onRehearse={() => { void runRestoreRehearsal(); }}/>
         </>}
 
         <footer><span>ChatGPT To Codex · desktop preview</span><span><ExternalLink size={13}/> Local-first • Tauri + React</span></footer>

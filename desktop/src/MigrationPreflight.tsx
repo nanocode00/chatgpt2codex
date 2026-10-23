@@ -1,11 +1,11 @@
 import { Archive, CircleAlert, ClipboardCheck, FolderOpen, RefreshCcw, ShieldCheck } from "lucide-react";
-import type { CredentialBackupReport, LegacyMigrationReport } from "./runtime";
+import type { CredentialBackupReport, LegacyMigrationReport, RestoreRehearsalReport } from "./runtime";
 
 function StateTag({ ok, missing = "확인 불가" }: { ok: boolean; missing?: string }) {
   return <span className={"migration-status " + (ok ? "present" : "")}>{ok ? "확인됨" : missing}</span>;
 }
 
-export function MigrationPreflight({ report, busy, error, onInspect, onSnapshot, backup, backupBusy, backupError, onBackup, onVerifyBackup }: {
+export function MigrationPreflight({ report, busy, error, onInspect, onSnapshot, backup, backupBusy, backupError, onBackup, onVerifyBackup, rehearsal, rehearsalBusy, rehearsalError, onRehearse }: {
   report: LegacyMigrationReport | null;
   busy: boolean;
   error: string;
@@ -16,6 +16,10 @@ export function MigrationPreflight({ report, busy, error, onInspect, onSnapshot,
   backupError: string;
   onBackup: () => void;
   onVerifyBackup: () => void;
+  rehearsal: RestoreRehearsalReport | null;
+  rehearsalBusy: boolean;
+  rehearsalError: string;
+  onRehearse: () => void;
 }) {
   return <section className="panel page-panel legacy-spaced" aria-label="WinForms에서 Tauri로 전환 사전 점검">
     <div className="panel-heading">
@@ -89,6 +93,22 @@ export function MigrationPreflight({ report, busy, error, onInspect, onSnapshot,
           {backup?.verified && backup.oauthClients !== null ? " · OAuth 클라이언트 " + backup.oauthClients + "개" : ""}
         </p>
         {backup?.path && <p className="migration-path"><FolderOpen size={14}/>{backup.path}</p>}
+        <div className="migration-rehearsal">
+          <strong>격리 복원 리허설</strong>
+          <p>기존 서버를 멈추지 않고 암호화 백업을 격리된 임시 폴더에서 복원·재검증합니다.
+            임시 폴더에는 DPAPI 암호문만 저장하며 평문 인증 파일은 기록하지 않습니다.</p>
+          <button className="legacy-action available" type="button"
+            onClick={onRehearse} disabled={rehearsalBusy || !backup?.verified}>
+            <RefreshCcw size={16}/>{rehearsalBusy ? "복원 검증 중..." : "격리 복원 리허설 실행"}
+          </button>
+          {rehearsalError && <p className="tunnel-warning" role="alert">{rehearsalError}</p>}
+          {rehearsal && <p className="migration-rehearsal-result" role="status">
+            {rehearsal.passed ? "복원 리허설 통과" : "복원 리허설 미통과"} · 검증 파일 {rehearsal.restoredFiles}개
+            · OAuth 클라이언트 {rehearsal.oauthClients}개
+            · 임시 폴더 {rehearsal.temporaryDirectoryRetained ? "잔존" : "정리 완료"}
+            <span>{rehearsal.details}</span>
+          </p>}
+        </div>
         <p className="legacy-footnote">
           백업은 이 Windows 로그인 환경에 묶여 있으며 서버 중지 시점의 일관성을 보장하지 않습니다.
           디스크 오류·Windows 계정 손실 시 복원할 수 있다는 보증이 아니고,
