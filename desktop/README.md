@@ -9,6 +9,11 @@ install, start, stop, kill, or migrate an existing C2C MCP runtime.
 - Native Tauri 2 window with a React/Vite charcoal dashboard based on the
   user's reference screenshot; sidebar for Overview, Connections, Diagnostics,
   and Settings. Unlike the older WinForms UI, page layout is responsive.
+- **WinForms control inventory UI** in a new Management page and extra
+  Connections/Diagnostics/Settings panels. All unsupported operations
+  are visibly disabled and tagged "연동 예정"; they do not call native
+  server, touch tokens, change the public tunnel or save WinForms settings.
+  See [feature parity checklist](../docs/TAURI_WINFORMS_FEATURE_INVENTORY.md).
 - **Real read-only status probe** from the native Rust layer:
   `http://127.0.0.1:<port>/healthz`, verifying both `ok: true` and
   `name: "chatgpt2codex"`. This is a localhost-only, short-timeout,
@@ -66,6 +71,9 @@ npm run desktop:icon
 
 The scoped **Tauri Desktop Smoke** GitHub Actions job compiles an unsigned
 Windows **debug preview executable** via `tauri build --debug --no-bundle`.
+The Windows binary uses the **GUI subsystem even in debug builds** so
+launching the EXE from Explorer does not open an extra blank command window.
+CI validates the PE header subsystem as well as compiling the executable.
 When that run passes, download the `c2c-tauri-windows-preview` artifact
 from the PR workflow's Artifacts. It is **not a production installer**,
 is not signed and must not replace the installed WinForms app.

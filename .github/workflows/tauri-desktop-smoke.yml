@@ -33,6 +33,24 @@ jobs:
         run: cargo --version
       - name: Build unsigned Windows desktop preview (no installation)
         run: npm --prefix desktop run tauri:build -- --debug --no-bundle
+      - name: Verify Windows GUI subsystem (no console window)
+        shell: pwsh
+        run: |
+          $exePath = (Resolve-Path "desktop/src-tauri/target/debug/chatgpt2codex-desktop.exe").Path
+          $bytes = [IO.File]::ReadAllBytes($exePath)
+          if ($bytes.Length -lt 256) { throw "Invalid Windows executable" }
+          $peOffset = [BitConverter]::ToInt32($bytes, 0x3c)
+          if ($peOffset -lt 0 -or ($peOffset + 96) -gt $bytes.Length) {
+            throw "Invalid PE optional header location"
+          }
+          if ([Text.Encoding]::ASCII.GetString($bytes, $peOffset, 4) -ne "PE`0`0") {
+            throw "Missing PE signature"
+          }
+          $subsystem = [BitConverter]::ToUInt16($bytes, $peOffset + 24 + 68)
+          if ($subsystem -ne 2) {
+            throw "Expected IMAGE_SUBSYSTEM_WINDOWS_GUI (2), got $subsystem"
+          }
+          Write-Host "PASS: native GUI subsystem; debug preview does not allocate a console"
       - name: Publish preview executable for visual review
         uses: actions/upload-artifact@v4
         with:
