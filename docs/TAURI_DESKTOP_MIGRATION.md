@@ -4,6 +4,13 @@ Tracking: #51 (common CLI management); #47 (Linux desktop), #49 (Windows/WSL)
 and #48 (Windows native E2E). WinForms PR #52 is superseded as a **visual
 direction**, not a production release and not a prerequisite for this branch.
 
+**Current release gate (2026-10-23):** F1–F3 encrypted backup, isolated
+restore and synthetic CLI authentication verification have landed through
+#63. The phases below describe the original implementation roadmap, **not**
+permission to replace the installed WinForms runtime. Before any real
+default/7979 takeover, consult
+[F4 production cutover and rollback contract](TAURI_PRODUCTION_CUTOVER_ROLLBACK_GATE.md).
+
 ## Guiding architecture
 
 ```
