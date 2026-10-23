@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { Archive, CircleAlert, ClipboardCheck, FolderOpen, RefreshCcw, ShieldCheck } from "lucide-react";
-import type { CredentialBackupReport, LegacyMigrationReport, RestoreRehearsalReport } from "./runtime";
+import { inspectCutoverReadiness, isNativeApp, type CutoverReadiness, type CredentialBackupReport, type LegacyMigrationReport, type RestoreRehearsalReport } from "./runtime";
 
 function StateTag({ ok, missing = "확인 불가" }: { ok: boolean; missing?: string }) {
   return <span className={"migration-status " + (ok ? "present" : "")}>{ok ? "확인됨" : missing}</span>;
@@ -21,6 +22,22 @@ export function MigrationPreflight({ report, busy, error, onInspect, onSnapshot,
   rehearsalError: string;
   onRehearse: () => void;
 }) {
+  const [cutover, setCutover] = useState<CutoverReadiness | null>(null);
+  const [cutoverBusy, setCutoverBusy] = useState(false);
+  const [cutoverError, setCutoverError] = useState("");
+  async function runCutoverDryRun() {
+    if (!isNativeApp()) return;
+    setCutoverBusy(true);
+    setCutoverError("");
+    setCutover(null);
+    try {
+      setCutover(await inspectCutoverReadiness());
+    } catch {
+      setCutoverError("전환 준비 점검에 실패했습니다. 실제 전환은 계속 차단됩니다.");
+    } finally {
+      setCutoverBusy(false);
+    }
+  }
   return <section className="panel page-panel legacy-spaced" aria-label="WinForms에서 Tauri로 전환 사전 점검">
     <div className="panel-heading">
       <div className="panel-title"><span className="icon-tile"><Archive size={18}/></span>
@@ -114,6 +131,28 @@ export function MigrationPreflight({ report, busy, error, onInspect, onSnapshot,
           디스크 오류·Windows 계정 손실 시 복원할 수 있다는 보증이 아니고,
           서버 전환이나 원본 파일에 실제 복원하는 기능은 아직 없습니다.
         </p>
+      </div>
+      <div className="migration-backup-card" aria-label="F4 전환 준비 Dry-run">
+        <div className="migration-backup-title"><ShieldCheck size={18}/>
+          <div><strong>F4-B · 운영 전환 사전 점검 (읽기 전용)</strong>
+            <p>전환 차단 요인을 조회하는 Dry-run입니다. 실제 서버·인증정보·포트는 변경하지 않습니다.</p>
+          </div>
+        </div>
+        <button className="legacy-action available" type="button" onClick={() => { void runCutoverDryRun(); }}
+          disabled={cutoverBusy || !isNativeApp()}>
+          <RefreshCcw size={16}/>{cutoverBusy ? "점검 중..." : "전환 준비 Dry-run 실행"}
+        </button>
+        {cutoverError && <p className="tunnel-warning" role="alert">{cutoverError}</p>}
+        {cutover && <div className="migration-result" role="status" aria-live="polite">
+          <strong>{cutover.canTransitionNow ? "전환 가능" : "운영 전환 차단 · 점검 결과만 표시"}</strong>
+          <p className="migration-backup-description">확인됨 · 차단 · 추가 검증 필요를 구분했습니다.
+            이 기능에는 실제 전환 실행 버튼이 없습니다.</p>
+          {cutover.checks.map(item => <div className="migration-row" key={item.id}>
+            <strong>{item.label}</strong>
+            <span>{item.status === "passed" ? "확인됨" : item.status === "blocked" ? "차단" : "추가 검증 필요"}</span>
+            <p className="migration-backup-description">{item.details}</p>
+          </div>)}
+        </div>}
       </div>
       <p className="legacy-footnote">
         이 단계는 전환 가능 여부를 조사하는 작업이며, 실제 인계와 롤백용 전체 백업은 아닙니다.

@@ -168,3 +168,19 @@ export interface RestoreRehearsalReport {
 export async function rehearseCredentialRestore(): Promise<RestoreRehearsalReport> {
   return invoke<RestoreRehearsalReport>("rehearse_credential_restore");
 }
+
+export interface CutoverReadinessCheck {
+  id: string;
+  label: string;
+  status: "passed" | "blocked" | "unverified";
+  details: string;
+}
+export interface CutoverReadiness {
+  canTransitionNow: boolean;
+  dryRunOnly: boolean;
+  checks: CutoverReadinessCheck[];
+}
+/** Read-only and never a production cutover approval. */
+export async function inspectCutoverReadiness(): Promise<CutoverReadiness> {
+  return invoke<CutoverReadiness>("inspect_cutover_readiness");
+}
