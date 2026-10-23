@@ -77,18 +77,23 @@ impl Drop for Disposable {
 
 struct JournalLock {
     path: PathBuf,
-    _handle: File,
+    handle: Option<File>,
 }
 impl JournalLock {
     fn acquire(path: &Path) -> Result<Self, &'static str> {
         // Refuse a concurrent or stale lock. Never steal or kill an owner.
         let handle = OpenOptions::new().write(true).create_new(true)
             .open(path).map_err(|_| "journal lock already exists or is unavailable")?;
-        Ok(Self { path: path.to_path_buf(), _handle: handle })
+        Ok(Self { path: path.to_path_buf(), handle: Some(handle) })
     }
 }
 impl Drop for JournalLock {
-    fn drop(&mut self) { let _ = fs::remove_file(&self.path); }
+    fn drop(&mut self) {
+        // Close the open Windows handle before removing this synthetic lock.
+        // Do not remove any lock owned by a different transaction.
+        self.handle.take();
+        let _ = fs::remove_file(&self.path);
+    }
 }
 
 struct Journal {
@@ -319,6 +324,8 @@ fn synthetic_unknown_process_and_concurrent_lease_fail_closed() {
     assert_eq!(phase, Phase::RolledBack);
     assert!(foreign.source_running && !foreign.target_running);
     assert_eq!(foreign.mutation_count, 0);
+    drop(journal);
+    assert!(!root.join("owner.lock").exists(), "fixture lock must be released after handle closes");
 }
 
 #[test]
