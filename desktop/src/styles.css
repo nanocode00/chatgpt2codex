@@ -205,3 +205,17 @@ button:focus-visible,input:focus-visible{outline:2px solid #999;outline-offset:2
 .migration-rehearsal p{font-size:11px;line-height:1.75;color:#bdbdbd;margin:9px 0 14px}
 .migration-rehearsal-result{border-top:1px solid #3f3f3f;padding-top:12px;color:#a7cfb4!important}
 .migration-rehearsal-result span{display:block;margin-top:7px;font-size:11px;line-height:1.75;color:#c0c0c0}
+
+/* F4-B Windows feedback: status and label on one row; explanation below.
+   Do not inherit the older migration-row flex layout which squeezes text. */
+.cutover-result{padding:15px 17px 8px;min-width:0}
+.cutover-result>strong{display:block;font-size:13px;font-weight:650;margin-bottom:8px}
+.cutover-result>.migration-backup-description{margin:6px 0 16px}
+.cutover-check{border-top:1px solid #383838;padding:14px 0;min-width:0}
+.cutover-check-heading{display:flex;gap:12px;align-items:center;justify-content:space-between;min-width:0}
+.cutover-check-heading strong{font-size:12px;font-weight:600;color:#ddd;overflow-wrap:anywhere}
+.cutover-check-status{flex:0 0 auto;border:1px solid #454545;border-radius:7px;padding:5px 8px;font-size:10px;color:#bcbcbc}
+.cutover-check-status.passed{border-color:#3e6751;color:#9acda9}
+.cutover-check-status.blocked{border-color:#7f4e4e;color:#dba2a2}
+.cutover-check p{font-size:11px;line-height:1.7;color:#aaa;margin:8px 0 0;overflow-wrap:anywhere}
+@media(max-width:760px){.cutover-check-heading{align-items:flex-start}.cutover-check-status{white-space:nowrap}}

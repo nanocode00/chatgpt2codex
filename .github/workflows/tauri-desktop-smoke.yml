@@ -9,6 +9,7 @@ on:
       - "src/runtime/instances.test.ts"
       - "scripts/package-tauri-cli-preview.ps1"
       - "scripts/test-windows-cli-lifecycle-isolated.ps1"
+      - "scripts/test-windows-f4-native-rollback.ps1"
       - ".github/workflows/tauri-desktop-smoke.yml"
   workflow_dispatch:
 
@@ -46,6 +47,11 @@ jobs:
       - name: Test native Windows no-tunnel CLI start stop restart and PID ownership
         shell: pwsh
         run: ./scripts/test-windows-cli-lifecycle-isolated.ps1
+      - name: F4-C1 real disposable CLI cutover and rollback (no legacy runtime)
+        shell: pwsh
+        env:
+          C2C_F4C1_E2E: "true"
+        run: ./scripts/test-windows-f4-native-rollback.ps1
       - name: Create isolated bundled CLI runtime
         shell: pwsh
         run: |
