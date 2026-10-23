@@ -16,6 +16,11 @@ install, start, stop, kill, or migrate an existing C2C MCP runtime.
 - Copy the **local-only** MCP address; session-only history of health checks.
 - Local UI preference for the health-check port and periodic refresh; this
   **does not change the real CLI's port or server configuration**.
+- The Connections screen can **read the installed Windows C2C CLI's default
+  instance health** via the bundled `bin/node.exe` and `dist/cli.js`.
+  The Rust host invokes only the fixed `health --instance default` command,
+  with a bounded timeout and no shell. This inspects the legacy installed
+  runtime without claiming the new UI owns it.
 - Browser Vite preview works, but correctly labels status as preview-only:
   browser mode does not probe the local MCP runtime or show fake online state.
 
@@ -83,3 +88,22 @@ Windows this does not interact with the installed WinForms application.
   your live Windows v0.3.1 install.
 - Don't put Owner Tokens in the React frontend or browser storage.
 - Follow [migration roadmap](../docs/TAURI_DESKTOP_MIGRATION.md).
+
+## Native CLI read-only inspection
+
+In the Tauri **Connections** screen select **CLI 조회**. The native app
+looks only for the fixed Windows install location:
+
+`%LOCALAPPDATA%/Programs/ChatGPT To Codex/bin/node.exe` and
+`%LOCALAPPDATA%/Programs/ChatGPT To Codex/dist/cli.js`.
+
+The CLI command is `health --instance default` with a validated, fixed
+instance name. It reports whether the *installed CLI's own state record*
+believes the instance is alive/healthy and, if available, tunnel health.
+It is distinct from the native localhost `/healthz` check: both can show
+healthy for different reasons and neither proves safe process ownership.
+
+If the installed CLI isn't found, the app returns an explicit unavailable
+message. It never searches PATH, downloads Node, rotates tokens, modifies
+the runtime or sends a stop/restart signal. Linux support for a packaged
+Node CLI comes later.

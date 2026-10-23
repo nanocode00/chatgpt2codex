@@ -5,7 +5,7 @@ import {
   Settings2, ShieldCheck, TerminalSquare, Wifi, WifiOff
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { checkRuntime, isNativeApp, type RuntimeHealth } from "./runtime";
+import { checkRuntime, inspectInstalledCli, isNativeApp, type CliInspection, type RuntimeHealth } from "./runtime";
 
 type Screen = "overview" | "connections" | "diagnostics" | "settings";
 type ActivityEntry = { time: string; message: string; online: boolean };
@@ -41,6 +41,8 @@ function App() {
   const [autoRefresh, setAutoRefresh] = useState(loadAutoRefresh);
   const [status, setStatus] = useState<RuntimeHealth | null>(null);
   const [checking, setChecking] = useState(false);
+  const [cliChecking, setCliChecking] = useState(false);
+  const [cliInspection, setCliInspection] = useState<CliInspection | null>(null);
   const [history, setHistory] = useState<ActivityEntry[]>([]);
   const [copied, setCopied] = useState(false);
   const [settingError, setSettingError] = useState("");
@@ -76,6 +78,26 @@ function App() {
     const interval = setInterval(() => { void runCheck(); }, 10_000);
     return () => clearInterval(interval);
   }, [autoRefresh, native, runCheck]);
+
+
+  const runCliInspection = useCallback(async () => {
+    setCliChecking(true);
+    try {
+      setCliInspection(await inspectInstalledCli("default"));
+    } catch {
+      setCliInspection({
+        available: false, instance: "default", alive: false, healthy: false,
+        tunnelAlive: null, publicHealthy: null, endpoint: null,
+        details: "설치된 CLI 상태 조회가 실패했습니다."
+      });
+    } finally {
+      setCliChecking(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (screen === "connections") void runCliInspection();
+  }, [screen, runCliInspection]);
 
   const endpoint = useMemo(() => "http://127.0.0.1:" + port + "/mcp", [port]);
   const serverOnline = native && !!status?.online;
@@ -192,6 +214,31 @@ function App() {
         {screen === "connections" && <>
           <div className="page-heading"><div><div className="eyebrow">CONNECTIVITY</div><h1>연결</h1><p>C2C 서버의 로컬 주소와 연결 가능 상태를 확인합니다.</p></div></div>
           <section className="panel page-panel"><div className="panel-heading"><div className="panel-title"><span className="icon-tile"><PlugZap size={18}/></span><div><h2>로컬 MCP 엔드포인트</h2><p>로컬 상태 검사와 동일한 포트를 사용합니다.</p></div></div>{statusTag()}</div><label className="field-label" htmlFor="connections-endpoint">LOCAL ADDRESS</label><div className="endpoint roomy"><input id="connections-endpoint" readOnly value={endpoint}/><button type="button" onClick={() => { void copyLocalEndpoint(); }}>{copied ? <Check size={16}/> : <Clipboard size={16}/>} {copied ? "복사 완료" : "복사"}</button></div><div className="info-row"><ShieldCheck size={18}/><div><strong>로컬 주소만 표시</strong><p>Owner Token을 읽거나 표시하지 않으며 외부 터널을 생성하지 않습니다.</p></div></div><div className="info-row"><CircleHelp size={18}/><div><strong>ChatGPT 웹 연결은 별도 설정</strong><p>기존 Windows 앱의 Cloudflare Quick Tunnel은 재시작 시 주소가 달라질 수 있습니다. 이 프리뷰는 터널 설정을 변경하지 않습니다.</p></div></div></section>
+          <section className="panel page-panel" style={{ marginTop: 20 }}>
+            <div className="panel-heading">
+              <div className="panel-title"><span className="icon-tile"><TerminalSquare size={18}/></span>
+                <div><h2>CLI 관리 인스턴스</h2><p>기존 Windows 설치본 · default 인스턴스</p></div>
+              </div>
+              <button className="secondary-btn" type="button" disabled={cliChecking} onClick={() => { void runCliInspection(); }}>
+                <RefreshCcw size={15}/>{cliChecking ? "조회 중..." : "CLI 조회"}
+              </button>
+            </div>
+            <div className="info-row">
+              <ShieldCheck size={18}/>
+              <div>
+                <strong>{cliInspection?.available ? (cliInspection.healthy ? "CLI 인스턴스 정상" : "CLI 인스턴스 미응답") : "CLI 확인 필요"}</strong>
+                <p>{cliInspection?.details ?? "CLI 상태 정보를 조회하는 중입니다."}</p>
+                {cliInspection?.available && <p>인스턴스: {cliInspection.instance} · 서버: {cliInspection.alive ? "실행 중" : "꺼짐"} · 터널: {cliInspection.tunnelAlive === null ? "정보 없음" : cliInspection.tunnelAlive ? "실행 중" : "꺼짐"}</p>}
+                {cliInspection?.available && cliInspection.endpoint && <p>CLI Health: {cliInspection.endpoint}</p>}
+              </div>
+            </div>
+            <div className="info-row">
+              <LockKeyhole size={18}/>
+              <div><strong>안전한 읽기 전용 연결</strong>
+                <p>설치된 CLI의 health 명령만 사용합니다. MCP 서버를 시작·종료하지 않고 Owner Token도 읽지 않습니다.</p>
+              </div>
+            </div>
+          </section>
         </>}
 
         {screen === "diagnostics" && <>

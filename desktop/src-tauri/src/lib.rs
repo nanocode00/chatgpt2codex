@@ -1,3 +1,5 @@
+mod cli_health;
+
 use serde::Serialize;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
@@ -81,7 +83,7 @@ async fn runtime_health(port: u16) -> Result<RuntimeHealth, String> {
 
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![runtime_health])
+        .invoke_handler(tauri::generate_handler![runtime_health, cli_health::inspect_cli_health])
         .run(tauri::generate_context!())
         .expect("failed to start ChatGPT To Codex desktop");
 }
