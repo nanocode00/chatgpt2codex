@@ -29,8 +29,25 @@ def shell(argv, env, *, cwd=None, timeout=30):
                                capture_output=True, timeout=timeout)
     if completed.returncode:
         # Never print init output here: it may include an owner token.
+        # Standalone restart/stop only: its error never includes token
+        # generation output. Print its refusal reason for CI diagnosis.
+        detail = ""
+        if len(argv) > 1 and str(argv[1]) in ("restart", "stop"):
+            detail = " stderr=" + completed.stderr.strip()[:600]
+            runtime = Path(env["HOME"]) / ".local/share/chatgpt2codex/runtime"
+            for candidate in runtime.glob("standalone-e2e.json"):
+                try:
+                    record = json.loads(candidate.read_text())
+                    pid = record.get("pid")
+                    command = Path("/proc") / str(pid) / "cmdline"
+                    args = command.read_bytes().split(b"\\0") if command.is_file() else []
+                    parts = [p.decode(errors="replace") for p in args if p]
+                    detail += " proc_argv=" + repr(parts[:15])[:900]
+                    detail += " recorded_entrypoint=" + repr(record.get("entrypoint"))
+                except (OSError, ValueError):
+                    pass
         raise AssertionError("Isolated C2C command failed: " + " ".join(str(x) for x in argv[:2])
-                             + " (exit " + str(completed.returncode) + ")")
+                             + " (exit " + str(completed.returncode) + ")" + detail)
     return completed.stdout
 
 

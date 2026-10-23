@@ -87,3 +87,21 @@ export async function inspectPublicTunnel(instance = "default"): Promise<PublicT
   }
   return invoke<PublicTunnelHealth>("inspect_public_tunnel_health", { instance });
 }
+
+export type ManagedAction = "status" | "prepare" | "start" | "stop" | "restart";
+export interface ManagedResult {
+  available: boolean;
+  ready: boolean;
+  running: boolean;
+  instance: string;
+  port: number;
+  details: string;
+  oneTimeOwnerToken?: string;
+}
+export async function manageOwnedCli(action: ManagedAction): Promise<ManagedResult> {
+  if (!isNativeApp()) {
+    return { available: false, ready: false, running: false,
+      instance: "tauri-preview-v1", port: 18797, details: "Windows Tauri 프리뷰에서만 지원합니다." };
+  }
+  return invoke<ManagedResult>("manage_owned_cli", { action });
+}

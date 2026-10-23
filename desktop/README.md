@@ -192,3 +192,7 @@ not marked Offline**; their trust policy must be reviewed separately to
 avoid probing localhost/private networks through a configurable hostname.
 The UI does not currently claim that it knows the user's ChatGPT plugin
 registration or connector authorization state.
+
+## Isolated CLI manager
+
+The Management page can now operate an independently bundled, audited Node C2C instance on port 18797. This requires the complete Windows preview ZIP (including c2c-runtime/) and explicit one-time token preparation. The installed WinForms instance, port 7979 and token remain untouched. See [isolated CLI lifecycle notes](../docs/TAURI_OWNED_CLI_PREVIEW.md).

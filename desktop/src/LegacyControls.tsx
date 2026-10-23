@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { CliLogComponent, CliLogPreview } from "./runtime";
+import type { CliLogComponent, CliLogPreview, ManagedResult, ManagedAction } from "./runtime";
 import {
   ArrowRight, Cloud, Copy, Download, ExternalLink, FileText, FolderOpen,
   Globe2, HeartPulse, KeyRound, Monitor, Play, Power, RefreshCcw,
@@ -49,26 +49,61 @@ function LockedField({ placeholder = "CLI 설정을 연결한 후 표시됩니�
     aria-label={placeholder} />;
 }
 
-export function ManagementControls({ onConnections, onSettings, onExit, exitError }: {
+export function ManagementControls({ onConnections, onSettings, onExit, exitError,
+  owned, ownedBusy, ownedError, ownedToken, onOwnedAction, onCopyToken }: {
   onConnections: () => void; onSettings: () => void;
   onExit: () => void; exitError: string;
+  owned: ManagedResult | null; ownedBusy: boolean; ownedError: string;
+  ownedToken: string | null;
+  onOwnedAction: (action: ManagedAction) => void;
+  onCopyToken: () => void;
 }) {
   return <>
     <section className="panel page-panel">
-      <SectionHeading title="MCP 서버 제어" icon={<TerminalSquare size={18}/>}
-        description="CLI가 생성하고 소유권을 확인한 인스턴스만 제어합니다."/>
+      <SectionHeading title="MCP 서버 제어" icon={<TerminalSquare size={18}/>} status="독립 인스턴스"
+        description="검증된 번들 CLI가 만든 별도 로컬 인스턴스만 관리합니다."/>
       <div className="legacy-body">
         <p className="legacy-explanation"><ShieldCheck size={17}/>
-          현재 Windows v0.3.1 서버는 기존 런처가 관리합니다.
-          Tauri의 제어 기능이 검증될 때까지 서버를 시작하거나 종료하지 않습니다.
+          기존 WinForms v0.3.1 서버 (7979)는 그대로 유지합니다.
+          이 화면은 격리된 별도 인스턴스 (18797)와 자체 Owner Token만 사용하며,
+          Cloudflare 터널은 생성하지 않습니다.
         </p>
-        <div className="legacy-actions large">
-          <PendingButton label="MCP 시작" icon={<Play size={17}/>} prominent/>
-          <PendingButton label="MCP 중지" icon={<Square size={17}/>} />
-          <PendingButton label="MCP 재시작" icon={<RotateCw size={17}/>} />
+        <div className="legacy-owned-status" role="status">
+          <strong>{owned?.available
+            ? owned.running ? "전용 MCP Online" : owned.ready ? "전용 MCP 중지됨" : "전용 MCP 초기 설정 필요"
+            : "번들 CLI 확인 필요"}</strong>
+          <p>{owned?.details ?? "전용 CLI 상태를 확인하고 있습니다."}</p>
+          <small>인스턴스: tauri-preview-v1 · 로컬 주소: http://127.0.0.1:18797/mcp</small>
         </div>
+        <div className="legacy-actions large">
+          <button className="legacy-action available" type="button" onClick={() => onOwnedAction("status")} disabled={ownedBusy}>
+            <RefreshCcw size={16}/>{ownedBusy ? "작업 중..." : "상태 조회"}
+          </button>
+          <button className="legacy-action available" type="button" onClick={() => onOwnedAction("prepare")} disabled={ownedBusy || !owned?.available || owned.ready}>
+            <KeyRound size={16}/>전용 인스턴스 준비
+          </button>
+          <button className="legacy-action available" type="button" onClick={() => onOwnedAction("start")} disabled={ownedBusy || !owned?.ready || owned.running}>
+            <Play size={17}/>MCP 시작
+          </button>
+          <button className="legacy-action available" type="button" onClick={() => onOwnedAction("stop")} disabled={ownedBusy || !owned?.running}>
+            <Square size={17}/>MCP 중지
+          </button>
+          <button className="legacy-action available" type="button" onClick={() => onOwnedAction("restart")} disabled={ownedBusy || !owned?.running}>
+            <RotateCw size={17}/>MCP 재시작
+          </button>
+        </div>
+        {ownedError && <p className="tunnel-warning" role="alert">{ownedError}</p>}
+        {ownedToken && <div className="legacy-token-notice" role="status">
+          <strong>전용 Owner Token이 생성됐습니다 (최초 1회 표시)</strong>
+          <p>기존 WinForms 토큰과 무관합니다. 화면에 내용을 그대로 표시하지 않으며,
+            복사하면 앱 내 임시 값은 즉시 지워집니다.</p>
+          <button className="legacy-action available" type="button" onClick={onCopyToken}>
+            <Copy size={16}/>새 토큰 복사 및 화면에서 지우기
+          </button>
+        </div>}
+        <p className="legacy-footnote">버튼은 CLI 소유권 검증에 실패하면 작동하지 않습니다. 전용 포트가 이미 사용 중이면 다른 프로세스를 종료하지 않습니다.</p>
         <button type="button" className="text-action legacy-link" onClick={onConnections}>
-          기존 CLI 상태 조회로 이동 <ArrowRight size={16}/>
+          기존 WinForms CLI 상태 조회로 이동 <ArrowRight size={16}/>
         </button>
       </div>
     </section>
