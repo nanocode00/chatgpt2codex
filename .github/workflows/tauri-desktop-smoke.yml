@@ -1,0 +1,42 @@
+name: Tauri Desktop Smoke
+
+on:
+  pull_request:
+    paths:
+      - "desktop/**"
+      - ".github/workflows/tauri-desktop-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tauri-smoke-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci --prefix desktop --no-audit --no-fund
+      - name: Typecheck and build React UI
+        run: npm run desktop:build
+      - name: Check Rust toolchain
+        run: cargo --version
+      - name: Build unsigned Windows desktop preview (no installation)
+        run: npm --prefix desktop run tauri:build -- --debug --no-bundle
+      - name: Publish preview executable for visual review
+        uses: actions/upload-artifact@v4
+        with:
+          name: c2c-tauri-windows-preview
+          path: desktop/src-tauri/target/debug/chatgpt2codex-desktop.exe
+          if-no-files-found: error
+          retention-days: 7

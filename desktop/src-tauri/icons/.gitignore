@@ -1,0 +1,10 @@
+# Keep desktop icon assets for supported desktop targets only.
+# 'npm run desktop:icon' also generates mobile/store tiles we do not ship.
+*
+!/.gitignore
+!/icon.ico
+!/icon.icns
+!/icon.png
+!/32x32.png
+!/128x128.png
+!/128x128@2x.png
