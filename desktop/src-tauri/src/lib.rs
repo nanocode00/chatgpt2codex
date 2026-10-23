@@ -5,6 +5,9 @@ mod managed_cli;
 mod migration;
 mod migration_backup;
 mod cutover_readiness;
+// Never link cutover mutation exercises into any release binary. Fixture only.
+#[cfg(test)]
+mod cutover_transaction_fixture;
 
 use serde::Serialize;
 use std::io::{Read, Write};
