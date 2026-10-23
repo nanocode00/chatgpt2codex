@@ -157,3 +157,14 @@ button:focus-visible,input:focus-visible{outline:2px solid #999;outline-offset:2
 .legacy-log-viewer{margin-top:18px;border:1px solid #424242;background:#171717;border-radius:11px;padding:15px;min-width:0}
 .legacy-log-caption{font-size:11px;line-height:1.6;color:#bdbdbd;margin-bottom:11px}
 .legacy-log-viewer pre{margin:0;max-height:325px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;line-height:1.6;color:#c4c4c4;font-family:Consolas,ui-monospace,monospace;tab-size:2}
+
+/* Independent remote Health status; not a claim about CLI process ownership. */
+.tunnel-status{display:flex;align-items:flex-start;gap:11px;padding:14px 16px;border:1px solid #3d3d3d;background:#262626;border-radius:11px;margin:0 0 14px;color:#bcbcbc}
+.tunnel-status svg{flex:none;margin-top:2px}
+.tunnel-status strong{font-size:12px;color:#e2e2e2}
+.tunnel-status p{font-size:11px;line-height:1.75;color:#a5a5a5;margin-top:7px}
+.tunnel-status.healthy{border-color:#345e49}
+.tunnel-status.healthy svg{color:#6fb18c}
+.tunnel-status.unreachable{border-color:#725442}
+.tunnel-status.unreachable svg{color:#d3a178}
+.tunnel-warning{margin:8px 0 17px;padding:12px 14px;border:1px solid #725442;border-radius:9px;color:#e8c6a5;font-size:11px;line-height:1.7}

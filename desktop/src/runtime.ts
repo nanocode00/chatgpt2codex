@@ -71,3 +71,19 @@ export async function closePreviewWindow(): Promise<void> {
   if (!isNativeApp()) return;
   await invoke<void>("close_preview_window");
 }
+
+export type PublicTunnelState = "online" | "offline" | "unavailable" | "unsupported";
+
+export interface PublicTunnelHealth {
+  state: PublicTunnelState;
+  endpoint: string | null;
+  details: string;
+}
+
+/** Read-only public HTTPS probe. No token is used or sent. */
+export async function inspectPublicTunnel(instance = "default"): Promise<PublicTunnelHealth> {
+  if (!isNativeApp()) {
+    return { state: "unavailable", endpoint: null, details: "공개 상태 확인은 Tauri 네이티브 앱에서만 지원합니다." };
+  }
+  return invoke<PublicTunnelHealth>("inspect_public_tunnel_health", { instance });
+}

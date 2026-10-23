@@ -5,7 +5,7 @@ import {
   Settings2, ShieldCheck, TerminalSquare, Wifi, WifiOff
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { checkRuntime, inspectInstalledCli, inspectInstalledCliLogs, closePreviewWindow, isNativeApp, type CliInspection, type CliLogPreview, type CliLogComponent, type RuntimeHealth } from "./runtime";
+import { checkRuntime, inspectInstalledCli, inspectInstalledCliLogs, inspectPublicTunnel, closePreviewWindow, isNativeApp, type CliInspection, type CliLogPreview, type CliLogComponent, type PublicTunnelHealth, type RuntimeHealth } from "./runtime";
 import { ManagementControls, LegacyConnectionControls, LegacyDiagnosticsControls, LegacySettingsControls } from "./LegacyControls";
 
 type Screen = "overview" | "manage" | "connections" | "diagnostics" | "settings";
@@ -45,6 +45,9 @@ function App() {
   const [checking, setChecking] = useState(false);
   const [cliChecking, setCliChecking] = useState(false);
   const [cliInspection, setCliInspection] = useState<CliInspection | null>(null);
+  const [tunnelHealth, setTunnelHealth] = useState<PublicTunnelHealth | null>(null);
+  const [tunnelChecking, setTunnelChecking] = useState(false);
+  const [tunnelNotice, setTunnelNotice] = useState("");
   const [logResult, setLogResult] = useState<CliLogPreview | null>(null);
   const [logsChecking, setLogsChecking] = useState(false);
   const [publicCopied, setPublicCopied] = useState(false);
@@ -54,6 +57,8 @@ function App() {
   const [settingError, setSettingError] = useState("");
   const [settingsNotice, setSettingsNotice] = useState("");
   const requestCounter = useRef(0);
+  const tunnelBusy = useRef(false);
+  const lastTunnel = useRef<PublicTunnelHealth | null>(null);
 
   const runCheck = useCallback(async () => {
     const current = ++requestCounter.current;
@@ -105,19 +110,70 @@ function App() {
     if (screen === "connections") void runCliInspection();
   }, [screen, runCliInspection]);
 
+  const runTunnelCheck = useCallback(async () => {
+    // A foreground/resume event can coincide with the one-minute poll.
+    if (tunnelBusy.current) return;
+    tunnelBusy.current = true;
+    setTunnelChecking(true);
+    try {
+      const next = await inspectPublicTunnel("default");
+      const previous = lastTunnel.current;
+      if (previous?.endpoint && next.endpoint && previous.endpoint !== next.endpoint) {
+        setTunnelNotice("Quick Tunnel 주소가 변경됐습니다. ChatGPT에 등록된 커넥터 주소도 확인하세요.");
+      } else if (previous?.state === "online" && next.state === "offline") {
+        setTunnelNotice("로컬 MCP와 별개로 공개 터널 연결이 끊겼습니다. WinForms에서 터널 상태를 확인해 주세요.");
+      } else if (next.state === "online") {
+        setTunnelNotice("");
+      }
+      setTunnelHealth(next);
+      lastTunnel.current = next;
+    } catch {
+      const failed: PublicTunnelHealth = {
+        state: "unavailable", endpoint: null,
+        details: "공개 상태를 검사하지 못했습니다."
+      };
+      setTunnelHealth(failed);
+      lastTunnel.current = failed;
+    } finally {
+      tunnelBusy.current = false;
+      setTunnelChecking(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!native) return;
+    void runTunnelCheck();
+    // Public URLs are less stable than localhost. Check independently, at
+    // most once a minute and whenever the WebView resumes / comes to front.
+    const interval = window.setInterval(() => { void runTunnelCheck(); }, 60_000);
+    const onResume = () => { void runCheck(); void runTunnelCheck(); };
+    const onVisible = () => { if (document.visibilityState === "visible") onResume(); };
+    window.addEventListener("focus", onResume);
+    window.addEventListener("online", onResume);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", onResume);
+      window.removeEventListener("online", onResume);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [native, runTunnelCheck, runCheck]);
+
+  const tunnelOnline = tunnelHealth?.state === "online";
+  const tunnelOffline = tunnelHealth?.state === "offline";
+  const tunnelLabel = tunnelOnline ? "Online" : tunnelOffline ? "Offline" : "미확인";
+
   const publicConnector = cliInspection?.available ? cliInspection.publicConnector : null;
-  const publicState = !cliInspection
-    ? "설치된 CLI에서 공개 연결 정보를 확인합니다."
-    : publicConnector
-      ? (cliInspection?.publicHealthy === true
-        ? "설치된 CLI가 공개 Health를 정상으로 확인했습니다. 주소가 변경되면 다시 조회하세요."
-        : "CLI에 기록된 공개 주소입니다. 현재 외부 연결은 미검증이므로 재시작 후 주소가 바뀌지 않았는지 확인하세요.")
-      : cliInspection.available
-        ? "공개 연결이 확인되지 않았습니다. 터널이나 CLI 상태를 확인해 주세요."
-        : cliInspection.details;
+  const publicState = tunnelHealth?.details ??
+    (!cliInspection ? "설치된 CLI에서 공개 연결 정보를 확인합니다." : cliInspection.details);
+
+  function refreshPublicState() {
+    void runCliInspection();
+    void runTunnelCheck();
+  }
 
   async function copyPublicConnector() {
-    if (!publicConnector) return;
+    if (!publicConnector || tunnelOffline) return;
     try {
       await navigator.clipboard.writeText(publicConnector);
       setPublicCopied(true);
@@ -229,7 +285,7 @@ function App() {
           <div className="metrics">
             <div className="metric"><div className="metric-label"><Gauge size={17}/>런타임 상태</div><strong>{serverOnline ? "Online" : "Offline"}</strong><span>{stateLabel}</span></div>
             <div className="metric"><div className="metric-label"><TerminalSquare size={17}/>로컬 포트</div><strong>{port}</strong><span>127.0.0.1</span></div>
-            <div className="metric"><div className="metric-label"><ShieldCheck size={17}/>접근 범위</div><strong>Local</strong><span>읽기 전용 상태 조회</span></div>
+            <div className="metric"><div className="metric-label"><ShieldCheck size={17}/>공개 터널</div><strong>{tunnelLabel}</strong><span>{tunnelOnline ? "HTTPS Health 확인" : tunnelOffline ? "외부 연결 실패 · 로컬은 별도" : "상태 확인 필요"}</span></div>
           </div>
 
           <div className="content-grid">
@@ -248,7 +304,7 @@ function App() {
                 <div className="panel-heading"><div className="panel-title"><span className="icon-tile"><PlugZap size={18}/></span><div><h2>MCP 연결</h2><p>로컬 커넥터 주소</p></div></div></div>
                 <label className="field-label" htmlFor="overview-endpoint">Local endpoint</label>
                 <div className="endpoint"><input id="overview-endpoint" readOnly value={endpoint} aria-label="로컬 MCP URL"/><button type="button" aria-label="로컬 URL 복사" onClick={() => { void copyLocalEndpoint(); }}>{copied ? <Check size={16}/> : <Copy size={16}/>}</button></div>
-                <div className="informative-note"><CircleAlert size={16}/><span>로컬 주소는 ChatGPT 웹에서 직접 접근할 수 없어요. 외부 터널은 아직 이 화면에서 관리하지 않습니다.</span></div>
+                <div className="informative-note"><CircleAlert size={16}/><span>{tunnelOffline ? "로컬 MCP는 정상이어도 공개 Quick Tunnel은 현재 연결되지 않습니다." : "로컬 주소는 ChatGPT 웹에서 직접 접근할 수 없어요. 공개 터널은 별도로 검사합니다."}</span></div>
                 <button type="button" className="text-action" onClick={() => setScreen("connections")}>연결 자세히 보기 <ChevronRight size={16}/></button>
               </section>
               <section className="panel project-panel">
@@ -295,13 +351,13 @@ function App() {
               </div>
             </div>
           </section>
-          <LegacyConnectionControls publicConnector={publicConnector ?? null} publicState={publicState} onCopyPublic={() => { void copyPublicConnector(); }} publicCopied={publicCopied} onRefreshPublic={() => { void runCliInspection(); }} checking={cliChecking}/>
+          <LegacyConnectionControls publicConnector={publicConnector ?? null} publicState={publicState} publicVerified={tunnelOnline} publicOffline={tunnelOffline} publicNotice={tunnelNotice} onCopyPublic={() => { void copyPublicConnector(); }} publicCopied={publicCopied} onRefreshPublic={refreshPublicState} checking={cliChecking || tunnelChecking}/>
         </>}
 
         {screen === "diagnostics" && <>
           <div className="page-heading"><div><div className="eyebrow">DIAGNOSTICS</div><h1>진단</h1><p>로컬 Health 검사 기록과 설치된 CLI의 서버·터널 로그를 확인합니다.</p></div><button className="secondary-btn" onClick={() => { void runCheck(); }} disabled={checking}><RefreshCcw size={16}/> 다시 확인</button></div>
           <section className="panel page-panel"><div className="panel-heading"><div className="panel-title"><span className="icon-tile"><Activity size={18}/></span><div><h2>상태 확인 기록</h2><p>현재 세션 · 최근 12건</p></div></div>{statusTag()}</div><div className="event-list">{history.length ? history.map((item, i) => <div className="event" key={item.time + i}><span className={"event-dot " + (item.online ? "ok" : "")}/><div><strong>{item.online ? "Health 확인 성공" : "Health 확인"}</strong><p>{item.message}</p></div><time>{item.time}</time></div>) : <p className="description">아직 검사 기록이 없습니다.</p>}</div></section>
-          <LegacyDiagnosticsControls checking={checking} onLocalHealth={() => { void runCheck(); }} onViewLogs={(component) => { void loadCliLogs(component); }} logsChecking={logsChecking} logResult={logResult}/>
+          <LegacyDiagnosticsControls checking={checking} onLocalHealth={() => { void runCheck(); }} onPublicHealth={refreshPublicState} tunnelChecking={tunnelChecking || cliChecking} tunnelStatus={tunnelHealth?.details ?? "아직 검사하지 않았습니다."} onViewLogs={(component) => { void loadCliLogs(component); }} logsChecking={logsChecking} logResult={logResult}/>
         </>}
 
         {screen === "settings" && <>
