@@ -60,8 +60,12 @@ jobs:
             -CliEntrypoint "desktop/src-tauri/target/debug/c2c-runtime/dist/cli.js"
       - name: Check Rust toolchain
         run: cargo --version
-      - name: Unit-test native CLI URL and log safety checks
+      - name: Unit-test native CLI URL, DPAPI backup and log safety checks
         run: cargo test --manifest-path desktop/src-tauri/Cargo.toml --lib
+      - name: F3 disposable DPAPI restore and authenticated MCP E2E
+        env:
+          C2C_F3_E2E: "true"
+        run: cargo test --manifest-path desktop/src-tauri/Cargo.toml --lib encrypted_fixture_restores_to_disposable_cli_and_authenticates -- --nocapture
       - name: Build unsigned Windows desktop preview (no installation)
         run: npm --prefix desktop run tauri:build -- --debug --no-bundle
       - name: Verify Windows GUI subsystem (no console window)
