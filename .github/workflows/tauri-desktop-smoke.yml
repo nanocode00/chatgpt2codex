@@ -76,6 +76,10 @@ jobs:
         env:
           C2C_F4C_E2E: "true"
         run: cargo test --manifest-path desktop/src-tauri/Cargo.toml --lib cutover_transaction_fixture -- --nocapture
+      - name: F4-C2 disposable Windows directory handover and crash recovery
+        env:
+          C2C_F4C2_E2E: "true"
+        run: cargo test --manifest-path desktop/src-tauri/Cargo.toml --lib cutover_file_fixture -- --nocapture
       - name: Build unsigned Windows desktop preview (no installation)
         run: npm --prefix desktop run tauri:build -- --debug --no-bundle
       - name: Verify Windows GUI subsystem (no console window)
