@@ -143,14 +143,18 @@ export function MigrationPreflight({ report, busy, error, onInspect, onSnapshot,
           <RefreshCcw size={16}/>{cutoverBusy ? "점검 중..." : "전환 준비 Dry-run 실행"}
         </button>
         {cutoverError && <p className="tunnel-warning" role="alert">{cutoverError}</p>}
-        {cutover && <div className="migration-result" role="status" aria-live="polite">
+        {cutover && <div className="migration-result cutover-result" role="status" aria-live="polite">
           <strong>{cutover.canTransitionNow ? "전환 가능" : "운영 전환 차단 · 점검 결과만 표시"}</strong>
           <p className="migration-backup-description">확인됨 · 차단 · 추가 검증 필요를 구분했습니다.
             이 기능에는 실제 전환 실행 버튼이 없습니다.</p>
-          {cutover.checks.map(item => <div className="migration-row" key={item.id}>
-            <strong>{item.label}</strong>
-            <span>{item.status === "passed" ? "확인됨" : item.status === "blocked" ? "차단" : "추가 검증 필요"}</span>
-            <p className="migration-backup-description">{item.details}</p>
+          {cutover.checks.map(item => <div className="cutover-check" key={item.id}>
+            <div className="cutover-check-heading">
+              <strong>{item.label}</strong>
+              <span className={"cutover-check-status " + item.status}>
+                {item.status === "passed" ? "확인됨" : item.status === "blocked" ? "차단" : "추가 검증 필요"}
+              </span>
+            </div>
+            <p>{item.details}</p>
           </div>)}
         </div>}
       </div>
