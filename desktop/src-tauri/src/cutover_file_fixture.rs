@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::os::windows::fs::MetadataExt;
 
@@ -18,6 +20,7 @@ const REPLACEMENT: [(&str, &[u8]); 2] = [
     ("oauth.json", b"not-an-oauth-token: synthetic replacement"),
 ];
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+static NEXT_FIXTURE_ID: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -50,12 +53,40 @@ impl Isolated {
         let base = PathBuf::from(std::env::var_os("RUNNER_TEMP")?);
         require_directory(&base).expect("must use a normal Windows runner temp directory");
         let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let root = base.join(format!("c2c-f4c2-{}-{stamp}", std::process::id()));
-        fs::create_dir(&root).expect("exclusive disposable fixture directory");
+        // Windows wall-clock ticks can repeat across parallel test threads.
+        // An atomic sequence + create_dir (CREATE_NEW semantics) avoids
+        // sharing a fixture root; never reuse or delete a colliding directory.
+        let root = (0..16).find_map(|_| {
+            let id = NEXT_FIXTURE_ID.fetch_add(1, Ordering::Relaxed);
+            let candidate = base.join(format!("c2c-f4c2-{}-{stamp}-{id}", std::process::id()));
+            match fs::create_dir(&candidate) {
+                Ok(()) => Some(candidate),
+                Err(error) if error.kind() == ErrorKind::AlreadyExists => None,
+                Err(error) => panic!("cannot create disposable fixture directory: {error}"),
+            }
+        }).expect("could not allocate an exclusive disposable fixture directory");
         fs::create_dir(root.join("live")).unwrap();
         write_group(&root.join("live"), &ORIGINAL).unwrap();
         fs::create_dir(root.join("journal")).unwrap();
         Some(Self { root })
+    }
+}
+
+#[test]
+fn parallel_fixtures_never_share_a_windows_temporary_directory() {
+    let Some(_guard) = Isolated::new() else { return };
+    let handles: Vec<_> = (0..12).map(|_| std::thread::spawn(|| {
+        let fixture = Isolated::new().expect("CI fixture gating changed");
+        require_directory(&fixture.root).unwrap();
+        fixture
+    })).collect();
+    let fixtures: Vec<_> = handles.into_iter()
+        .map(|handle| handle.join().expect("fixture thread panicked")).collect();
+    let roots: std::collections::HashSet<_> = fixtures.iter()
+        .map(|fixture| &fixture.root).collect();
+    assert_eq!(roots.len(), fixtures.len(), "parallel fixtures must have distinct roots");
+    for fixture in &fixtures {
+        assert!(matches_group(&fixture.root.join("live"), &ORIGINAL));
     }
 }
 impl Drop for Isolated {
