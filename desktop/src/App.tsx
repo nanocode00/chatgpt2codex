@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { checkRuntime, inspectInstalledCli, inspectInstalledCliLogs, inspectPublicTunnel, manageOwnedCli, closePreviewWindow, isNativeApp, type CliInspection, type CliLogPreview, type CliLogComponent, type ManagedAction, type ManagedResult, type PublicTunnelHealth, type RuntimeHealth } from "./runtime";
 import { ManagementControls, LegacyConnectionControls, LegacyDiagnosticsControls, LegacySettingsControls } from "./LegacyControls";
 import { MigrationPreflight } from "./MigrationPreflight";
-import { inspectLegacyMigration, saveLegacySettingsSnapshot, type LegacyMigrationReport } from "./runtime";
+import { inspectLegacyMigration, saveLegacySettingsSnapshot, inspectCredentialBackup, createCredentialBackup, type LegacyMigrationReport, type CredentialBackupReport } from "./runtime";
 
 type Screen = "overview" | "manage" | "connections" | "diagnostics" | "settings";
 type ActivityEntry = { time: string; message: string; online: boolean };
@@ -61,6 +61,9 @@ function App() {
   const [migrationReport, setMigrationReport] = useState<LegacyMigrationReport | null>(null);
   const [migrationBusy, setMigrationBusy] = useState(false);
   const [migrationError, setMigrationError] = useState("");
+  const [credentialBackup, setCredentialBackup] = useState<CredentialBackupReport | null>(null);
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupError, setBackupError] = useState("");
   const [history, setHistory] = useState<ActivityEntry[]>([]);
   const [copied, setCopied] = useState(false);
   const [settingError, setSettingError] = useState("");
@@ -146,9 +149,26 @@ function App() {
     }
   }, [native]);
 
+  const runBackupCheck = useCallback(async (create = false) => {
+    if (!native) return;
+    if (create && !window.confirm("기존 OAuth 및 Owner Token 해시를 현재 Windows 사용자 계정 전용 DPAPI 백업에 암호화해 저장할까요? 원본은 수정하지 않으며 복구는 아직 지원하지 않습니다.")) return;
+    setBackupBusy(true);
+    setBackupError("");
+    try {
+      setCredentialBackup(create ? await createCredentialBackup() : await inspectCredentialBackup());
+    } catch (error) {
+      setBackupError(error instanceof Error ? error.message : "암호화 백업 확인에 실패했습니다.");
+    } finally {
+      setBackupBusy(false);
+    }
+  }, [native]);
+
   useEffect(() => {
-    if (screen === "settings" && native) void runMigrationCheck();
-  }, [screen, native, runMigrationCheck]);
+    if (screen === "settings" && native) {
+      void runMigrationCheck();
+      void runBackupCheck();
+    }
+  }, [screen, native, runMigrationCheck, runBackupCheck]);
 
   const runCliInspection = useCallback(async () => {
     setCliChecking(true);
@@ -426,7 +446,9 @@ function App() {
           <section className="panel page-panel"><div className="panel-heading"><div className="panel-title"><span className="icon-tile"><Settings2 size={18}/></span><div><h2>모니터링</h2><p>조회 대상과 갱신 주기를 관리합니다.</p></div></div></div><form onSubmit={saveSettings} className="settings-form"><label htmlFor="port-setting">로컬 MCP 포트</label><p>상태 확인 요청을 보낼 localhost 포트입니다.</p><div className="setting-control"><input id="port-setting" type="number" min="1" max="65535" value={draftPort} onChange={event => setDraftPort(event.target.value)}/><button type="submit" className="secondary-btn">조회 포트 저장</button></div>{settingError && <p className="form-error" role="alert">{settingError}</p>}{settingsNotice && <p className="form-ok" role="status">{settingsNotice}</p>}</form><div className="settings-row"><div><strong>자동 상태 확인</strong><p>Tauri 앱에서 10초마다 로컬 서버 상태를 조회합니다.</p></div><button type="button" className={"switch " + (autoRefresh ? "enabled" : "")} role="switch" aria-checked={autoRefresh} aria-label="자동 상태 확인" onClick={() => toggleAutoRefresh(!autoRefresh)}><span /></button></div><div className="info-row"><LockKeyhole size={18}/><div><strong>보안</strong><p>현재 동작하는 것은 모니터링 설정뿐입니다. 서버 시작/중지, 원격 쓰기 권한, Owner Token은 건드리지 않습니다.</p></div></div></section>
           <LegacySettingsControls />
           <MigrationPreflight report={migrationReport} busy={migrationBusy} error={migrationError}
-            onInspect={() => { void runMigrationCheck(); }} onSnapshot={() => { void runMigrationCheck(true); }}/>
+            onInspect={() => { void runMigrationCheck(); }} onSnapshot={() => { void runMigrationCheck(true); }}
+            backup={credentialBackup} backupBusy={backupBusy} backupError={backupError}
+            onBackup={() => { void runBackupCheck(true); }} onVerifyBackup={() => { void runBackupCheck(false); }}/>
         </>}
 
         <footer><span>ChatGPT To Codex · desktop preview</span><span><ExternalLink size={13}/> Local-first • Tauri + React</span></footer>

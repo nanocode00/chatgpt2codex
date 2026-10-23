@@ -204,3 +204,11 @@ WinForms settings, existing hashed Owner Token validity and OAuth client *count*
 It does not copy secrets or take over port 7979. Optional settings snapshot is
 **non-secret, not a full backup**, and cannot overwrite an earlier snapshot.
 See [migration preflight and gated plan](../docs/TAURI_WINFORMS_MIGRATION_PREFLIGHT.md).
+
+## Optional encrypted credential backup
+
+Windows Tauri **Settings → WinForms → Tauri 전환 준비** now supports an explicit,
+current-user DPAPI-encrypted **Owner Token hash + OAuth state + settings** backup,
+with immediate read-back/integrity validation. It cannot restore to the live
+WinForms location, rotate a token, stop a server or take over port 7979.
+See [DPAPI credential backup limitations](../docs/TAURI_DPAPI_CREDENTIAL_BACKUP.md).
