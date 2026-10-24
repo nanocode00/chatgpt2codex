@@ -8,6 +8,8 @@ mod cutover_readiness;
 // Never link cutover mutation exercises into any release binary. Fixture only.
 #[cfg(test)]
 mod cutover_transaction_fixture;
+#[cfg(all(test, windows))]
+mod cutover_file_fixture;
 
 use serde::Serialize;
 use std::io::{Read, Write};
