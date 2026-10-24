@@ -9,6 +9,7 @@ on:
       - "src/runtime/instances.test.ts"
       - "scripts/package-tauri-cli-preview.ps1"
       - "scripts/test-windows-cli-lifecycle-isolated.ps1"
+      - "scripts/inspect-windows-f4-acceptance.ps1"
       - "scripts/test-windows-f4-native-rollback.ps1"
       - ".github/workflows/tauri-desktop-smoke.yml"
   workflow_dispatch:
@@ -47,6 +48,36 @@ jobs:
       - name: Test native Windows no-tunnel CLI start stop restart and PID ownership
         shell: pwsh
         run: ./scripts/test-windows-cli-lifecycle-isolated.ps1
+      - name: F4-D1 read-only acceptance report contract
+        shell: pwsh
+        run: |
+          # No live service is required. The report is not saved or uploaded.
+          $reportJson = & ./scripts/inspect-windows-f4-acceptance.ps1 -Port 62349
+          if (-not $reportJson) { throw "F4-D1 did not return JSON" }
+          $report = $reportJson | ConvertFrom-Json -ErrorAction Stop
+          if ($report.schemaVersion -ne 1 -or $report.phase -ne "F4-D1" -or
+              $report.canTransitionNow -ne $false -or
+              $report.observationOnly -ne $true -or
+              $report.mayStopProcesses -ne $false -or
+              $report.inspectedPort -ne 62349) {
+            throw "F4-D1 report must always refuse live cutover"
+          }
+          $expected = @("loopbackListener", "cliProcessCandidate", "localHealth",
+              "osProcessOwnership", "publicOAuthContinuity", "chatgptClientRoundtrip",
+              "rollbackReadiness", "featureParity")
+          $keys = @($report.checks.PSObject.Properties.Name)
+          if ($keys.Count -ne $expected.Count) { throw "F4-D1 checks schema changed" }
+          foreach ($key in $expected) {
+            if ($key -notin $keys) { throw "F4-D1 check missing" }
+          }
+          if ($report.checks.osProcessOwnership -ne "unverified" -or
+              $report.checks.publicOAuthContinuity -ne "not_tested" -or
+              $report.checks.chatgptClientRoundtrip -ne "not_tested" -or
+              $report.checks.rollbackReadiness -ne "not_proven" -or
+              $report.checks.featureParity -ne "manual_review_required") {
+            throw "F4-D1 must not infer manual acceptance from localhost checks"
+          }
+          Write-Host "PASS F4-D1: bounded redacted read-only no-go report contract"
       - name: F4-C1 real disposable CLI cutover and rollback (no legacy runtime)
         shell: pwsh
         env:
