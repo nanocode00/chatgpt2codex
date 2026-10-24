@@ -3,6 +3,10 @@
 **Status: design only. No production cutover, credentials import, installer change,
 server stop, port takeover, OAuth registration change, or token rotation.**
 
+F4-D real-Windows human observation is tracked separately in
+[the read-only manual acceptance checklist](TAURI_F4D_WINDOWS_MANUAL_ACCEPTANCE.md).
+It does not grant permission to stop the legacy server or migrate credentials.
+
 Inputs: the merged Tauri foundation and isolated lifecycle (#53, #55–#59),
 read-only migration inventory (#60), current-Windows-user DPAPI backup (#61),
 encrypted-only restoration rehearsal (#62), and synthetic private CLI authentication
