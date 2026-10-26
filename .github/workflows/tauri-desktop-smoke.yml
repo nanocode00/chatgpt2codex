@@ -9,6 +9,8 @@ on:
       - "src/runtime/instances.test.ts"
       - "scripts/package-tauri-cli-preview.ps1"
       - "scripts/test-windows-cli-lifecycle-isolated.ps1"
+      - "scripts/windows-cli-commands.ps1"
+      - "scripts/test-windows-cli-commands-isolated.ps1"
       - "scripts/inspect-windows-f4-acceptance.ps1"
       - "scripts/test-windows-f4-native-rollback.ps1"
       - ".github/workflows/tauri-desktop-smoke.yml"
@@ -48,6 +50,9 @@ jobs:
       - name: Test native Windows no-tunnel CLI start stop restart and PID ownership
         shell: pwsh
         run: ./scripts/test-windows-cli-lifecycle-isolated.ps1
+      - name: F4-D3 isolated Windows opt-in CLI command installer and rollback
+        shell: pwsh
+        run: ./scripts/test-windows-cli-commands-isolated.ps1
       - name: F4-D1 read-only acceptance report contract
         shell: pwsh
         run: |
