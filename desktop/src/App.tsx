@@ -297,7 +297,7 @@ function App() {
     try {
       await closePreviewWindow();
     } catch {
-      setExitError("Tauri 창을 닫지 못했습니다. 창의 X 버튼으로 종료해 주세요.");
+      setExitError("Tauri 프리뷰를 종료하지 못했습니다. 트레이 아이콘의 '프리뷰 종료'를 사용해 주세요.");
     }
   }
 
