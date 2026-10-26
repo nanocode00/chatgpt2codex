@@ -46,6 +46,14 @@ if ($FixtureInstallRoot) {
 
 $node = Join-Path $installRoot "bin\node.exe"
 $cli = Join-Path $installRoot "dist\cli.js"
+$shimNode = $node
+$shimCli = $cli
+if (-not $FixtureInstallRoot) {
+    # Keep non-ASCII Windows user profile names out of ASCII CMD wrappers.
+    # The fixed percent-variable is resolved by Windows at invocation time.
+    $shimNode = '%LOCALAPPDATA%\Programs\ChatGPT To Codex\bin\node.exe'
+    $shimCli = '%LOCALAPPDATA%\Programs\ChatGPT To Codex\dist\cli.js'
+}
 $shimNames = @("c2c.cmd", "chatgpt2codex.cmd")
 $receiptPath = Join-Path $shimDir "c2c-shims-receipt.json"
 $marker = ":: C2C_USER_CLI_SHIM_V1"
@@ -61,8 +69,10 @@ function Assert-OrdinaryDirectory([string]$Target) {
 }
 
 function Get-ShimText([string]$NodePath, [string]$CliPath) {
-    # CMD interpolates percent/bang tokens; refuse unsafe absolute paths.
-    if ($NodePath -match '[%!"&|<>^]' -or $CliPath -match '[%!"&|<>^]') {
+    # Allow only the fixed LOCALAPPDATA variable to expand in CMD.
+    $escapedNode = $NodePath.Replace('%LOCALAPPDATA%', '')
+    $escapedCli = $CliPath.Replace('%LOCALAPPDATA%', '')
+    if ($escapedNode -match '[%!"&|<>^]' -or $escapedCli -match '[%!"&|<>^]') {
         throw "Unsafe characters in CLI installation path"
     }
     $newline = [Environment]::NewLine
@@ -88,7 +98,7 @@ function Read-Receipt {
 }
 
 function Assert-OwnedShims {
-    $expected = Get-ShimText $node $cli
+    $expected = Get-ShimText $shimNode $shimCli
     foreach ($name in $shimNames) {
         $path = Join-Path $shimDir $name
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -133,7 +143,7 @@ if ($Install) {
             throw "Refusing redirected CLI bundle file"
         }
     }
-    $null = Get-ShimText $node $cli
+    $null = Get-ShimText $shimNode $shimCli
     $receipt = Read-Receipt
     if ($null -ne $receipt) {
         Assert-OwnedShims
@@ -158,7 +168,7 @@ if ($Install) {
         }
         New-Item -ItemType Directory -Path $shimDir -Force | Out-Null
         Assert-OrdinaryDirectory $shimDir
-        $text = Get-ShimText $node $cli
+        $text = Get-ShimText $shimNode $shimCli
         foreach ($name in $shimNames) {
             [IO.File]::WriteAllText((Join-Path $shimDir $name), $text, [Text.Encoding]::ASCII)
         }
