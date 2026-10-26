@@ -226,10 +226,11 @@ pub async fn inspect_cli_logs(instance: String, component: String) -> Result<Cli
 }
 
 #[tauri::command]
-pub fn close_preview_window(window: tauri::Window) -> Result<(), String> {
-    // Closing the Tauri preview never stops the separate Windows WinForms
-    // process, its existing MCP server, or the Cloudflare tunnel.
-    window.close().map_err(|_| "Tauri 창을 닫지 못했습니다.".to_owned())
+pub fn close_preview_window(app: tauri::AppHandle) -> Result<(), String> {
+    // This in-app button explicitly exits the preview. X/minimize now hide
+    // to tray; exiting never stops WinForms, default C2C or Cloudflare.
+    app.exit(0);
+    Ok(())
 }
 
 #[cfg(test)]

@@ -5,6 +5,8 @@ mod managed_cli;
 mod migration;
 mod migration_backup;
 mod cutover_readiness;
+#[cfg(target_os = "windows")]
+mod tray_lifecycle;
 // Never link cutover mutation exercises into any release binary. Fixture only.
 #[cfg(test)]
 mod cutover_transaction_fixture;
@@ -94,6 +96,17 @@ async fn runtime_health(port: u16) -> Result<RuntimeHealth, String> {
 
 pub fn run() {
     tauri::Builder::default()
+        // The tray controls only this preview window. No installed CLI or
+        // legacy WinForms lifecycle actions are registered here.
+        .setup(|app| {
+            #[cfg(target_os = "windows")]
+            tray_lifecycle::setup(app)?;
+            Ok(())
+        })
+        .on_window_event(|_window, _event| {
+            #[cfg(target_os = "windows")]
+            tray_lifecycle::on_window_event(_window, _event);
+        })
         .invoke_handler(tauri::generate_handler![runtime_health, cli_health::inspect_cli_health, cli_operations::inspect_cli_logs, cli_operations::close_preview_window, public_health::inspect_public_tunnel_health, managed_cli::manage_owned_cli, migration::inspect_legacy_migration, migration::save_legacy_settings_snapshot, migration_backup::inspect_credential_backup, migration_backup::create_credential_backup, migration_backup::rehearse_credential_restore, cutover_readiness::inspect_cutover_readiness])
         .run(tauri::generate_context!())
         .expect("failed to start ChatGPT To Codex desktop");
