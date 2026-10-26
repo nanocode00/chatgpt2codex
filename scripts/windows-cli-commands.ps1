@@ -88,7 +88,7 @@ function Read-Receipt {
         throw "Refusing redirected CLI receipt"
     }
     $raw = Get-Content -LiteralPath $receiptPath -Raw -ErrorAction Stop
-    if ($raw.Length -gt 4096) { throw "CLI receipt exceeds bounded size" }
+    if ($raw.Length -gt 65536) { throw "CLI receipt exceeds bounded size" }
     $r = $raw | ConvertFrom-Json -ErrorAction Stop
     if ($r.schemaVersion -ne 1 -or $r.owner -cne "C2C_F4D3" -or
         $r.shimDir -cne $shimDir -or $r.installRoot -cne $installRoot) {
@@ -173,17 +173,25 @@ if ($Install) {
             [IO.File]::WriteAllText((Join-Path $shimDir $name), $text, [Text.Encoding]::ASCII)
         }
         $original = @(Get-UserPathEntries)
+        $originalPath = [Environment]::GetEnvironmentVariable("Path", "User")
         $added = -not (Path-HasShim $original)
+        $nextPath = $originalPath
+        if ($added) {
+            $separator = if ($originalPath -and -not $originalPath.EndsWith(';')) { ";" } else { "" }
+            $nextPath = $originalPath + $separator + $shimDir
+        }
         $record = [ordered]@{
             schemaVersion = 1
             owner = "C2C_F4D3"
             shimDir = $shimDir
             installRoot = $installRoot
             addedToUserPath = $added
+            pathBeforeInstall = $originalPath
+            pathAfterInstall = $nextPath
         }
         [IO.File]::WriteAllText($receiptPath, ($record | ConvertTo-Json -Compress), [Text.Encoding]::UTF8)
         if ($added) {
-            [Environment]::SetEnvironmentVariable("Path", ((@($original) + @($shimDir)) -join ';'), "User")
+            [Environment]::SetEnvironmentVariable("Path", $nextPath, "User")
         }
     }
 } elseif ($Remove) {
@@ -194,14 +202,22 @@ if ($Install) {
             Remove-Item -LiteralPath (Join-Path $shimDir $name) -Force -ErrorAction Stop
         }
         if ($receipt.addedToUserPath -eq $true) {
-            $existing = @(Get-UserPathEntries)
-            $kept = @($existing | Where-Object {
-                -not [string]::Equals(
-                    [Environment]::ExpandEnvironmentVariables($_).TrimEnd('\'),
-                    $shimDir.TrimEnd('\'),
-                    [StringComparison]::OrdinalIgnoreCase)
-            })
-            [Environment]::SetEnvironmentVariable("Path", ($kept -join ';'), "User")
+            $currentUserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+            if ([string]::Equals($currentUserPath, [string]$receipt.pathAfterInstall,
+                    [StringComparison]::Ordinal)) {
+                # Exact restoration only if nobody changed PATH meanwhile.
+                [Environment]::SetEnvironmentVariable("Path", [string]$receipt.pathBeforeInstall, "User")
+            } else {
+                # Concurrent edits are preserved; remove just our own entry.
+                $existing = @(Get-UserPathEntries)
+                $kept = @($existing | Where-Object {
+                    -not [string]::Equals(
+                        [Environment]::ExpandEnvironmentVariables($_).TrimEnd('\'),
+                        $shimDir.TrimEnd('\'),
+                        [StringComparison]::OrdinalIgnoreCase)
+                })
+                [Environment]::SetEnvironmentVariable("Path", ($kept -join ';'), "User")
+            }
         }
         Remove-Item -LiteralPath $receiptPath -Force -ErrorAction Stop
         if ((Get-ChildItem -LiteralPath $shimDir -Force | Measure-Object).Count -eq 0) {
