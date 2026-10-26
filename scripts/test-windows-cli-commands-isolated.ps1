@@ -14,8 +14,12 @@ $node = Join-Path $install "bin\node.exe"
 $cli = Join-Path $install "dist\cli.js"
 $originalUserPath = [Environment]::GetEnvironmentVariable("Path", "User")
 
-function Invoke-ShimTool([string[]]$Arguments) {
-    $value = & $scriptPath @Arguments -FixtureInstallRoot $install -FixtureShimDir $shims
+function Invoke-ShimTool([ValidateSet("inspect", "install", "remove")][string]$Mode = "inspect") {
+    $value = switch ($Mode) {
+        "install" { & $scriptPath -Install -FixtureInstallRoot $install -FixtureShimDir $shims }
+        "remove" { & $scriptPath -Remove -FixtureInstallRoot $install -FixtureShimDir $shims }
+        default { & $scriptPath -FixtureInstallRoot $install -FixtureShimDir $shims }
+    }
     if (-not $value) { throw "F4-D3 failed to return contract JSON" }
     return (($value | Out-String).Trim() | ConvertFrom-Json -ErrorAction Stop)
 }
@@ -27,11 +31,11 @@ try {
     Copy-Item -LiteralPath (Get-Command node.exe -ErrorAction Stop).Source -Destination $node
     Set-Content -LiteralPath $cli -Value 'console.log(JSON.stringify(process.argv.slice(2)))' -Encoding UTF8
 
-    $before = Invoke-ShimTool -Arguments @()
+    $before = Invoke-ShimTool
     Assert ($before.installedCliPresent -and -not $before.ownedCommandShims) "Read-only observation incorrect"
     Assert (-not (Test-Path -LiteralPath $shims)) "Inspection changed the filesystem"
 
-    $installed = Invoke-ShimTool -Arguments @("-Install")
+    $installed = Invoke-ShimTool -Mode install
     Assert ($installed.ownedCommandShims -and $installed.userPathRegistered) "Opt-in registration failed"
     Assert (-not $installed.productionRuntimeTouched) "Fixture report permits touching production"
     $cmdA = Join-Path $shims "c2c.cmd"
@@ -41,17 +45,17 @@ try {
         Assert ($LASTEXITCODE -eq 0) "Shim subprocess failed"
         Assert ($out -ceq '["status","--instance","ci-fixture"]') "Shim arguments failed to round trip"
     }
-    $repeat = Invoke-ShimTool -Arguments @("-Install")
+    $repeat = Invoke-ShimTool -Mode install
     Assert ($repeat.ownedCommandShims -and $repeat.userPathRegistered) "Idempotent reinstallation failed"
 
     $old = [IO.File]::ReadAllText($cmdA, [Text.Encoding]::ASCII)
     [IO.File]::WriteAllText($cmdA, "user-modified", [Text.Encoding]::ASCII)
     $refused = $false
-    try { $null = Invoke-ShimTool -Arguments @("-Remove") } catch { $refused = $true }
+    try { $null = Invoke-ShimTool -Mode remove } catch { $refused = $true }
     Assert $refused "Remove must refuse modified shim"
     [IO.File]::WriteAllText($cmdA, $old, [Text.Encoding]::ASCII)
 
-    $removed = Invoke-ShimTool -Arguments @("-Remove")
+    $removed = Invoke-ShimTool -Mode remove
     Assert (-not $removed.ownedCommandShims -and -not $removed.userPathRegistered) "Uninstall failed"
     Assert (-not (Test-Path -LiteralPath $cmdA) -and -not (Test-Path -LiteralPath $cmdB)) "Leftover command shims"
     Assert ([Environment]::GetEnvironmentVariable("Path","User") -ceq $originalUserPath) "User PATH changed after removal"
@@ -60,7 +64,7 @@ try {
     New-Item -ItemType Directory -Force -Path $shims | Out-Null
     Set-Content -LiteralPath $cmdA -Value "an unrelated command" -Encoding ASCII
     $refused = $false
-    try { $null = Invoke-ShimTool -Arguments @("-Install") } catch { $refused = $true }
+    try { $null = Invoke-ShimTool -Mode install } catch { $refused = $true }
     Assert $refused "Install overwrote an unowned command"
     Assert ((Get-Content -LiteralPath $cmdA -Raw).Contains("unrelated command")) "Unowned shim changed"
     Remove-Item -LiteralPath $cmdA -Force
