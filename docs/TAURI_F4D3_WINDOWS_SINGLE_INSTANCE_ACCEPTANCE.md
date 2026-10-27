@@ -45,6 +45,10 @@ other unrelated C2C clients.
 2. Download the **successful Windows Tauri Desktop Smoke artifact for
    this PR**. Extract it to a dedicated temporary folder, not the legacy
    install directory.
+   If an **older Tauri preview ZIP** is still running hidden in its tray,
+   exit **that older Tauri preview only** via its own `프리뷰 종료` menu
+   before proceeding. It did not have the single-instance plugin, so it
+   cannot participate reliably in the new preview's duplicate detection.
 3. Launch its Tauri preview EXE once. Verify that one Tauri window and
    one preview tray icon appear.
 4. Launch **the same exact preview EXE** a second time using Explorer.
