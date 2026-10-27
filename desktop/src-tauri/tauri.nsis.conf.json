@@ -10,7 +10,6 @@
     "windows": {
       "nsis": {
         "installMode": "currentUser",
-        "shortcutName": "ChatGPT To Codex Tauri Preview",
         "installerHooks": "windows/f4d4-hooks.nsh"
       }
     }

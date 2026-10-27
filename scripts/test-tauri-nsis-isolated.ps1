@@ -22,11 +22,9 @@ function Assert([bool]$ok, [string]$message) {
     if (-not $ok) { throw $message }
 }
 function Read-RunValue([string]$name) {
-    try {
-        return [string](Get-ItemPropertyValue -Path $runKey -Name $name -ErrorAction Stop)
-    } catch [System.Management.Automation.ItemNotFoundException] {
-        return $null
-    }
+    $item = Get-ItemProperty -Path $runKey -ErrorAction SilentlyContinue
+    if (-not $item -or -not $item.PSObject.Properties[$name]) { return $null }
+    return [string]$item.PSObject.Properties[$name].Value
 }
 function Invoke-Installer([string]$file, [string]$label) {
     $proc = Start-Process -FilePath $file -ArgumentList @("/S") -PassThru -Wait
@@ -47,7 +45,7 @@ function Assert-HealthyPayload {
     Assert ((Test-Path $node) -and (Test-Path $cli)) "Bundled CLI or node missing"
     Assert ((Get-FileHash -LiteralPath $node -Algorithm SHA256).Hash -ieq $manifest.nodeSha256) "Node hash mismatch"
     Assert ((Get-FileHash -LiteralPath $cli -Algorithm SHA256).Hash -ieq $manifest.cliSha256) "CLI hash mismatch"
-    Write-Host "PASS: isolated Tauri NSIS install and signed-by-manifest runtime payload"
+    Write-Host "PASS: isolated Tauri NSIS install and SHA-256 manifest-verified runtime payload"
 }
 
 Assert ($installers.Count -eq 1) "Expected one F4-D4 NSIS installer"
