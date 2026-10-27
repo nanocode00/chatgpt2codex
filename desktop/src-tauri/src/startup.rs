@@ -181,7 +181,7 @@ mod tests {
             // Emulate a WinForms value in the isolated fixture only. Neither
             // this UI feature nor its rollback may alter that legacy name.
             let legacy = "\"C:\\Legacy.exe\"";
-            let reg = root.open_subkey_with_flags(&path, KEY_WRITE).unwrap();
+            let reg = root.open_subkey_with_flags(&path, KEY_READ | KEY_WRITE).unwrap();
             reg.set_value("ChatGPT To Codex", &legacy).unwrap();
             let first = inspect_with(&root, &path, VALUE_NAME, &exe, &exe).unwrap();
             assert!(first.supported);
@@ -195,7 +195,7 @@ mod tests {
             let unchanged: String = reg.get_value("ChatGPT To Codex").unwrap();
             assert_eq!(unchanged, legacy);
 
-            let key = root.open_subkey_with_flags(&path, KEY_WRITE).unwrap();
+            let key = root.open_subkey_with_flags(&path, KEY_READ | KEY_WRITE).unwrap();
             key.set_value(VALUE_NAME, &"\"C:\\Unrelated.exe\"").unwrap();
             assert!(inspect_with(&root, &path, VALUE_NAME, &exe, &exe).unwrap().conflict);
             assert!(change_with(&root, &path, VALUE_NAME, &exe, &exe, true).is_err());
