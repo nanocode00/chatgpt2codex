@@ -1,5 +1,24 @@
 import { invoke } from "@tauri-apps/api/core";
 
+export interface PreviewStartupInspection {
+  supported: boolean;
+  enabled: boolean;
+  conflict: boolean;
+  details: string;
+}
+
+export async function inspectPreviewAutostart(): Promise<PreviewStartupInspection> {
+  if (!isNativeApp()) {
+    return { supported: false, enabled: false, conflict: false, details: "Windows 설치형 Tauri 앱에서만 지원합니다." };
+  }
+  return invoke<PreviewStartupInspection>("inspect_preview_autostart");
+}
+
+export async function setPreviewAutostart(enable: boolean): Promise<PreviewStartupInspection> {
+  if (!isNativeApp()) throw new Error("Windows Tauri 앱에서만 변경할 수 있습니다.");
+  return invoke<PreviewStartupInspection>("set_preview_autostart", { enable });
+}
+
 export interface RuntimeHealth {
   online: boolean;
   service: string;
