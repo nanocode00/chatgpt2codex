@@ -11,7 +11,7 @@ const MAIN_WINDOW: &str = "main";
 const MENU_SHOW: &str = "preview-show";
 const MENU_QUIT: &str = "preview-quit";
 
-fn restore_main(app: &AppHandle) {
+pub(crate) fn restore_main(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
         let _ = window.unminimize();
         let _ = window.show();

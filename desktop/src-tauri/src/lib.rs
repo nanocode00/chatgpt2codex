@@ -95,7 +95,17 @@ async fn runtime_health(port: u16) -> Result<RuntimeHealth, String> {
 }
 
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // Register before any other plugin / setup. A second Windows Tauri
+    // preview launch restores the existing window and then exits itself.
+    // Neither invocation can take over the WinForms/default C2C runtime.
+    #[cfg(target_os = "windows")]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        // Never inspect/log forwarded arguments: they are irrelevant to
+        // preview focus and may contain sensitive user-specific paths.
+        tray_lifecycle::restore_main(app);
+    }));
+    builder
         // The tray controls only this preview window. No installed CLI or
         // legacy WinForms lifecycle actions are registered here.
         .setup(|app| {
