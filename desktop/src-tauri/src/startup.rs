@@ -26,10 +26,9 @@ pub struct StartupInspection {
 fn local_target() -> Result<PathBuf, String> {
     let local = std::env::var_os("LOCALAPPDATA")
         .ok_or("Windows 사용자 로컬 설치 위치를 확인할 수 없습니다.")?;
-    Ok(PathBuf::from(local)
-        .join("Programs")
-        .join(PROGRAM_FOLDER)
-        .join(EXE_NAME))
+    // Tauri v2 currentUser NSIS installs in LOCALAPPDATA/<productName>.
+    // Keep this in sync with the dedicated NSIS overlay config.
+    Ok(PathBuf::from(local).join(PROGRAM_FOLDER).join(EXE_NAME))
 }
 
 // This is an exact allowed *separate Tauri* installation path, not the

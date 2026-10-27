@@ -94,7 +94,15 @@ fn verify_manifest(root: &Path) -> Result<(PathBuf, PathBuf), String> {
 }
 
 fn payload_for(executable_dir: &Path, local_appdata: &Path) -> Result<Payload, String> {
-    let (node, cli) = verify_manifest(executable_dir)?;
+    // Portable ZIP has <exe>/c2c-runtime; NSIS may place bundle resources
+    // under <exe>/resources/c2c-runtime. Both paths are verified against
+    // the same fixed no-tunnel manifest and immutable hash allowlist.
+    let resource_root = if executable_dir.join("c2c-runtime").join("manifest.json").is_file() {
+        executable_dir.to_path_buf()
+    } else {
+        executable_dir.join("resources")
+    };
+    let (node, cli) = verify_manifest(&resource_root)?;
     let base = local_appdata.join("ChatGPTToCodex-Tauri-Preview");
     let home = base.join("isolated-home");
     let workspace = base.join("workspace");

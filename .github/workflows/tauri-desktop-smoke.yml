@@ -8,6 +8,7 @@ on:
       - "src/runtime/instances.ts"
       - "src/runtime/instances.test.ts"
       - "scripts/package-tauri-cli-preview.ps1"
+      - "scripts/test-tauri-nsis-isolated.ps1"
       - "scripts/test-windows-cli-lifecycle-isolated.ps1"
       - "scripts/windows-cli-commands.ps1"
       - "scripts/test-windows-cli-commands-isolated.ps1"
@@ -145,3 +146,21 @@ jobs:
             desktop/src-tauri/target/debug/c2c-runtime/**
           if-no-files-found: error
           retention-days: 7
+      - name: F4-D4-A build separate current-user Tauri NSIS installer
+        shell: pwsh
+        run: |
+          npm --prefix desktop run tauri:build -- --debug --bundles nsis --config src-tauri/tauri.nsis.conf.json
+          if ($LASTEXITCODE -ne 0) { throw "Tauri dedicated NSIS bundle build failed" }
+          $installers = @(Get-ChildItem "desktop/src-tauri/target/debug/bundle/nsis" -Filter "*-setup.exe" -File)
+          if ($installers.Count -ne 1) { throw "Expected one isolated NSIS setup.exe" }
+          Write-Host "PASS: F4-D4 dedicated current-user installer generated"
+      - name: F4-D4-A isolated NSIS install and uninstall E2E
+        shell: pwsh
+        run: ./scripts/test-tauri-nsis-isolated.ps1
+      - name: Publish unsigned isolated NSIS installer for guarded review
+        uses: actions/upload-artifact@v4
+        with:
+          name: c2c-tauri-nsis-isolated-review-only
+          path: desktop/src-tauri/target/debug/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          retention-days: 3
