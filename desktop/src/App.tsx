@@ -5,7 +5,7 @@ import {
   Settings2, ShieldCheck, TerminalSquare, Wifi, WifiOff
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { checkRuntime, inspectInstalledCli, inspectInstalledCliLogs, inspectPublicTunnel, manageOwnedCli, closePreviewWindow, isNativeApp, type CliInspection, type CliLogPreview, type CliLogComponent, type ManagedAction, type ManagedResult, type PublicTunnelHealth, type RuntimeHealth } from "./runtime";
+import { checkRuntime, inspectInstalledCli, inspectInstalledCliLogs, inspectPublicTunnel, manageOwnedCli, closePreviewWindow, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type CliInspection, type CliLogPreview, type CliLogComponent, type ManagedAction, type ManagedResult, type PublicTunnelHealth, type RuntimeHealth } from "./runtime";
 import { ManagementControls, LegacyConnectionControls, LegacyDiagnosticsControls, LegacySettingsControls } from "./LegacyControls";
 import { MigrationPreflight } from "./MigrationPreflight";
 import { inspectLegacyMigration, saveLegacySettingsSnapshot, inspectCredentialBackup, createCredentialBackup, rehearseCredentialRestore, type LegacyMigrationReport, type CredentialBackupReport, type RestoreRehearsalReport } from "./runtime";
@@ -71,6 +71,9 @@ function App() {
   const [copied, setCopied] = useState(false);
   const [settingError, setSettingError] = useState("");
   const [settingsNotice, setSettingsNotice] = useState("");
+  const [previewStartup, setPreviewStartup] = useState<PreviewStartupInspection | null>(null);
+  const [startupBusy, setStartupBusy] = useState(false);
+  const [startupError, setStartupError] = useState("");
   const requestCounter = useRef(0);
   const tunnelBusy = useRef(false);
   const lastTunnel = useRef<PublicTunnelHealth | null>(null);
@@ -99,6 +102,25 @@ function App() {
   }, [port]);
 
   useEffect(() => { void runCheck(); return () => { requestCounter.current += 1; }; }, [runCheck]);
+  useEffect(() => {
+    if (!native) return;
+    void inspectPreviewAutostart().then(setPreviewStartup).catch(() => {
+      setStartupError("자동 시작 등록 상태를 확인할 수 없습니다.");
+    });
+  }, [native]);
+  const togglePreviewStartup = async (enable: boolean) => {
+    if (!previewStartup?.supported || startupBusy) return;
+    setStartupError("");
+    setStartupBusy(true);
+    try {
+      setPreviewStartup(await setPreviewAutostart(enable));
+    } catch (error) {
+      setStartupError(error instanceof Error ? error.message : String(error));
+      try { setPreviewStartup(await inspectPreviewAutostart()); } catch { /* preserve error */ }
+    } finally {
+      setStartupBusy(false);
+    }
+  };
   useEffect(() => {
     if (!autoRefresh || !native) return;
     const interval = setInterval(() => { void runCheck(); }, 10_000);
@@ -460,8 +482,18 @@ function App() {
         </>}
 
         {screen === "settings" && <>
-          <div className="page-heading"><div><div className="eyebrow">PREFERENCES</div><h1>설정</h1><p>이 프리뷰의 상태 확인 방식만 설정합니다. C2C CLI 설정은 변경하지 않습니다.</p></div></div>
-          <section className="panel page-panel"><div className="panel-heading"><div className="panel-title"><span className="icon-tile"><Settings2 size={18}/></span><div><h2>모니터링</h2><p>조회 대상과 갱신 주기를 관리합니다.</p></div></div></div><form onSubmit={saveSettings} className="settings-form"><label htmlFor="port-setting">로컬 MCP 포트</label><p>상태 확인 요청을 보낼 localhost 포트입니다.</p><div className="setting-control"><input id="port-setting" type="number" min="1" max="65535" value={draftPort} onChange={event => setDraftPort(event.target.value)}/><button type="submit" className="secondary-btn">조회 포트 저장</button></div>{settingError && <p className="form-error" role="alert">{settingError}</p>}{settingsNotice && <p className="form-ok" role="status">{settingsNotice}</p>}</form><div className="settings-row"><div><strong>자동 상태 확인</strong><p>Tauri 앱에서 10초마다 로컬 서버 상태를 조회합니다.</p></div><button type="button" className={"switch " + (autoRefresh ? "enabled" : "")} role="switch" aria-checked={autoRefresh} aria-label="자동 상태 확인" onClick={() => toggleAutoRefresh(!autoRefresh)}><span /></button></div><div className="info-row"><LockKeyhole size={18}/><div><strong>보안</strong><p>현재 동작하는 것은 모니터링 설정뿐입니다. 서버 시작/중지, 원격 쓰기 권한, Owner Token은 건드리지 않습니다.</p></div></div></section>
+          <div className="page-heading"><div><div className="eyebrow">PREFERENCES</div><h1>설정</h1><p>모니터링과 별도 Tauri 자동 시작 상태를 관리합니다. 기존 C2C CLI 설정은 변경하지 않습니다.</p></div></div>
+          <section className="panel page-panel"><div className="panel-heading"><div className="panel-title"><span className="icon-tile"><Settings2 size={18}/></span><div><h2>모니터링</h2><p>조회 대상과 갱신 주기를 관리합니다.</p></div></div></div><form onSubmit={saveSettings} className="settings-form"><label htmlFor="port-setting">로컬 MCP 포트</label><p>상태 확인 요청을 보낼 localhost 포트입니다.</p><div className="setting-control"><input id="port-setting" type="number" min="1" max="65535" value={draftPort} onChange={event => setDraftPort(event.target.value)}/><button type="submit" className="secondary-btn">조회 포트 저장</button></div>{settingError && <p className="form-error" role="alert">{settingError}</p>}{settingsNotice && <p className="form-ok" role="status">{settingsNotice}</p>}</form><div className="settings-row"><div><strong>자동 상태 확인</strong><p>Tauri 앱에서 10초마다 로컬 서버 상태를 조회합니다.</p></div><button type="button" className={"switch " + (autoRefresh ? "enabled" : "")} role="switch" aria-checked={autoRefresh} aria-label="자동 상태 확인" onClick={() => toggleAutoRefresh(!autoRefresh)}><span /></button></div><div className="info-row"><LockKeyhole size={18}/><div><strong>보안</strong><p>서버 시작/중지, 원격 쓰기 권한, Owner Token은 이 설정에서 변경하지 않습니다.</p></div></div></section>
+          <section className="panel page-panel" style={{ marginTop: 20 }}>
+            <div className="panel-heading"><div className="panel-title"><span className="icon-tile"><Settings2 size={18}/></span><div><h2>Windows 로그인 시작</h2><p>기존 WinForms와 별도로 Tauri 앱만 실행</p></div></div></div>
+            <div className="settings-row">
+              <div><strong>Tauri 자동 시작</strong><p>{previewStartup?.details ?? "자동 시작 등록 상태를 조회 중입니다."}</p></div>
+              <button type="button" className={"switch " + (previewStartup?.enabled ? "enabled" : "")} role="switch" aria-label="Tauri 로그인 자동 시작" aria-checked={previewStartup?.enabled ?? false}
+                disabled={!previewStartup?.supported || startupBusy} onClick={() => { void togglePreviewStartup(!previewStartup?.enabled); }}><span /></button>
+            </div>
+            {startupError && <p className="form-error" role="alert">{startupError}</p>}
+            <div className="info-row"><LockKeyhole size={18}/><div><strong>안전 제한</strong><p>휴대용 ZIP 프리뷰에서는 변경할 수 없습니다. Tauri 전용 설치 경로를 검증한 경우에만 사용자 계정의 별도 등록 항목을 변경하며, 기존 WinForms와 CLI 서버는 변경하지 않습니다.</p></div></div>
+          </section>
           <LegacySettingsControls />
           <MigrationPreflight report={migrationReport} busy={migrationBusy} error={migrationError}
             onInspect={() => { void runMigrationCheck(); }} onSnapshot={() => { void runMigrationCheck(true); }}
