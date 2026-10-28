@@ -130,7 +130,11 @@ fn expected_record(root: &Payload, record: &serde_json::Value) -> bool {
     let expected_cli = fs::canonicalize(&root.cli).ok();
     let observed_cli = record["entrypoint"].as_str()
         .and_then(|s| fs::canonicalize(s).ok());
-    let expected_workspace = fs::canonicalize(&root.workspace).ok();
+    // An explicitly chosen, registered preview project may become the workspace.
+    // Resolve it from the isolated bundled CLI, NEVER from WebView paths.
+    let expected_workspace = selected_workspace(root).ok()
+        .and_then(|selection| selection.map(|(_, path)| path).or_else(|| Some(root.workspace.clone())))
+        .and_then(|path| fs::canonicalize(path).ok());
     let observed_workspace = record["workspace"].as_str()
         .and_then(|s| fs::canonicalize(s).ok());
     expected_cli.is_some() && expected_cli == observed_cli &&
@@ -233,6 +237,101 @@ pub(crate) fn read_catalog_command(catalog: &str) -> Result<serde_json::Value, S
     cli_command(&root, args, Duration::from_secs(12))
 }
 
+// The CLI does not expose a global mutable "profile use" command.
+ // Only the canonical, instance-scoped repository selection is writable.
+ fn valid_repository_id(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    (1..=64).contains(&bytes.len())
+        && bytes[0].is_ascii_lowercase()
+        && bytes.iter().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"._-".contains(b))
+        && !value.contains("..")
+ }
+
+fn selected_repository(root: &Payload) -> Result<Option<String>, String> {
+    let config = cli_command(root, &["config", "show", "--instance", INSTANCE], Duration::from_secs(12))?;
+    let selected = config["persisted"]["repository"].as_str().map(str::to_owned);
+    if selected.as_ref().is_some_and(|id| !valid_repository_id(id)) {
+        return Err("Tauri 전용 프로젝트 선택 정보가 유효하지 않습니다.".into());
+    }
+    Ok(selected)
+}
+
+fn registered_repository_path(root: &Payload, id: &str) -> Result<PathBuf, String> {
+    if !valid_repository_id(id) {
+        return Err("프로젝트 ID 형식이 유효하지 않습니다.".into());
+    }
+    let catalog = cli_command(root, &["repository", "list"], Duration::from_secs(12))?;
+    let repositories = catalog["repositories"].as_array()
+        .filter(|items| items.len() <= 128)
+        .ok_or("Tauri 프로젝트 목록의 형식 또는 크기가 올바르지 않습니다.")?;
+    let entry = repositories.iter().find(|item| item["id"] == id)
+        .ok_or("선택한 프로젝트가 Tauri 전용 목록에 없습니다.")?;
+    if entry["available"] != true {
+        return Err("선택한 프로젝트의 디렉터리를 찾을 수 없습니다.".into());
+    }
+    let path = entry["root"].as_str().ok_or("프로젝트 경로를 읽을 수 없습니다.")?;
+    let root = PathBuf::from(path);
+    if !root.is_absolute() || !root.is_dir() {
+        return Err("등록된 프로젝트 디렉터리가 유효하지 않습니다.".into());
+    }
+    fs::canonicalize(root).map_err(|_| "프로젝트 경로를 확인하지 못했습니다.".into())
+}
+
+fn selected_workspace(root: &Payload) -> Result<Option<(String, PathBuf)>, String> {
+    selected_repository(root)?
+        .map(|id| registered_repository_path(root, &id).map(|path| (id, path)))
+        .transpose()
+}
+
+/// Only writes instance-scoped repository preference when no preview
+/// runtime record exists. Never starts/stops/restarts any process.
+fn select_repository(root: &Payload, id: &str) -> Result<Option<String>, String> {
+    if !valid_repository_id(id) {
+        return Err("프로젝트 ID 형식이 유효하지 않습니다.".into());
+    }
+    let lock = MUTATION_LOCK.get_or_init(|| Mutex::new(()));
+    let _guard = lock.lock().map_err(|_| "프로젝트 선택 잠금을 얻지 못했습니다.")?;
+    ensure_workspace(root)?;
+    if record_if_any(root)?.is_some() || port_occupied() {
+        return Err("전용 인스턴스 기록 또는 실행 중인 포트가 있습니다. 선택을 변경하려면 전용 서버를 정상 중지하고 기록을 확인하세요.".into());
+    }
+    let _checked_root = registered_repository_path(root, id)?;
+    let previous = selected_repository(root)?;
+    if previous.as_deref() == Some(id) { return Ok(previous); }
+
+    let result = cli_command(
+        root, &["repository", "use", id, "--instance", INSTANCE], Duration::from_secs(12)
+    );
+    let observed = selected_repository(root);
+    if result.as_ref().is_ok_and(|v| v["selected"] == true
+        && v["repository"] == id && v["instance"] == INSTANCE)
+        && observed.as_ref().is_ok_and(|value| value.as_deref() == Some(id)) {
+        return Ok(Some(id.to_string()));
+    }
+    // Best-effort rollback of the *same owned instance's* preference only.
+    // No process stop/restart and no other instance/default mutation.
+    let rollback = match previous {
+        Some(old) => cli_command(root, &["repository", "use", &old, "--instance", INSTANCE], Duration::from_secs(12)),
+        None => cli_command(root, &["config", "unset", "repository", "--instance", INSTANCE], Duration::from_secs(12)),
+    };
+    if rollback.is_err() {
+        return Err("프로젝트 선택 검증에 실패했고 설정 복구도 확인되지 않았습니다. CLI 설정을 점검하세요.".into());
+    }
+    Err("프로젝트 선택 검증에 실패하여 이전 선택으로 복구했습니다.".into())
+}
+
+#[tauri::command]
+pub async fn select_owned_repository(id: String) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = payload()?;
+        select_repository(&root, &id)
+    }).await.map_err(|_| "프로젝트 선택 처리에 실패했습니다.".to_string())?
+}
+
+pub(crate) fn inspect_selected_repository() -> Result<Option<String>, String> {
+    selected_repository(&payload()?)
+}
+
 fn ensure_workspace(root: &Payload) -> Result<(), String> {
     fs::create_dir_all(&root.home).map_err(|_| "격리된 CLI 저장 공간을 만들지 못했습니다.")?;
     fs::create_dir_all(root.home.join(".config")).map_err(|_| "격리 설정 디렉터리를 만들지 못했습니다.")?;
@@ -322,8 +421,11 @@ fn operate(root: Payload, action: &str) -> Result<ManagedResult, String> {
                 if port_occupied() {
                     return Err("Tauri 전용 포트 18797이 사용 중입니다. 다른 프로세스는 종료하지 않습니다.".into());
                 }
+                let selection = selected_workspace(&root)?;
+                let workspace = selection.as_ref().map(|(_, path)| path)
+                    .unwrap_or(&root.workspace);
                 let args = ["start", "--instance", INSTANCE,
-                    "--workspace", root.workspace.to_str().ok_or("유효하지 않은 경로입니다.")?,
+                    "--workspace", workspace.to_str().ok_or("유효하지 않은 경로입니다.")?,
                     "--host", "127.0.0.1", "--port", "18797", "--tunnel", "none"];
                 let started = cli_command(&root, &args, Duration::from_secs(35))?;
                 if started["started"] != true || started["healthy"] != true {
@@ -376,6 +478,14 @@ mod tests {
     fn preview_uses_a_port_separate_from_winforms() {
         assert_ne!(PORT, 7979);
         assert_eq!(INSTANCE, "tauri-preview-v1");
+    }
+
+    #[test]
+    fn strict_repository_ids_reject_paths_and_option_injection() {
+        assert!(valid_repository_id("project-a"));
+        for id in ["", "../legacy", "..", "--instance", "Project", "a b", "한글", "a".repeat(65).as_str()] {
+            assert!(!valid_repository_id(id), "{id}");
+        }
     }
 
     #[test]
