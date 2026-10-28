@@ -288,7 +288,7 @@ fn selected_workspace(root: &Payload) -> Result<Option<(String, PathBuf)>, Strin
 /// Only writes instance-scoped repository preference when no preview
 /// runtime record exists. Never starts/stops/restarts any process.
 fn select_repository(root: &Payload, id: &str) -> Result<Option<String>, String> {
-    if !valid_repository_id(id) {
+    if !id.is_empty() && !valid_repository_id(id) {
         return Err("프로젝트 ID 형식이 유효하지 않습니다.".into());
     }
     let lock = MUTATION_LOCK.get_or_init(|| Mutex::new(()));
@@ -297,18 +297,25 @@ fn select_repository(root: &Payload, id: &str) -> Result<Option<String>, String>
     if record_if_any(root)?.is_some() || port_occupied() {
         return Err("전용 인스턴스 기록 또는 실행 중인 포트가 있습니다. 선택을 변경하려면 전용 서버를 정상 중지하고 기록을 확인하세요.".into());
     }
-    let _checked_root = registered_repository_path(root, id)?;
+    if !id.is_empty() {
+        let _checked_root = registered_repository_path(root, id)?;
+    }
     let previous = selected_repository(root)?;
-    if previous.as_deref() == Some(id) { return Ok(previous); }
+    if previous.as_deref().unwrap_or("") == id { return Ok(previous); }
 
-    let result = cli_command(
-        root, &["repository", "use", id, "--instance", INSTANCE], Duration::from_secs(12)
-    );
+    let result = if id.is_empty() {
+        cli_command(root, &["config", "unset", "repository", "--instance", INSTANCE], Duration::from_secs(12))
+    } else {
+        cli_command(root, &["repository", "use", id, "--instance", INSTANCE], Duration::from_secs(12))
+    };
     let observed = selected_repository(root);
-    if result.as_ref().is_ok_and(|v| v["selected"] == true
-        && v["repository"] == id && v["instance"] == INSTANCE)
-        && observed.as_ref().is_ok_and(|value| value.as_deref() == Some(id)) {
-        return Ok(Some(id.to_string()));
+    let command_ok = if id.is_empty() {
+        result.as_ref().is_ok_and(|v| v["updated"] == true && v["unset"] == true && v["instance"] == INSTANCE)
+    } else {
+        result.as_ref().is_ok_and(|v| v["selected"] == true && v["repository"] == id && v["instance"] == INSTANCE)
+    };
+    if command_ok && observed.as_ref().is_ok_and(|value| value.as_deref().unwrap_or("") == id) {
+        return Ok(if id.is_empty() { None } else { Some(id.to_string()) });
     }
     // Best-effort rollback of the *same owned instance's* preference only.
     // No process stop/restart and no other instance/default mutation.
