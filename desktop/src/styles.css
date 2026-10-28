@@ -158,6 +158,17 @@ button:focus-visible,input:focus-visible{outline:2px solid #999;outline-offset:2
 .legacy-log-caption{font-size:11px;line-height:1.6;color:#bdbdbd;margin-bottom:11px}
 .legacy-log-viewer pre{margin:0;max-height:325px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;line-height:1.6;color:#c4c4c4;font-family:Consolas,ui-monospace,monospace;tab-size:2}
 
+/* Human-readable Health status; the raw API JSON is opt-in for operators. */
+.legacy-health-summary{border:1px solid #424242;border-radius:11px;padding:0 16px;margin-top:12px;background:#1e1e1e}
+.legacy-health-summary .legacy-pref-row:first-child{border-top:0}
+.legacy-health-summary .legacy-value{flex:none;text-align:right;max-width:35%;font-size:11px}
+.legacy-health-advanced{border-top:1px solid #383838;margin-top:17px;padding-top:14px}
+.legacy-health-advanced summary{cursor:pointer;color:#bcbcbc;font-size:12px;line-height:1.7}
+.legacy-health-advanced summary:hover{color:#f0f0f0}
+.legacy-health-advanced summary:focus-visible{outline:2px solid #9fa5ac;outline-offset:4px;border-radius:4px}
+.legacy-health-advanced .legacy-footnote{margin-top:10px}
+.legacy-health-advanced .legacy-actions{margin-top:10px}
+
 /* Independent remote Health status; not a claim about CLI process ownership. */
 .tunnel-status{display:flex;align-items:flex-start;gap:11px;padding:14px 16px;border:1px solid #3d3d3d;background:#262626;border-radius:11px;margin:0 0 14px;color:#bcbcbc}
 .tunnel-status svg{flex:none;margin-top:2px}
