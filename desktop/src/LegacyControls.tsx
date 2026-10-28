@@ -49,11 +49,12 @@ function LockedField({ placeholder = "CLI 설정을 연결한 후 표시됩니�
     aria-label={placeholder} />;
 }
 
-export function ManagementControls({ onConnections, onSettings, onExit, exitError,
+export function ManagementControls({ onConnections, onSettings, onExit, exitError, onHide, trayError,
   owned, ownedBusy, ownedError, ownedToken, onOwnedAction, onCopyToken,
   catalog, catalogBusy, catalogError, onRefreshCatalog }: {
   onConnections: () => void; onSettings: () => void;
   onExit: () => void; exitError: string;
+  onHide: () => void; trayError: string;
   owned: ManagedResult | null; ownedBusy: boolean; ownedError: string;
   ownedToken: string | null;
   onOwnedAction: (action: ManagedAction) => void;
@@ -161,15 +162,16 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
       </div>
     </section>
     <section className="panel page-panel legacy-spaced">
-      <SectionHeading title="앱·트레이" icon={<Monitor size={18}/>} status="일부 연결"
+      <SectionHeading title="앱·트레이" icon={<Monitor size={18}/>} status="연결됨"
         description="작업 표시줄 및 트레이에서의 앱 동작을 관리합니다." />
       <div className="legacy-body">
         <div className="legacy-actions">
-          <PendingButton label="트레이로 숨기기" icon={<Monitor size={16}/>} />
+          <button type="button" className="legacy-action available" onClick={onHide}><Monitor size={16}/>트레이로 숨기기</button>
           <button type="button" className="legacy-action available" onClick={onExit}><Power size={16}/>앱 종료</button>
         </div>
-        <p className="legacy-footnote">앱 종료는 이 프리뷰 창만 닫으며 기존 MCP 서버를 중지하지 않습니다. 트레이 숨기기는 추후 연결합니다.</p>
-        {exitError && <p role="alert" className="form-error">{exitError}</p>}
+        <p className="legacy-footnote">트레이로 숨기면 Tauri 창만 사라지며 트레이 메뉴나 아이콘 더블클릭으로 복원할 수 있습니다. 앱 종료는 Tauri 프리뷰만 끝내며 기존 MCP 서버를 중지하지 않습니다.</p>
+        {trayError && <p role="alert" className="form-error">{trayError}</p>}
+        {exitError && <p role="alert" className="form-error">{exitError}</p>
         <button type="button" className="text-action legacy-link" onClick={onSettings}>
           시작 옵션 및 설정 보기 <ArrowRight size={16}/>
         </button>
@@ -239,7 +241,8 @@ export function LegacyConnectionControls({ publicConnector, publicState, publicV
   </>;
 }
 
-export function LegacyDiagnosticsControls({ onLocalHealth, checking, onPublicHealth, tunnelChecking, tunnelStatus, onViewLogs, logsChecking, logResult }: {
+export function LegacyDiagnosticsControls({ onLocalHealth, checking, onPublicHealth, tunnelChecking, tunnelStatus, onViewLogs, logsChecking, logResult,
+  native, localVerified, publicVerified, openError, onOpenLocalHealth, onOpenPublicHealth, onOpenGithub, onOpenDeveloper }: {
   onLocalHealth: () => void; checking: boolean;
   onPublicHealth: () => void;
   tunnelChecking: boolean;
@@ -247,6 +250,9 @@ export function LegacyDiagnosticsControls({ onLocalHealth, checking, onPublicHea
   onViewLogs: (component: CliLogComponent) => void;
   logsChecking: boolean;
   logResult: CliLogPreview | null;
+  native: boolean; localVerified: boolean; publicVerified: boolean; openError: string;
+  onOpenLocalHealth: () => void; onOpenPublicHealth: () => void;
+  onOpenGithub: () => void; onOpenDeveloper: () => void;
 }) {
   return <section className="panel page-panel legacy-spaced">
     <SectionHeading title="진단 도구" icon={<HeartPulse size={18}/>} status="일부 연결"
@@ -265,11 +271,22 @@ export function LegacyDiagnosticsControls({ onLocalHealth, checking, onPublicHea
         <button type="button" className="legacy-action available" onClick={() => onViewLogs("tunnel")} disabled={logsChecking}>
           <FileText size={16}/>터널 로그 보기
         </button>
+        <button type="button" className="legacy-action available" onClick={onOpenLocalHealth} disabled={!native || !localVerified}>
+          <ExternalLink size={16}/>로컬 Health 열기
+        </button>
+        <button type="button" className="legacy-action available" onClick={onOpenPublicHealth} disabled={!native || !publicVerified}>
+          <ExternalLink size={16}/>공개 Health 열기
+        </button>
         <PendingButton label="업데이트 확인" icon={<Download size={16}/>} />
-        <PendingButton label="GitHub 저장소 열기" icon={<ExternalLink size={16}/>} />
-        <PendingButton label="개발자 정보" icon={<Settings2 size={16}/>} />
+        <button type="button" className="legacy-action available" onClick={onOpenGithub} disabled={!native}>
+          <ExternalLink size={16}/>GitHub 저장소 열기
+        </button>
+        <button type="button" className="legacy-action available" onClick={onOpenDeveloper} disabled={!native}>
+          <Settings2 size={16}/>개발자 정보
+        </button>
       </div>
-      <p className="legacy-footnote">공개 Quick Tunnel Health는 독립적으로 검사합니다. 로그는 설치된 CLI 및 기존 WinForms 임시 기록에서 읽으며 민감한 행을 숨깁니다. 업데이트 기능은 아직 연동 예정입니다.</p>
+      <p className="legacy-footnote">Health 열기는 클릭 시 다시 서버를 검증하며, 공개 주소는 검증된 Quick Tunnel만 허용합니다. GitHub 링크는 고정 주소만 열고 임의 URL은 실행하지 않습니다. 업데이트 확인은 아직 미연결입니다.</p>
+      {openError && <p className="form-error" role="alert">{openError}</p>}
       <p className="legacy-footnote">공개 연결: {tunnelStatus}</p>
       {logResult && <div className="legacy-log-viewer" role="region" aria-label="C2C CLI 로그 미리보기">
         <div className="legacy-log-caption">{logResult.component === "server" ? "서버 로그" : "터널 로그"} · {logResult.details}</div>
