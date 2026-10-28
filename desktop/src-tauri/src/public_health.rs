@@ -26,7 +26,7 @@ fn snapshot(state: &'static str, endpoint: Option<String>, details: &str) -> Pub
 
 /// Accept only the exact Quick Tunnel origin recorded by our installed CLI.
 /// Do not follow redirects, probe arbitrary addresses, or contact localhost.
-fn quick_tunnel_health_url(mcp_url: &str) -> Option<String> {
+pub(crate) fn quick_tunnel_health_url(mcp_url: &str) -> Option<String> {
     let hostname = mcp_url
         .strip_prefix("https://")?
         .strip_suffix("/mcp")?;

@@ -19,10 +19,10 @@ pub(crate) fn restore_main(app: &AppHandle) {
     }
 }
 
-fn hide_main(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
-        let _ = window.hide();
-    }
+pub(crate) fn hide_main(app: &AppHandle) -> Result<(), String> {
+    let window = app.get_webview_window(MAIN_WINDOW)
+        .ok_or_else(|| "Tauri 프리뷰 창을 찾을 수 없습니다.".to_string())?;
+    window.hide().map_err(|_| "프리뷰 창을 트레이로 숨기지 못했습니다.".to_string())
 }
 
 pub(crate) fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
@@ -68,7 +68,7 @@ pub(crate) fn on_window_event(window: &tauri::Window, event: &WindowEvent) {
         // background window visible in the taskbar.
         WindowEvent::Resized(_) => {
             if window.is_minimized().unwrap_or(false) {
-                hide_main(window.app_handle());
+                let _ = hide_main(window.app_handle());
             }
         }
         _ => (),

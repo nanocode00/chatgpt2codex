@@ -91,6 +91,19 @@ export async function closePreviewWindow(): Promise<void> {
   await invoke<void>("close_preview_window");
 }
 
+/** F5-B: native Tauri window only. Never touches CLI or the WinForms server. */
+export async function hidePreviewWindow(): Promise<void> {
+  if (!isNativeApp()) throw new Error("Windows Tauri 앱에서만 트레이로 숨길 수 있습니다.");
+  await invoke<void>("hide_preview_window");
+}
+
+export type TrustedLink = "github" | "developer" | "local_health" | "public_health";
+/** The Rust command selects exact destinations and revalidates health on click. */
+export async function openTrustedLink(kind: TrustedLink, port?: number): Promise<void> {
+  if (!isNativeApp()) throw new Error("Windows Tauri 앱에서만 외부 브라우저를 열 수 있습니다.");
+  await invoke<void>("open_trusted_link", { kind, port: port ?? null });
+}
+
 export type PublicTunnelState = "online" | "offline" | "unavailable" | "unsupported";
 
 export interface PublicTunnelHealth {
