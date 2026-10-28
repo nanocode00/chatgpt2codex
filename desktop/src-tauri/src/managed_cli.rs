@@ -159,9 +159,16 @@ fn record_if_any(root: &Payload) -> Result<Option<serde_json::Value>, String> {
 
 fn cli_command(root: &Payload, args: &[&str], timeout: Duration) -> Result<serde_json::Value, String> {
     let config = root.home.join(".config");
+    // Read-only list commands must work even before the preview workspace
+    // has been initialized. Mutating operations always call ensure_workspace.
+    let workdir = if root.workspace.is_dir() {
+        root.workspace.as_path()
+    } else {
+        root.cli.parent().ok_or("검증된 CLI 작업 디렉터리를 찾지 못했습니다.")?
+    };
     let mut command = Command::new(&root.node);
     command.arg(&root.cli).args(args)
-        .current_dir(&root.workspace)
+        .current_dir(workdir)
         .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
     // A strict inherited-env allowlist prevents legacy C2C credentials,
     // Cloudflare tunnel tokens and host config from leaking into a child.
@@ -211,6 +218,19 @@ fn cli_command(root: &Payload, args: &[&str], timeout: Duration) -> Result<serde
         return Err("CLI 응답이 예상 범위를 초과했습니다.".into());
     }
     serde_json::from_slice(&bytes).map_err(|_| "CLI가 유효한 상태 JSON을 반환하지 않았습니다.".into())
+}
+
+/// Only these two fixed list verbs can be invoked by the catalog UI.
+ /// Resolves a hash-verified bundle and a separate preview HOME; no init,
+ /// selection, token read, legacy CLI execution, tunnel or process control.
+pub(crate) fn read_catalog_command(catalog: &str) -> Result<serde_json::Value, String> {
+    let args: &[&str] = match catalog {
+        "repository" => &["repository", "list"],
+        "profile" => &["profile", "list"],
+        _ => return Err("읽기 전용 카탈로그 명령이 아닙니다.".into()),
+    };
+    let root = payload()?;
+    cli_command(&root, args, Duration::from_secs(12))
 }
 
 fn ensure_workspace(root: &Payload) -> Result<(), String> {

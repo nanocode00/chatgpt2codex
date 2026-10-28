@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { CliLogComponent, CliLogPreview, ManagedResult, ManagedAction } from "./runtime";
+import type { CliLogComponent, CliLogPreview, ManagedResult, ManagedAction, CatalogInspection } from "./runtime";
 import {
   ArrowRight, Cloud, Copy, Download, ExternalLink, FileText, FolderOpen,
   Globe2, HeartPulse, KeyRound, Monitor, Play, Power, RefreshCcw,
@@ -50,13 +50,16 @@ function LockedField({ placeholder = "CLI 설정을 연결한 후 표시됩니�
 }
 
 export function ManagementControls({ onConnections, onSettings, onExit, exitError,
-  owned, ownedBusy, ownedError, ownedToken, onOwnedAction, onCopyToken }: {
+  owned, ownedBusy, ownedError, ownedToken, onOwnedAction, onCopyToken,
+  catalog, catalogBusy, catalogError, onRefreshCatalog }: {
   onConnections: () => void; onSettings: () => void;
   onExit: () => void; exitError: string;
   owned: ManagedResult | null; ownedBusy: boolean; ownedError: string;
   ownedToken: string | null;
   onOwnedAction: (action: ManagedAction) => void;
   onCopyToken: () => void;
+  catalog: CatalogInspection | null; catalogBusy: boolean; catalogError: string;
+  onRefreshCatalog: () => void;
 }) {
   return <>
     <section className="panel page-panel">
@@ -108,17 +111,53 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
       </div>
     </section>
     <section className="panel page-panel legacy-spaced">
-      <SectionHeading title="프로젝트" icon={<FolderOpen size={18}/>}
-        description="작업할 프로젝트 폴더와 CLI 프로필을 선택합니다." />
+      <SectionHeading title="프로젝트·CLI 프로필" icon={<FolderOpen size={18}/>} status="조회 전용"
+        description="기존 WinForms 선택값과 독립 Tauri CLI 카탈로그를 구분해서 표시합니다." />
       <div className="legacy-body">
-        <FormRow label="선택된 프로젝트" help="기존 앱의 선택값을 아직 가져오지 않습니다.">
-          <div className="legacy-inline"><LockedField placeholder="프로젝트를 선택하지 않았습니다 (미연동)"/><PendingButton label="찾아보기" icon={<FolderOpen size={16}/>} /></div>
+        <div className="legacy-actions">
+          <button className="legacy-action available" type="button" disabled={catalogBusy}
+            onClick={onRefreshCatalog}>
+            <RefreshCcw size={16}/>{catalogBusy ? "조회 중..." : "목록 새로고침"}
+          </button>
+        </div>
+        {catalogError && <p className="form-error" role="alert">{catalogError}</p>}
+        <FormRow label="기존 WinForms 선택 프로젝트" help="기존 설정을 읽기만 합니다. 아래 독립 CLI 목록과 연결되지 않습니다.">
+          <input className="legacy-field" type="text" readOnly
+            value={catalog?.legacyProject ?? ""}
+            placeholder={catalog ? "선택된 프로젝트 없음" : "조회 전"}
+            aria-label="기존 WinForms 프로젝트 경로 (조회 전용)" />
         </FormRow>
-        <FormRow label="CLI 프로필" help="프로필 목록과 권한 설정은 추후 연결합니다.">
-          <select className="legacy-field" disabled aria-label="CLI 프로필 — 연동 예정">
-            <option>프로필 연동 예정</option>
-          </select>
-        </FormRow>
+        {catalog?.legacyProject && <p className="legacy-footnote" role="status">
+          {catalog.legacyProjectExists ? "기존 프로젝트 디렉터리 확인됨" : "기존 프로젝트 디렉터리를 찾지 못했습니다."}
+        </p>}
+        <div className="legacy-pref-row">
+          <div><strong>Tauri 전용 프로젝트 목록</strong>
+            <p>격리된 프리뷰 HOME에 등록된 프로젝트만 표시하며, 목록 조회로 등록·선택하지 않습니다.</p>
+          </div>
+          <span className="legacy-value">{catalog?.available ? catalog.projects.length + "개" : "확인 필요"}</span>
+        </div>
+        {catalog?.available && (catalog.projects.length
+          ? <ul aria-label="Tauri 전용 프로젝트 목록">
+              {catalog.projects.map(item => <li key={item.id}>
+                <strong>{item.name}</strong> ({item.id}) · {item.available ? "디렉터리 확인됨" : "디렉터리 없음"}
+              </li>)}
+            </ul>
+          : <p className="legacy-footnote">등록된 전용 프로젝트가 없습니다.</p>)}
+        <div className="legacy-pref-row">
+          <div><strong>Tauri 전용 CLI 프로필</strong>
+            <p>Python/Docker 프로필 이름과 종류만 조회합니다. 선택·편집은 다음 단계에서 지원합니다.</p>
+          </div>
+          <span className="legacy-value">{catalog?.available ? catalog.profiles.length + "개" : "확인 필요"}</span>
+        </div>
+        {catalog?.available && (catalog.profiles.length
+          ? <ul aria-label="Tauri 전용 CLI 프로필 목록">
+              {catalog.profiles.map(item => <li key={item.alias}>
+                <strong>{item.alias}</strong> · {[item.python && "Python", item.docker && "Docker"].filter(Boolean).join(" / ")}
+              </li>)}
+            </ul>
+          : <p className="legacy-footnote">등록된 전용 프로필이 없습니다.</p>)}
+        <p className="legacy-footnote" role="status">{catalog?.details ?? "읽기 전용 목록 조회를 시작하지 않았습니다."}</p>
+        <p className="legacy-footnote">프로젝트 변경·폴더 선택·CLI 프로필 적용은 아직 지원하지 않습니다. 기존 WinForms 설정과 서버 7979는 변경하지 않습니다.</p>
       </div>
     </section>
     <section className="panel page-panel legacy-spaced">

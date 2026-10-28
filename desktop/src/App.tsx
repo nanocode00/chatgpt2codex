@@ -5,7 +5,7 @@ import {
   Settings2, ShieldCheck, TerminalSquare, Wifi, WifiOff
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { checkRuntime, inspectInstalledCli, inspectInstalledCliLogs, inspectPublicTunnel, manageOwnedCli, closePreviewWindow, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type CliInspection, type CliLogPreview, type CliLogComponent, type ManagedAction, type ManagedResult, type PublicTunnelHealth, type RuntimeHealth } from "./runtime";
+import { checkRuntime, inspectInstalledCli, inspectInstalledCliLogs, inspectPublicTunnel, manageOwnedCli, inspectOwnedCatalog, closePreviewWindow, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type CliInspection, type CliLogPreview, type CliLogComponent, type ManagedAction, type ManagedResult, type CatalogInspection, type PublicTunnelHealth, type RuntimeHealth } from "./runtime";
 import { ManagementControls, LegacyConnectionControls, LegacyDiagnosticsControls, LegacySettingsControls } from "./LegacyControls";
 import { MigrationPreflight } from "./MigrationPreflight";
 import { inspectLegacyMigration, saveLegacySettingsSnapshot, inspectCredentialBackup, createCredentialBackup, rehearseCredentialRestore, type LegacyMigrationReport, type CredentialBackupReport, type RestoreRehearsalReport } from "./runtime";
@@ -58,6 +58,9 @@ function App() {
   const [ownedBusy, setOwnedBusy] = useState(false);
   const [ownedError, setOwnedError] = useState("");
   const [ownedToken, setOwnedToken] = useState<string | null>(null);
+  const [catalog, setCatalog] = useState<CatalogInspection | null>(null);
+  const [catalogBusy, setCatalogBusy] = useState(false);
+  const [catalogError, setCatalogError] = useState("");
   const [migrationReport, setMigrationReport] = useState<LegacyMigrationReport | null>(null);
   const [migrationBusy, setMigrationBusy] = useState(false);
   const [migrationError, setMigrationError] = useState("");
@@ -146,9 +149,25 @@ function App() {
     }
   }, []);
 
+  const refreshCatalog = useCallback(async () => {
+    setCatalogBusy(true);
+    setCatalogError("");
+    try {
+      setCatalog(await inspectOwnedCatalog());
+    } catch (error) {
+      setCatalog(null);
+      setCatalogError(error instanceof Error ? error.message : "프로젝트/프로필 조회에 실패했습니다.");
+    } finally {
+      setCatalogBusy(false);
+    }
+  }, []);
+
   useEffect(() => {
-    if (screen === "manage") void runOwnedAction("status");
-  }, [screen, runOwnedAction]);
+    if (screen === "manage") {
+      void runOwnedAction("status");
+      void refreshCatalog();
+    }
+  }, [screen, runOwnedAction, refreshCatalog]);
 
   async function copyOwnedToken() {
     if (!ownedToken) return;
@@ -428,8 +447,8 @@ function App() {
               </section>
               <section className="panel project-panel">
                 <div className="panel-heading"><div className="panel-title"><span className="icon-tile"><FolderCode size={18}/></span><div><h2>프로젝트 관리</h2><p>CLI 공통 인스턴스 연동 준비 중</p></div></div></div>
-                <p className="description">프로젝트 목록과 프로필은 기존 C2C CLI가 관리합니다. 다음 단계에서 공통 관리 기능을 연결할 예정입니다.</p>
-                <span className="coming-soon">CLI 연동 예정</span>
+                <p className="description">기존 WinForms의 프로젝트 선택과 독립 Tauri CLI의 프로젝트·프로필 목록을 조회할 수 있습니다.</p>
+                <span className="coming-soon">목록 조회 지원 · 선택은 추후 연결</span>
                 <button type="button" className="text-action legacy-link" onClick={() => setScreen("manage")}>관리 화면 보기 <ChevronRight size={16}/></button>
               </section>
             </div>
@@ -441,6 +460,7 @@ function App() {
             <p>기존 Windows 런처의 관리 항목을 먼저 배치했어. 실제 서버 제어는 안전성 검증 후 연결해.</p></div></div>
           <ManagementControls onConnections={() => setScreen("connections")} onSettings={() => setScreen("settings")} onExit={() => { void exitPreview(); }} exitError={exitError}
             owned={owned} ownedBusy={ownedBusy} ownedError={ownedError} ownedToken={ownedToken}
+            catalog={catalog} catalogBusy={catalogBusy} catalogError={catalogError} onRefreshCatalog={() => { void refreshCatalog(); }}
             onOwnedAction={(action) => { void runOwnedAction(action); }} onCopyToken={() => { void copyOwnedToken(); }}/>
         </>}
 
