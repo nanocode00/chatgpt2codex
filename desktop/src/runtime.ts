@@ -107,6 +107,33 @@ export async function inspectPublicTunnel(instance = "default"): Promise<PublicT
   return invoke<PublicTunnelHealth>("inspect_public_tunnel_health", { instance });
 }
 
+export interface CatalogRepository {
+  id: string;
+  name: string;
+  available: boolean;
+}
+export interface CatalogProfile {
+  alias: string;
+  python: boolean;
+  docker: boolean;
+}
+export interface CatalogInspection {
+  available: boolean;
+  projects: CatalogRepository[];
+  profiles: CatalogProfile[];
+  legacyProject: string | null;
+  legacyProjectExists: boolean;
+  details: string;
+}
+/** Read-only. Lists use the isolated hash-verified preview CLI, not WinForms. */
+export async function inspectOwnedCatalog(): Promise<CatalogInspection> {
+  if (!isNativeApp()) {
+    return { available: false, projects: [], profiles: [], legacyProject: null,
+      legacyProjectExists: false, details: "프로젝트/프로필 조회는 Windows Tauri 앱에서만 지원합니다." };
+  }
+  return invoke<CatalogInspection>("inspect_owned_catalog");
+}
+
 export type ManagedAction = "status" | "prepare" | "start" | "stop" | "restart";
 export interface ManagedResult {
   available: boolean;
