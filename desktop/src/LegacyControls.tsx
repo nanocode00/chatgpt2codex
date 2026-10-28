@@ -171,7 +171,7 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
         </div>
         <p className="legacy-footnote">트레이로 숨기면 Tauri 창만 사라지며 트레이 메뉴나 아이콘 더블클릭으로 복원할 수 있습니다. 앱 종료는 Tauri 프리뷰만 끝내며 기존 MCP 서버를 중지하지 않습니다.</p>
         {trayError && <p role="alert" className="form-error">{trayError}</p>}
-        {exitError && <p role="alert" className="form-error">{exitError}</p>
+        {exitError && <p role="alert" className="form-error">{exitError}</p>}
         <button type="button" className="text-action legacy-link" onClick={onSettings}>
           시작 옵션 및 설정 보기 <ArrowRight size={16}/>
         </button>
