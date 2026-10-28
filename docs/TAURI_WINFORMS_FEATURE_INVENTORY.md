@@ -1,54 +1,140 @@
-# WinForms → Tauri feature inventory (UI-only parity)
+# WinForms → Tauri functional parity inventory (F5 baseline)
 
-Tracking: #51. Original user-supplied WinForms screenshots reviewed 2026-10-21:
-main window, tray context menu and settings dialog.
+As of **2026-10-28**, based on repository \`main\` at
+\`f8d006b2181d2d208bbc697e4b3c0d74ace39fab\` (merged PRs #69–#75).
+The baseline is \`windows/ChatGPTToCodexLauncher.cs\`; Tauri behavior comes
+from \`desktop/src/{App,LegacyControls,MigrationPreflight,runtime}.*\` and
+the exact native command registration in
+\`desktop/src-tauri/src/lib.rs\`.
 
-This branch adds visual control coverage and a first set of **read-only operations**. `disabled` means there
-is intentionally no handler, no Tauri command, and no process/token/config
-mutation. Greyed-out controls show **연동 예정**. Blank settings do not claim
-to reflect the installed WinForms preferences.
+This is **a source-and-evidence audit, not an assertion that the Windows
+applications are functionally interchangeable**. The installed legacy
+WinForms application and its live \`default\` instance on port **7979**
+must remain untouched. F4-E production cutover stays **NO-GO**.
 
-| WinForms control | Tauri location | Current behavior |
-| --- | --- | --- |
-| MCP 시작, 중지, 재시작 | 관리 → MCP 서버 제어 | Disabled pending audited shared CLI |
-| 트레이로 숨기기, 종료 | 관리 → 앱·트레이 | Tray disabled; **App exit working** (Tauri window only, MCP remains running) |
-| 프로젝트 폴더 / 찾아보기 | 관리 → 프로젝트 | Disabled; existing folder path not read |
-| 프로필 선택 | 관리 → 프로젝트 | Disabled future unified CLI catalog |
-| 커넥터 URL 복사 | 연결 → 로컬 MCP URL | **Working** local-only copy, not public URL |
-| ChatGPT 웹 커넥터 사용 | 연결 → 외부 ChatGPT 연결 | Disabled; existing setting not imported |
-| 본인 소유 고정 도메인 | 연결 → 외부 ChatGPT 연결 | Disabled, no fake tunnel hostname |
-| 공개 상태 확인 / 공개 URL 복사 | 연결 → 외부 ChatGPT 연결 | **Working**; independent unauthenticated HTTPS Quick Tunnel health probe (Online/Offline/Unknown), labels saved/stale URLs and prevents copying known offline URL |
-| Owner Token 복사 | 연결 → Owner Token | Disabled, secret never shown or cached |
-| Owner Token 자동 생성 | 연결 → Owner Token | Disabled; no token rotation |
-| 로컬 상태 확인 | 진단 → 진단 도구 | **Working**, reuses native health probe |
-| 공개 상태 열기 | 진단 → 진단 도구 | Disabled until tunnel health contract |
-| 서버·터널 로그 보기 | 진단 → 진단 도구 | **Working**, CLI-managed logs first; fixed WinForms temp-log fallback for healthy default instance, with stale-file warning, bounded/redacted output |
-| 업데이트 확인 | 진단 → 진단 도구 / 설정 | Disabled |
-| GitHub 저장소 / 개발자 정보 | 진단 → 진단 도구 | Disabled pending trusted URL policy |
-| 언어 | 설정 → Windows 런처 설정 | Disabled, default selection not implied |
-| Windows 시작 시 실행 | 설정 → Windows 런처 설정 | Disabled, existing registry untouched |
-| 앱 열 때 MCP 자동 시작 | 설정 → Windows 런처 설정 | Disabled |
-| 업데이트 자동 확인 | 설정 → Windows 런처 설정 | Disabled |
-| 로컬 포트 설정 | 설정 → Windows 런처 설정 | Disabled actual server port |
-| GitHub 저장소 URL | 설정 → Windows 런처 설정 | Disabled; value not imported |
-| 설정 저장 | 설정 → Windows 런처 설정 | Disabled for runtime preferences |
-| 모니터링 조회 포트 / 자동 Health | 설정 → 모니터링 | **Working**, frontend-only preference |
-| CLI 상태 조회 | 연결 → CLI 관리 인스턴스 | **Working**, read-only fixed installed CLI |
+## Terms and ownership
 
-## Implementation sequencing
+- **Connected**: usable Tauri native control with a defined scope.
+- **Read-only**: observed status; cannot change the associated runtime.
+- **Partial**: a related control exists, but the WinForms operation is not
+  fully implemented or targets a different instance.
+- **Pending**: intentionally disabled / UI placeholder; a visible control
+  must never imply functional parity.
+- **Independent**: \`tauri-preview-v1\` uses an owned bundled Node CLI,
+  isolated HOME/workspace, \`127.0.0.1:18797\`, **no tunnel**, with
+  separate credentials. This is NOT WinForms \`default:7979\`.
 
-1. Keep Tauri overview and native health intact. All new controls are
-   view-only until their privileged CLI equivalents pass tests.
-2. After #54 safe Windows lifecycle review, wire fixed typed commands for
-   **CLI-owned** instance management (start, stop, restart) without taking over
-   v0.3.1 WinForms-managed runtime.
-3. Wire projects / profiles / log diagnostics to shared instance manager.
-4. Add Cloudflare Quick/Named Tunnel semantics and public endpoint ownership.
-5. Add token handling with explicit rotation confirmation and never export
-   secrets to browser storage or diagnostics.
-6. Migrate WinForms settings with backup, idempotency and user-visible diff;
-   then implement native startup, tray, update and settings persistence.
+## Feature-by-feature comparison
 
-Do not claim GUI feature parity until both the visual and behavior columns
-are complete. This branch adds the initial safe runtime queries and preview exit,
-not full lifecycle or installer parity.
+| Domain / WinForms baseline | Tauri UI behavior on current main | Classification | Next action |
+| --- | --- | --- | --- |
+| Main window with runtime status | Overview and local \`/healthz\` probe; user-selectable **monitoring** port only | Connected / read-only | Distinguish inspected port and owned-instance scope |
+| WinForms MCP start / stop / restart | Manage buttons actually control **independent** \`tauri-preview-v1:18797\`, not legacy \`default:7979\` | Partial / independent | Keep legacy control read-only; later enable only audited ownership-scoped controls |
+| Server/runtime state in tray | Tauri tray and window lifecycle implemented | Connected, limited manual proof | No per-legacy-service tray control assumed |
+| Hide to tray / restore | Native tray close/hide/restore exists; **Manage → 트레이로 숨기기** is still disabled | Partial | **F5 quick win:** bind this button to existing native tray behavior |
+| Duplicate desktop launch | Windows native single-instance callback restores window | Connected | Reuse existing regression tests |
+| App exit independent of server | \`앱 종료\` command exits Tauri preview without stopping default server | Connected | Clarify owned background-instance lifetime on app exit |
+| Selected WinForms project folder / Browse | Tauri Manage selected-project field and Browse are disabled; migration reports/snapshots can **inspect** legacy selection | Partial / read-only | **F5-A:** expose current selection read-only, then separated picker/change flow |
+| WinForms project startup workspace | No connected WinForms workspace selector; independent CLI fixed preview workspace | Pending | Scope any editable selection to owned preview instance only |
+| CLI project catalog (not a WinForms UI parity item) | CLI project list/show/add/remove exists, but Tauri project list UI not connected | Pending / CLI extension | **F5-A:** read-only list with bounded, typed results |
+| CLI Python/Docker profile catalog (not a WinForms UI parity item) | CLI profile list/show/test/add/remove exists; Tauri profile select disabled | Pending / CLI extension | **F5-A:** read-only profile summary; defer edits |
+| Local MCP URL / copy | Local endpoint display/copy uses inspected localhost port | Connected | Do not represent local address as public OAuth endpoint |
+| Cloudflare Quick Tunnel / Named hostname | Public HTTPS health and verified/stale URL/copy exist; tunnel enable, hostname edit and lifecycle are disabled | Partial / read-only | Read-only status first; user-owned settings only in a later opt-in change |
+| ChatGPT web-connector enable | Related status UI, but switch and persisted configuration are not connected | Pending | No automatic re-registration or issuer changes |
+| Owner Token copy / regenerate | Legacy token UI intentionally disabled; dedicated preview \`prepare\` can create a **different**, one-time token | Partial / independent | Preserve legacy credential isolation; never display original token |
+| Local health and server / tunnel logs | Native local probe, bounded redacted CLI log reader, WinForms temp-log fallback, public probe | Connected / read-only | Add evidence of origin and staleness where relevant |
+| Open local/public health in browser | Native probes exist, but WinForms open-link parity is incomplete | Partial | F5 quick win: trusted/verified URL open only |
+| GitHub repository open / developer info | Buttons remain disabled | Pending | F5 quick win: trusted URL only, no arbitrary launcher |
+| Update check / auto update | Disabled UI; dedicated NSIS setup and CI upgrade fixture **are not an updater** | Pending | Defer updater/signing to release track |
+| Launcher language setting | Tauri shows disabled legacy setting; existing UI language hardcoded in parts | Pending | Localized UI/preferences as separate feature |
+| Windows login auto-start | Dedicated **Tauri-only** HKCU Run entry can be toggled in real installed NSIS app; legacy Run entry untouched | Connected / Tauri-only | No claim of legacy startup preference migration |
+| Start MCP when launcher opens | Disabled; never auto-start live default | Pending | Opt-in independent-instance policy only |
+| MCP actual server port | WinForms persisted port can be inspected by migration; Tauri settings port changes **monitoring only** | Partial / read-only | Avoid silently converting monitor port into server port |
+| Public hostname / GitHub repository / persisted launch options | Read-only WinForms migration inspection/snapshot and disabled edit fields | Partial / read-only | Read-only visibility first, editing later with explicit ownership |
+| Settings save | Only frontend monitoring preference saves; WinForms settings are not rewritten | Partial | Do not label local UI preferences as CLI runtime settings |
+| Existing settings and credential backup | Read-only migration, DPAPI encrypted backup + disposable restore rehearsal | Connected / safety tooling | Not a live restore or production handover |
+| Installed Windows setup/reinstall/uninstall | Separate Tauri \`currentUser\` NSIS; hosted Windows install/uninstall and 0.1.0→0.1.1 fixture tests | Connected / independent | No auto-updater, signed release or WinForms uninstallation |
+
+## Evidence: tests and limitations
+
+- Windows CI on PRs **#74/#75**: standalone NSIS build;
+  disposable installation and uninstallation; bundled CLI hashes;
+  separate legacy Run sentinel; same-version reinstall and test-fixture
+  version upgrade; isolated preview data preserved.
+- Windows laptop human acceptance on **2026-10-28**:
+  installed Tauri EXE and bundle present alongside WinForms;
+  GUI worked; dedicated login-start Run value ON then OFF;
+  Tauri-only uninstalled; existing default remained
+  \`alive=True\`, \`healthy=True\`, \`port=7979\`.
+- **Not proven** by that acceptance: real Windows relogin auto-launch;
+  each tray interaction and duplicate-window edge case in that
+  installation; actual production OAuth/ChatGPT public roundtrip;
+  Windows live default-instance ownership takeover;
+  interruption halfway through a real NSIS installer and automatic
+  rollback; signed package or an updater.
+- In particular, a synthetic journal/fixture or a rejected corrupt
+  installer is **not** proof of crash-safe recovery of a live client.
+
+## F5 implementation order: user-visible value first
+
+### F5-A — make project/profile information useful (first PR)
+
+1. Add a narrow, **read-only**, typed native Rust bridge that uses only
+   a verified bundled CLI/exact preview workspace to retrieve
+   \`project list\` and \`profile list\` (or the existing native catalog
+   API if already audited). Show current scope and empty/error states.
+2. Display legacy selected-project **read-only** only if the existing
+   migration inspector already supports it. Never auto-import that
+   project into the owned preview. Never leak raw config secrets.
+3. Replace disabled placeholders in Manage with truthful data, keeping
+   browsing/editing disabled until scope and ownership are defined.
+4. Accept: no writes to legacy settings/default/7979; unknown CLI or
+   malformed data fail closed; Windows CI, UI build and a short human
+   preview check. **Do not add installer/reboot/cutover tests** to this
+   read-only feature PR.
+
+### F5-B — connect small native UI affordances (independent PR)
+
+- Wire \`트레이로 숨기기\` to the existing native Tauri window/tray
+  handler; keep exit separate from server stop.
+- Wire repository/open-health actions only to fixed trusted URLs or
+  verified endpoint origins, with bounded inputs.
+- Accept: UI action does what its label says, no arbitrary command or
+  execution path, no default-instance mutation.
+
+### F5-C — owned-instance project selection and runtime preferences
+
+- Introduce explicit profile/project selection for the **owned**
+  \`tauri-preview-v1\` only with selection preview and confirmation,
+  exact CLI ownership validation and no hidden runtime restart.
+- Add settings editing only when the canonical CLI config interface and
+  error/rollback behavior are defined. Keep WinForms configuration
+  separately read-only until a future migration decision.
+- Add Cloudflare management and token rotation **only** after separate
+  credential/issuer UX decisions; no silent rotation.
+
+### F4-E — production cutover (separate, later)
+
+Requires its own explicit operator approval and live proof of process
+identity, ACL-safe state migration, credential/OAuth issuer continuity
+or planned reconnect, and rollback. **Do not make F5 depend on this.**
+
+## Previously open PRs to triage, not merge as F5 shortcuts
+
+- **#50:** old Windows installer payload tests. Check overlap with
+  merged independent NSIS F4-D4 CI before any reuse.
+- **#52:** older WinForms visual-dashboard direction; superseded as
+  the UI implementation by Tauri 2 + React. Review/close only after
+  checking that it contains no independent necessary change.
+- **#54:** old draft PID ownership guard. Investigate whether its
+  proposed checks are already covered by the current CLI; do **not**
+  merge blindly into the live Windows process lifecycle.
+
+## Scope control
+
+Treat F5 as product UI and feature wiring. Prefer one small PR per
+visible behavior; extend targeted tests, not the migration/release
+matrix, unless the change actually affects that boundary. Never touch
+the dirty \`/home/honorbear/chatgpt2codex\` main worktree as part of
+the review. This inventory is documentation only; it adds no privileged
+desktop control or Windows machine changes.
