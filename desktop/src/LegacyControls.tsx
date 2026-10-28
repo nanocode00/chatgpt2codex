@@ -51,7 +51,8 @@ function LockedField({ placeholder = "CLI 설정을 연결한 후 표시됩니�
 
 export function ManagementControls({ onConnections, onSettings, onExit, exitError, onHide, trayError,
   owned, ownedBusy, ownedError, ownedToken, onOwnedAction, onCopyToken,
-  catalog, catalogBusy, catalogError, onRefreshCatalog }: {
+  catalog, catalogBusy, catalogError, onRefreshCatalog,
+  draftRepository, onDraftRepository, selectionBusy, selectionError, selectionNotice, onConfirmRepository }: {
   onConnections: () => void; onSettings: () => void;
   onExit: () => void; exitError: string;
   onHide: () => void; trayError: string;
@@ -61,6 +62,9 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
   onCopyToken: () => void;
   catalog: CatalogInspection | null; catalogBusy: boolean; catalogError: string;
   onRefreshCatalog: () => void;
+  draftRepository: string; onDraftRepository: (id: string) => void;
+  selectionBusy: boolean; selectionError: string; selectionNotice: string;
+  onConfirmRepository: () => void;
 }) {
   return <>
     <section className="panel page-panel">
@@ -112,8 +116,8 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
       </div>
     </section>
     <section className="panel page-panel legacy-spaced">
-      <SectionHeading title="프로젝트·CLI 프로필" icon={<FolderOpen size={18}/>} status="조회 전용"
-        description="기존 WinForms 선택값과 독립 Tauri CLI 카탈로그를 구분해서 표시합니다." />
+      <SectionHeading title="프로젝트·CLI 프로필" icon={<FolderOpen size={18}/>} status="전용 프로젝트 선택"
+        description="기존 WinForms는 조회만 하고 Tauri 전용 프로젝트만 확인 후 선택합니다." />
       <div className="legacy-body">
         <div className="legacy-actions">
           <button className="legacy-action available" type="button" disabled={catalogBusy}
@@ -133,7 +137,7 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
         </p>}
         <div className="legacy-pref-row">
           <div><strong>Tauri 전용 프로젝트 목록</strong>
-            <p>격리된 프리뷰 HOME에 등록된 프로젝트만 표시하며, 목록 조회로 등록·선택하지 않습니다.</p>
+            <p>격리된 프리뷰 HOME에 등록된 프로젝트입니다. 기존 WinForms 프로젝트를 자동으로 가져오지 않습니다.</p>
           </div>
           <span className="legacy-value">{catalog?.available ? catalog.projects.length + "개" : "확인 필요"}</span>
         </div>
@@ -144,9 +148,33 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
               </li>)}
             </ul>
           : <p className="legacy-footnote">등록된 전용 프로젝트가 없습니다.</p>)}
+        <FormRow label="다음 시작에 사용할 Tauri 전용 프로젝트" help="등록된 프로젝트 중 디렉터리가 확인된 항목만 선택합니다. 확인 후 저장되며 실행 중인 서버는 변경되지 않습니다.">
+          <div className="legacy-inline">
+            <select className="legacy-field" aria-label="Tauri 전용 프로젝트 선택" value={draftRepository}
+              onChange={event => onDraftRepository(event.target.value)}
+              disabled={!catalog?.available || catalogBusy || selectionBusy || ownedBusy || !!owned?.running}>
+              <option value="">기본 격리된 프리뷰 작업 공간</option>
+              {catalog?.projects.filter(item => item.available).map(item => (
+                <option key={item.id} value={item.id}>{item.name} ({item.id})</option>
+              ))}
+            </select>
+            <button className="legacy-action available" type="button" onClick={onConfirmRepository}
+              disabled={!catalog?.available || !draftRepository || draftRepository === catalog.selectedRepository ||
+                !catalog.projects.some(item => item.id === draftRepository && item.available) ||
+                catalogBusy || selectionBusy || ownedBusy || !!owned?.running}>
+              {selectionBusy ? "저장 중..." : "선택 확인 및 저장"}
+            </button>
+          </div>
+        </FormRow>
+        <p className="legacy-footnote" role="status">현재 설정: {catalog?.selectedRepository
+          ? catalog.projects.find(item => item.id === catalog.selectedRepository)?.name ?? catalog.selectedRepository
+          : "기본 격리 작업 공간"} · 인스턴스 tauri-preview-v1:18797 전용</p>
+        {selectionError && <p className="form-error" role="alert">{selectionError}</p>}
+        {selectionNotice && <p className="form-ok" role="status">{selectionNotice}</p>}
+        <p className="legacy-footnote">프로젝트 등록·삭제는 아직 CLI에서만 지원합니다. 실행 중인 전용 서버나 기록이 남은 인스턴스에서는 변경을 거부하며, 자동 재시작하지 않습니다.</p>
         <div className="legacy-pref-row">
           <div><strong>Tauri 전용 CLI 프로필</strong>
-            <p>Python/Docker 프로필 이름과 종류만 조회합니다. 선택·편집은 다음 단계에서 지원합니다.</p>
+            <p>Python/Docker 프로필은 조회 전용입니다. CLI에는 활성 프로필을 고르는 별도의 use 명령이 없어 적용 기능은 아직 제공하지 않습니다.</p>
           </div>
           <span className="legacy-value">{catalog?.available ? catalog.profiles.length + "개" : "확인 필요"}</span>
         </div>
@@ -158,7 +186,7 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
             </ul>
           : <p className="legacy-footnote">등록된 전용 프로필이 없습니다.</p>)}
         <p className="legacy-footnote" role="status">{catalog?.details ?? "읽기 전용 목록 조회를 시작하지 않았습니다."}</p>
-        <p className="legacy-footnote">프로젝트 변경·폴더 선택·CLI 프로필 적용은 아직 지원하지 않습니다. 기존 WinForms 설정과 서버 7979는 변경하지 않습니다.</p>
+        <p className="legacy-footnote">전용 프로젝트 선택은 등록된 항목에만 적용됩니다. 기존 WinForms 설정과 서버 7979 및 CLI 프로필 설정은 변경하지 않습니다.</p>
       </div>
     </section>
     <section className="panel page-panel legacy-spaced">
