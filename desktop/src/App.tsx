@@ -179,18 +179,19 @@ function App() {
 
   async function confirmOwnedRepository() {
     const choice = catalog?.projects.find(item => item.id === draftRepository && item.available);
-    if (!catalog?.available || !choice || owned?.running || selectionBusy || ownedBusy) return;
+    if (!catalog?.available || (draftRepository && !choice) || owned?.running || selectionBusy || ownedBusy) return;
+    const title = choice ? `"${choice.name}"(${choice.id})` : "기본 격리 작업 공간";
     if (!window.confirm(
-      `Tauri 전용 인스턴스(tauri-preview-v1:18797)의 다음 시작 프로젝트를 "${choice.name}"(${choice.id})로 변경할까요?\n\n기존 WinForms(default:7979)는 변경되지 않으며 서버를 자동 시작·재시작하지 않습니다.`
+      `Tauri 전용 인스턴스(tauri-preview-v1:18797)의 다음 시작 프로젝트를 ${title}(으)로 변경할까요?\n\n기존 WinForms(default:7979)는 변경되지 않으며 서버를 자동 시작·재시작하지 않습니다.`
     )) return;
     setSelectionBusy(true);
     setSelectionError("");
     setSelectionNotice("");
     try {
-      await selectOwnedRepository(choice.id);
+      await selectOwnedRepository(draftRepository);
       await refreshCatalog();
       await runOwnedAction("status");
-      setSelectionNotice(`전용 프로젝트를 "${choice.name}"로 저장했습니다. 다음에 Tauri 전용 MCP를 시작할 때 적용됩니다.`);
+      setSelectionNotice(`전용 프로젝트 설정을 ${title}(으)로 저장했습니다. 다음에 Tauri 전용 MCP를 시작할 때 적용됩니다.`);
     } catch (error) {
       setSelectionError(error instanceof Error ? error.message : "프로젝트 선택에 실패했습니다.");
       await refreshCatalog();
