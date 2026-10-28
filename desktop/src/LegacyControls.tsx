@@ -159,8 +159,8 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
               ))}
             </select>
             <button className="legacy-action available" type="button" onClick={onConfirmRepository}
-              disabled={!catalog?.available || !draftRepository || draftRepository === catalog.selectedRepository ||
-                !catalog.projects.some(item => item.id === draftRepository && item.available) ||
+              disabled={!catalog?.available || draftRepository === (catalog.selectedRepository ?? "") ||
+                (draftRepository !== "" && !catalog.projects.some(item => item.id === draftRepository && item.available)) ||
                 catalogBusy || selectionBusy || ownedBusy || !!owned?.running}>
               {selectionBusy ? "저장 중..." : "선택 확인 및 저장"}
             </button>
