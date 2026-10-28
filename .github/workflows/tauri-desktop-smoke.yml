@@ -9,6 +9,7 @@ on:
       - "src/runtime/instances.test.ts"
       - "scripts/package-tauri-cli-preview.ps1"
       - "scripts/test-tauri-nsis-isolated.ps1"
+      - "scripts/test-tauri-nsis-upgrade-isolated.ps1"
       - "scripts/test-windows-cli-lifecycle-isolated.ps1"
       - "scripts/windows-cli-commands.ps1"
       - "scripts/test-windows-cli-commands-isolated.ps1"
@@ -153,14 +154,35 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Tauri dedicated NSIS bundle build failed" }
           $installers = @(Get-ChildItem "desktop/src-tauri/target/debug/bundle/nsis" -Filter "*-setup.exe" -File)
           if ($installers.Count -ne 1) { throw "Expected one isolated NSIS setup.exe" }
+          $staging = Join-Path $env:RUNNER_TEMP "c2c-f4d4-nsis-baseline"
+          New-Item -ItemType Directory -Path $staging -Force | Out-Null
+          Copy-Item -LiteralPath $installers[0].FullName -Destination (Join-Path $staging "baseline-setup.exe") -ErrorAction Stop
           Write-Host "PASS: F4-D4 dedicated current-user installer generated"
       - name: F4-D4-A isolated NSIS install and uninstall E2E
         shell: pwsh
         run: ./scripts/test-tauri-nsis-isolated.ps1
+      - name: F4-D4-B build distinct version 0.1.1 upgrade installer
+        shell: pwsh
+        run: |
+          $config = Get-Content -LiteralPath "desktop/src-tauri/tauri.nsis.conf.json" -Raw | ConvertFrom-Json
+          $config | Add-Member -NotePropertyName version -NotePropertyValue "0.1.1"
+          $config | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath "desktop/src-tauri/tauri.nsis.upgrade.ci.json" -Encoding utf8
+          npm --prefix desktop run tauri:build -- --debug --bundles nsis --config src-tauri/tauri.nsis.upgrade.ci.json
+          if ($LASTEXITCODE -ne 0) { throw "Second-version NSIS bundle build failed" }
+          $installers = @(Get-ChildItem "desktop/src-tauri/target/debug/bundle/nsis" -Filter "*-setup.exe" -File |
+            Where-Object { $_.Name -match "0[._]1[._]1" })
+          if ($installers.Count -ne 1) { throw "Exactly one v0.1.1 NSIS installer required" }
+          $staging = Join-Path $env:RUNNER_TEMP "c2c-f4d4-nsis-upgrade"
+          New-Item -ItemType Directory -Path $staging -Force | Out-Null
+          Copy-Item -LiteralPath $installers[0].FullName -Destination (Join-Path $staging "upgrade-setup.exe") -ErrorAction Stop
+          Write-Host "PASS: independent NSIS 0.1.1 upgrade package staged"
+      - name: F4-D4-B isolated reinstall, upgrade and failure-preservation E2E
+        shell: pwsh
+        run: ./scripts/test-tauri-nsis-upgrade-isolated.ps1
       - name: Publish unsigned isolated NSIS installer for guarded review
         uses: actions/upload-artifact@v4
         with:
           name: c2c-tauri-nsis-isolated-review-only
-          path: desktop/src-tauri/target/debug/bundle/nsis/*-setup.exe
+          path: ${{ runner.temp }}/c2c-f4d4-nsis-baseline/baseline-setup.exe
           if-no-files-found: error
           retention-days: 3
