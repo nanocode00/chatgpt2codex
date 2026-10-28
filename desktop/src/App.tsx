@@ -5,7 +5,7 @@ import {
   Settings2, ShieldCheck, TerminalSquare, Wifi, WifiOff
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { checkRuntime, inspectInstalledCli, inspectInstalledCliLogs, inspectPublicTunnel, manageOwnedCli, inspectOwnedCatalog, closePreviewWindow, hidePreviewWindow, openTrustedLink, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type CliInspection, type CliLogPreview, type CliLogComponent, type ManagedAction, type ManagedResult, type CatalogInspection, type PublicTunnelHealth, type RuntimeHealth, type TrustedLink } from "./runtime";
+import { checkRuntime, inspectInstalledCli, inspectInstalledCliLogs, inspectPublicTunnel, manageOwnedCli, inspectOwnedCatalog, selectOwnedRepository, closePreviewWindow, hidePreviewWindow, openTrustedLink, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type CliInspection, type CliLogPreview, type CliLogComponent, type ManagedAction, type ManagedResult, type CatalogInspection, type PublicTunnelHealth, type RuntimeHealth, type TrustedLink } from "./runtime";
 import { ManagementControls, LegacyConnectionControls, LegacyDiagnosticsControls, LegacySettingsControls } from "./LegacyControls";
 import { MigrationPreflight } from "./MigrationPreflight";
 import { inspectLegacyMigration, saveLegacySettingsSnapshot, inspectCredentialBackup, createCredentialBackup, rehearseCredentialRestore, type LegacyMigrationReport, type CredentialBackupReport, type RestoreRehearsalReport } from "./runtime";
@@ -63,6 +63,10 @@ function App() {
   const [catalog, setCatalog] = useState<CatalogInspection | null>(null);
   const [catalogBusy, setCatalogBusy] = useState(false);
   const [catalogError, setCatalogError] = useState("");
+  const [draftRepository, setDraftRepository] = useState("");
+  const [selectionBusy, setSelectionBusy] = useState(false);
+  const [selectionError, setSelectionError] = useState("");
+  const [selectionNotice, setSelectionNotice] = useState("");
   const [migrationReport, setMigrationReport] = useState<LegacyMigrationReport | null>(null);
   const [migrationBusy, setMigrationBusy] = useState(false);
   const [migrationError, setMigrationError] = useState("");
@@ -155,7 +159,9 @@ function App() {
     setCatalogBusy(true);
     setCatalogError("");
     try {
-      setCatalog(await inspectOwnedCatalog());
+      const updated = await inspectOwnedCatalog();
+      setCatalog(updated);
+      setDraftRepository(updated.selectedRepository ?? "");
     } catch (error) {
       setCatalog(null);
       setCatalogError(error instanceof Error ? error.message : "프로젝트/프로필 조회에 실패했습니다.");
@@ -170,6 +176,28 @@ function App() {
       void refreshCatalog();
     }
   }, [screen, runOwnedAction, refreshCatalog]);
+
+  async function confirmOwnedRepository() {
+    const choice = catalog?.projects.find(item => item.id === draftRepository && item.available);
+    if (!catalog?.available || !choice || owned?.running || selectionBusy || ownedBusy) return;
+    if (!window.confirm(
+      `Tauri 전용 인스턴스(tauri-preview-v1:18797)의 다음 시작 프로젝트를 "${choice.name}"(${choice.id})로 변경할까요?\n\n기존 WinForms(default:7979)는 변경되지 않으며 서버를 자동 시작·재시작하지 않습니다.`
+    )) return;
+    setSelectionBusy(true);
+    setSelectionError("");
+    setSelectionNotice("");
+    try {
+      await selectOwnedRepository(choice.id);
+      await refreshCatalog();
+      await runOwnedAction("status");
+      setSelectionNotice(`전용 프로젝트를 "${choice.name}"로 저장했습니다. 다음에 Tauri 전용 MCP를 시작할 때 적용됩니다.`);
+    } catch (error) {
+      setSelectionError(error instanceof Error ? error.message : "프로젝트 선택에 실패했습니다.");
+      await refreshCatalog();
+    } finally {
+      setSelectionBusy(false);
+    }
+  }
 
   async function copyOwnedToken() {
     if (!ownedToken) return;
@@ -482,6 +510,8 @@ function App() {
             onHide={() => { void hideToTray(); }} trayError={trayError}
             owned={owned} ownedBusy={ownedBusy} ownedError={ownedError} ownedToken={ownedToken}
             catalog={catalog} catalogBusy={catalogBusy} catalogError={catalogError} onRefreshCatalog={() => { void refreshCatalog(); }}
+            draftRepository={draftRepository} onDraftRepository={setDraftRepository} selectionBusy={selectionBusy}
+            selectionError={selectionError} selectionNotice={selectionNotice} onConfirmRepository={() => { void confirmOwnedRepository(); }}
             onOwnedAction={(action) => { void runOwnedAction(action); }} onCopyToken={() => { void copyOwnedToken(); }}/>
         </>}
 
