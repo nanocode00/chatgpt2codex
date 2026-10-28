@@ -132,9 +132,11 @@ fn expected_record(root: &Payload, record: &serde_json::Value) -> bool {
         .and_then(|s| fs::canonicalize(s).ok());
     // An explicitly chosen, registered preview project may become the workspace.
     // Resolve it from the isolated bundled CLI, NEVER from WebView paths.
-    let expected_workspace = selected_workspace(root).ok()
-        .and_then(|selection| selection.map(|(_, path)| path).or_else(|| Some(root.workspace.clone())))
-        .and_then(|path| fs::canonicalize(path).ok());
+    let expected_workspace = match selected_workspace(root) {
+        Ok(Some((_, path))) => fs::canonicalize(path).ok(),
+        Ok(None) => fs::canonicalize(&root.workspace).ok(),
+        Err(_) => None, // Corrupt config/registry must never pass ownership verification.
+    };
     let observed_workspace = record["workspace"].as_str()
         .and_then(|s| fs::canonicalize(s).ok());
     expected_cli.is_some() && expected_cli == observed_cli &&
@@ -242,7 +244,7 @@ pub(crate) fn read_catalog_command(catalog: &str) -> Result<serde_json::Value, S
  fn valid_repository_id(value: &str) -> bool {
     let bytes = value.as_bytes();
     (1..=64).contains(&bytes.len())
-        && bytes[0].is_ascii_lowercase()
+        && (bytes[0].is_ascii_lowercase() || bytes[0].is_ascii_digit())
         && bytes.iter().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"._-".contains(b))
         && !value.contains("..")
  }
@@ -483,7 +485,7 @@ mod tests {
     #[test]
     fn strict_repository_ids_reject_paths_and_option_injection() {
         assert!(valid_repository_id("project-a"));
-        for id in ["", "../legacy", "..", "--instance", "Project", "a b", "한글", "a".repeat(65).as_str()] {
+        for id in ["", "../legacy", "..", "--instance", "Project", "a b", "한글", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"] {
             assert!(!valid_repository_id(id), "{id}");
         }
     }
