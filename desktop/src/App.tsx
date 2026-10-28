@@ -520,7 +520,8 @@ function App() {
           <div className="page-heading"><div><div className="eyebrow">DIAGNOSTICS</div><h1>진단</h1><p>로컬 Health 검사 기록과 설치된 CLI의 서버·터널 로그를 확인합니다.</p></div><button className="secondary-btn" onClick={() => { void runCheck(); }} disabled={checking}><RefreshCcw size={16}/> 다시 확인</button></div>
           <section className="panel page-panel"><div className="panel-heading"><div className="panel-title"><span className="icon-tile"><Activity size={18}/></span><div><h2>상태 확인 기록</h2><p>현재 세션 · 최근 12건</p></div></div>{statusTag()}</div><div className="event-list">{history.length ? history.map((item, i) => <div className="event" key={item.time + i}><span className={"event-dot " + (item.online ? "ok" : "")}/><div><strong>{item.online ? "Health 확인 성공" : "Health 확인"}</strong><p>{item.message}</p></div><time>{item.time}</time></div>) : <p className="description">아직 검사 기록이 없습니다.</p>}</div></section>
           <LegacyDiagnosticsControls checking={checking} onLocalHealth={() => { void runCheck(); }} onPublicHealth={refreshPublicState} tunnelChecking={tunnelChecking || cliChecking} tunnelStatus={tunnelHealth?.details ?? "아직 검사하지 않았습니다."} onViewLogs={(component) => { void loadCliLogs(component); }} logsChecking={logsChecking} logResult={logResult}
-            native={native} localVerified={serverOnline} publicVerified={tunnelOnline} openError={linkError}
+            native={native} localVerified={serverOnline} localChecked={status !== null} localDetails={status?.details ?? "로컬 MCP 서버 상태를 확인하고 있습니다."} localPort={port}
+            publicVerified={tunnelOnline} publicHealthState={tunnelHealth?.state ?? null} openError={linkError}
             onOpenLocalHealth={() => { void openLink("local_health"); }} onOpenPublicHealth={() => { void openLink("public_health"); }}
             onOpenGithub={() => { void openLink("github"); }} onOpenDeveloper={() => { void openLink("developer"); }}/>
         </>}
