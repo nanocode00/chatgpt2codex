@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { CliLogComponent, CliLogPreview, ManagedResult, ManagedAction, CatalogInspection } from "./runtime";
+import type { CliLogComponent, CliLogPreview, ManagedResult, ManagedAction, CatalogInspection, PublicTunnelState } from "./runtime";
 import {
   ArrowRight, Cloud, Copy, Download, ExternalLink, FileText, FolderOpen,
   Globe2, HeartPulse, KeyRound, Monitor, Play, Power, RefreshCcw,
@@ -242,7 +242,8 @@ export function LegacyConnectionControls({ publicConnector, publicState, publicV
 }
 
 export function LegacyDiagnosticsControls({ onLocalHealth, checking, onPublicHealth, tunnelChecking, tunnelStatus, onViewLogs, logsChecking, logResult,
-  native, localVerified, publicVerified, openError, onOpenLocalHealth, onOpenPublicHealth, onOpenGithub, onOpenDeveloper }: {
+  native, localVerified, localChecked, localDetails, localPort, publicVerified, publicHealthState, openError,
+  onOpenLocalHealth, onOpenPublicHealth, onOpenGithub, onOpenDeveloper }: {
   onLocalHealth: () => void; checking: boolean;
   onPublicHealth: () => void;
   tunnelChecking: boolean;
@@ -250,14 +251,31 @@ export function LegacyDiagnosticsControls({ onLocalHealth, checking, onPublicHea
   onViewLogs: (component: CliLogComponent) => void;
   logsChecking: boolean;
   logResult: CliLogPreview | null;
-  native: boolean; localVerified: boolean; publicVerified: boolean; openError: string;
+  native: boolean; localVerified: boolean; localChecked: boolean; localDetails: string; localPort: number;
+  publicVerified: boolean; publicHealthState: PublicTunnelState | null; openError: string;
   onOpenLocalHealth: () => void; onOpenPublicHealth: () => void;
   onOpenGithub: () => void; onOpenDeveloper: () => void;
 }) {
   return <section className="panel page-panel legacy-spaced">
     <SectionHeading title="진단 도구" icon={<HeartPulse size={18}/>} status="일부 연결"
-      description="기존 Windows 앱의 상태·로그·업데이트 바로가기" />
+      description="로컬 서버와 외부 연결을 확인하고 로그를 살펴봅니다." />
     <div className="legacy-body">
+      <div className="legacy-health-summary" aria-label="연결 상태 요약">
+        <div className="legacy-pref-row" role="status">
+          <div>
+            <strong>로컬 MCP 서버 · 127.0.0.1:{localPort}</strong>
+            <p>{localDetails}</p>
+          </div>
+          <span className="legacy-value">{!native ? "네이티브 앱 필요" : !localChecked ? "확인 중" : localVerified ? "정상" : "미연결"}</span>
+        </div>
+        <div className="legacy-pref-row" role="status">
+          <div>
+            <strong>외부 공개 연결 · Quick Tunnel</strong>
+            <p>{tunnelStatus}</p>
+          </div>
+          <span className="legacy-value">{!native ? "네이티브 앱 필요" : publicHealthState === "online" ? "정상" : publicHealthState === "offline" ? "연결 실패" : publicHealthState === "unsupported" ? "직접 검사 미지원" : "미확인"}</span>
+        </div>
+      </div>
       <div className="legacy-actions">
         <button type="button" className="legacy-action available" onClick={onLocalHealth} disabled={checking}>
           <Wifi size={16}/>{checking ? "확인 중..." : "로컬 상태 확인"}
@@ -271,12 +289,6 @@ export function LegacyDiagnosticsControls({ onLocalHealth, checking, onPublicHea
         <button type="button" className="legacy-action available" onClick={() => onViewLogs("tunnel")} disabled={logsChecking}>
           <FileText size={16}/>터널 로그 보기
         </button>
-        <button type="button" className="legacy-action available" onClick={onOpenLocalHealth} disabled={!native || !localVerified}>
-          <ExternalLink size={16}/>로컬 Health 열기
-        </button>
-        <button type="button" className="legacy-action available" onClick={onOpenPublicHealth} disabled={!native || !publicVerified}>
-          <ExternalLink size={16}/>공개 Health 열기
-        </button>
         <PendingButton label="업데이트 확인" icon={<Download size={16}/>} />
         <button type="button" className="legacy-action available" onClick={onOpenGithub} disabled={!native}>
           <ExternalLink size={16}/>GitHub 저장소 열기
@@ -285,9 +297,20 @@ export function LegacyDiagnosticsControls({ onLocalHealth, checking, onPublicHea
           <Settings2 size={16}/>개발자 정보
         </button>
       </div>
-      <p className="legacy-footnote">Health 열기는 클릭 시 다시 서버를 검증하며, 공개 주소는 검증된 Quick Tunnel만 허용합니다. GitHub 링크는 고정 주소만 열고 임의 URL은 실행하지 않습니다. 업데이트 확인은 아직 미연결입니다.</p>
+      <p className="legacy-footnote">Health는 서비스가 정상인지 확인하는 기능입니다. 위 상태는 앱에서 읽기 쉽게 표시하며, 업데이트 확인은 아직 미연결입니다.</p>
+      <details className="legacy-health-advanced">
+        <summary>고급 진단 · 서버 응답 JSON 보기</summary>
+        <p className="legacy-footnote">아래 링크는 일반 웹페이지가 아니라 개발자·운영자용 <code>/healthz</code> API 원본입니다. 기본 브라우저에서 JSON 텍스트가 표시되는 것이 정상입니다. 링크는 클릭 시 다시 검증합니다.</p>
+        <div className="legacy-actions">
+          <button type="button" className="legacy-action available" onClick={onOpenLocalHealth} disabled={!native || !localVerified}>
+            <ExternalLink size={16}/>로컬 응답 JSON
+          </button>
+          <button type="button" className="legacy-action available" onClick={onOpenPublicHealth} disabled={!native || !publicVerified}>
+            <ExternalLink size={16}/>공개 응답 JSON
+          </button>
+        </div>
+      </details>
       {openError && <p className="form-error" role="alert">{openError}</p>}
-      <p className="legacy-footnote">공개 연결: {tunnelStatus}</p>
       {logResult && <div className="legacy-log-viewer" role="region" aria-label="C2C CLI 로그 미리보기">
         <div className="legacy-log-caption">{logResult.component === "server" ? "서버 로그" : "터널 로그"} · {logResult.details}</div>
         {logResult.available && logResult.content
