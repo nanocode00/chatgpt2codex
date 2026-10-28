@@ -27,7 +27,9 @@ qualified installed Tauri executable.
   entry when the temporary folder is removed, so the UI switch stays
   disabled in all existing preview ZIPs.
 - Enabling requires the **current EXE** to be the canonical regular file
-  `%LOCALAPPDATA%\Programs\ChatGPT To Codex Tauri Preview\chatgpt2codex-desktop.exe`.
+  `%LOCALAPPDATA%\ChatGPT To Codex Tauri Preview\chatgpt2codex-desktop.exe`
+  (the default Tauri v2 NSIS `currentUser` install directory for the
+  dedicated `productName`).
   The existing WinForms `%LOCALAPPDATA%\Programs\ChatGPT To Codex\` is
   neither read nor written by this feature. The separate Tauri installer
   and upgrade/uninstall flows are **not implemented** in this PR.

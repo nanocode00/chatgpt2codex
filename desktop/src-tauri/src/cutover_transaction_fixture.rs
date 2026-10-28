@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+static NEXT_DISPOSABLE_ID: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -66,7 +68,10 @@ impl Disposable {
         let meta = fs::symlink_metadata(&base).expect("missing runner temporary directory");
         assert!(meta.is_dir() && !meta.file_type().is_symlink(), "runner temp must be a real directory");
         let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let root = base.join(format!("c2c-f4c-synthetic-{}-{stamp}", std::process::id()));
+        // Windows timestamps can have coarse resolution. Parallel fixture
+        // tests must never resolve to the same disposable directory name.
+        let ordinal = NEXT_DISPOSABLE_ID.fetch_add(1, Ordering::Relaxed);
+        let root = base.join(format!("c2c-f4c-synthetic-{}-{stamp}-{ordinal}", std::process::id()));
         fs::create_dir(&root).expect("create exclusively named disposable fixture root");
         Some(Self { root })
     }
