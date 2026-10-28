@@ -5,7 +5,7 @@ import {
   Settings2, ShieldCheck, TerminalSquare, Wifi, WifiOff
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { checkRuntime, inspectInstalledCli, inspectInstalledCliLogs, inspectPublicTunnel, manageOwnedCli, inspectOwnedCatalog, closePreviewWindow, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type CliInspection, type CliLogPreview, type CliLogComponent, type ManagedAction, type ManagedResult, type CatalogInspection, type PublicTunnelHealth, type RuntimeHealth } from "./runtime";
+import { checkRuntime, inspectInstalledCli, inspectInstalledCliLogs, inspectPublicTunnel, manageOwnedCli, inspectOwnedCatalog, closePreviewWindow, hidePreviewWindow, openTrustedLink, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type CliInspection, type CliLogPreview, type CliLogComponent, type ManagedAction, type ManagedResult, type CatalogInspection, type PublicTunnelHealth, type RuntimeHealth, type TrustedLink } from "./runtime";
 import { ManagementControls, LegacyConnectionControls, LegacyDiagnosticsControls, LegacySettingsControls } from "./LegacyControls";
 import { MigrationPreflight } from "./MigrationPreflight";
 import { inspectLegacyMigration, saveLegacySettingsSnapshot, inspectCredentialBackup, createCredentialBackup, rehearseCredentialRestore, type LegacyMigrationReport, type CredentialBackupReport, type RestoreRehearsalReport } from "./runtime";
@@ -54,6 +54,8 @@ function App() {
   const [logsChecking, setLogsChecking] = useState(false);
   const [publicCopied, setPublicCopied] = useState(false);
   const [exitError, setExitError] = useState("");
+  const [trayError, setTrayError] = useState("");
+  const [linkError, setLinkError] = useState("");
   const [owned, setOwned] = useState<ManagedResult | null>(null);
   const [ownedBusy, setOwnedBusy] = useState(false);
   const [ownedError, setOwnedError] = useState("");
@@ -342,6 +344,24 @@ function App() {
     }
   }
 
+  async function hideToTray() {
+    setTrayError("");
+    try {
+      await hidePreviewWindow();
+    } catch (error) {
+      setTrayError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function openLink(kind: TrustedLink) {
+    setLinkError("");
+    try {
+      await openTrustedLink(kind, kind === "local_health" ? port : undefined);
+    } catch (error) {
+      setLinkError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
   const endpoint = useMemo(() => "http://127.0.0.1:" + port + "/mcp", [port]);
   const serverOnline = native && !!status?.online;
   const stateLabel = !native ? "브라우저 미리보기" : checking && !status ? "확인 중" : serverOnline ? "정상 실행 중" : "연결되지 않음";
@@ -459,6 +479,7 @@ function App() {
           <div className="page-heading"><div><div className="eyebrow">MANAGEMENT</div><h1>런타임 관리</h1>
             <p>기존 Windows 런처의 관리 항목을 먼저 배치했어. 실제 서버 제어는 안전성 검증 후 연결해.</p></div></div>
           <ManagementControls onConnections={() => setScreen("connections")} onSettings={() => setScreen("settings")} onExit={() => { void exitPreview(); }} exitError={exitError}
+            onHide={() => { void hideToTray(); }} trayError={trayError}
             owned={owned} ownedBusy={ownedBusy} ownedError={ownedError} ownedToken={ownedToken}
             catalog={catalog} catalogBusy={catalogBusy} catalogError={catalogError} onRefreshCatalog={() => { void refreshCatalog(); }}
             onOwnedAction={(action) => { void runOwnedAction(action); }} onCopyToken={() => { void copyOwnedToken(); }}/>
@@ -498,7 +519,10 @@ function App() {
         {screen === "diagnostics" && <>
           <div className="page-heading"><div><div className="eyebrow">DIAGNOSTICS</div><h1>진단</h1><p>로컬 Health 검사 기록과 설치된 CLI의 서버·터널 로그를 확인합니다.</p></div><button className="secondary-btn" onClick={() => { void runCheck(); }} disabled={checking}><RefreshCcw size={16}/> 다시 확인</button></div>
           <section className="panel page-panel"><div className="panel-heading"><div className="panel-title"><span className="icon-tile"><Activity size={18}/></span><div><h2>상태 확인 기록</h2><p>현재 세션 · 최근 12건</p></div></div>{statusTag()}</div><div className="event-list">{history.length ? history.map((item, i) => <div className="event" key={item.time + i}><span className={"event-dot " + (item.online ? "ok" : "")}/><div><strong>{item.online ? "Health 확인 성공" : "Health 확인"}</strong><p>{item.message}</p></div><time>{item.time}</time></div>) : <p className="description">아직 검사 기록이 없습니다.</p>}</div></section>
-          <LegacyDiagnosticsControls checking={checking} onLocalHealth={() => { void runCheck(); }} onPublicHealth={refreshPublicState} tunnelChecking={tunnelChecking || cliChecking} tunnelStatus={tunnelHealth?.details ?? "아직 검사하지 않았습니다."} onViewLogs={(component) => { void loadCliLogs(component); }} logsChecking={logsChecking} logResult={logResult}/>
+          <LegacyDiagnosticsControls checking={checking} onLocalHealth={() => { void runCheck(); }} onPublicHealth={refreshPublicState} tunnelChecking={tunnelChecking || cliChecking} tunnelStatus={tunnelHealth?.details ?? "아직 검사하지 않았습니다."} onViewLogs={(component) => { void loadCliLogs(component); }} logsChecking={logsChecking} logResult={logResult}
+            native={native} localVerified={serverOnline} publicVerified={tunnelOnline} openError={linkError}
+            onOpenLocalHealth={() => { void openLink("local_health"); }} onOpenPublicHealth={() => { void openLink("public_health"); }}
+            onOpenGithub={() => { void openLink("github"); }} onOpenDeveloper={() => { void openLink("developer"); }}/>
         </>}
 
         {screen === "settings" && <>
