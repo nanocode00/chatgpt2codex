@@ -13,6 +13,12 @@ import { inspectLegacyMigration, saveLegacySettingsSnapshot, inspectCredentialBa
 type Screen = "overview" | "manage" | "connections" | "diagnostics" | "settings";
 type ActivityEntry = { time: string; message: string; online: boolean };
 
+/** Rust/Tauri invoke rejects with a plain string, not necessarily an Error. */
+function nativeFailureMessage(error: unknown, fallback: string): string {
+  const message = typeof error === "string" ? error : error instanceof Error ? error.message : "";
+  return message.trim() ? message.slice(0, 480) : fallback;
+}
+
 function loadPort(): number {
   try {
     const raw = Number.parseInt(localStorage.getItem("c2c.desktop.health-port") || "7979", 10);
@@ -199,7 +205,7 @@ function App() {
       await runOwnedAction("status");
       setSelectionNotice(`전용 프로젝트 설정을 ${title}(으)로 저장했습니다. 다음에 Tauri 전용 MCP를 시작할 때 적용됩니다.`);
     } catch (error) {
-      setSelectionError(error instanceof Error ? error.message : "프로젝트 선택에 실패했습니다.");
+      setSelectionError(nativeFailureMessage(error, "프로젝트 선택에 실패했습니다."));
       await refreshCatalog();
     } finally {
       setSelectionBusy(false);
@@ -218,7 +224,7 @@ function App() {
       setFolderId(picked?.suggestedId ?? "");
     } catch (error) {
       setPickedFolder(null);
-      setFolderError(error instanceof Error ? error.message : "폴더 선택에 실패했습니다.");
+      setFolderError(nativeFailureMessage(error, "폴더 선택에 실패했습니다."));
     } finally {
       setFolderBusy(false);
     }
@@ -232,7 +238,7 @@ function App() {
     try {
       await cancelOwnedPickedRepository(choice.serial);
     } catch (error) {
-      setFolderError(error instanceof Error ? error.message : "선택 취소에 실패했습니다.");
+      setFolderError(nativeFailureMessage(error, "선택 취소에 실패했습니다."));
     }
   }
 
@@ -261,7 +267,7 @@ function App() {
       await refreshCatalog();
       setFolderNotice(`"${name}"(${id}) 프로젝트를 Tauri 전용 목록에 등록했습니다. 사용하려면 드롭다운에서 선택하고 저장하세요.`);
     } catch (error) {
-      setFolderError(error instanceof Error ? error.message : "프로젝트 등록에 실패했습니다.");
+      setFolderError(nativeFailureMessage(error, "프로젝트 등록에 실패했습니다."));
       await refreshCatalog();
     } finally {
       setFolderBusy(false);
