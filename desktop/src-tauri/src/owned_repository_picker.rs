@@ -43,6 +43,20 @@ fn suggested_id(name: &str) -> String {
     if value.is_empty() { "project".to_string() } else { value.to_owned() }
 }
 
+// Windows canonicalize returns \\?\C:\... for local folders.
+// Display a familiar path only; registration always uses the retained PathBuf.
+fn display_folder_path(path: &str) -> String {
+    if let Some(unc) = path.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{}", unc);
+    }
+    if let Some(drive) = path.strip_prefix(r"\\?\") {
+        if drive.as_bytes().get(1) == Some(&b':') {
+            return drive.to_owned();
+        }
+    }
+    path.to_owned()
+}
+
 fn preview_for(path: PathBuf) -> Result<PickedFolder, String> {
     let canonical = std::fs::canonicalize(path)
         .map_err(|_| "선택한 폴더의 실제 경로를 확인할 수 없습니다.".to_string())?;
@@ -59,7 +73,7 @@ fn preview_for(path: PathBuf) -> Result<PickedFolder, String> {
     let suggested_name = basename.chars().take(65).collect::<String>();
     let serial = SERIAL.fetch_add(1, Ordering::Relaxed);
     let next = PickedFolder {
-        serial, path: shown, suggested_id: suggested_id(&suggested_name),
+        serial, path: display_folder_path(&shown), suggested_id: suggested_id(&suggested_name),
         suggested_name,
     };
     *pending().lock().map_err(|_| "프로젝트 폴더 선택 잠금 오류")? =
@@ -124,6 +138,13 @@ pub fn cancel_owned_picked_repository(serial: u64) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn only_windows_device_prefix_is_simplified_for_display() {
+        assert_eq!(display_folder_path(r"\\?\C:\Users\tester\한글"), r"C:\Users\tester\한글");
+        assert_eq!(display_folder_path(r"\\?\UNC\server\share"), r"\\server\share");
+        assert_eq!(display_folder_path(r"C:\Users\tester"), r"C:\Users\tester");
+        assert_eq!(display_folder_path(r"\\?\Volume{example}"), r"\\?\Volume{example}");
+    }
     #[test]
     fn suggested_ids_are_bounded_and_safe() {
         assert_eq!(suggested_id("Tauri Smoke"), "tauri-smoke");
