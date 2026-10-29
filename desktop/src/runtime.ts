@@ -154,6 +154,27 @@ export async function selectOwnedRepository(id: string): Promise<string | null> 
   return invoke<string | null>("select_owned_repository", { id });
 }
 
+/** Native OS-picked folder preview. Its serial is a one-shot registration token;
+ * registration never takes a path supplied by the frontend. */
+export interface PickedRepositoryFolder {
+  serial: number;
+  path: string;
+  suggestedId: string;
+  suggestedName: string;
+}
+export async function pickOwnedRepositoryFolder(): Promise<PickedRepositoryFolder | null> {
+  if (!isNativeApp()) throw new Error("Windows Tauri 앱에서만 폴더를 선택할 수 있습니다.");
+  return invoke<PickedRepositoryFolder | null>("pick_owned_repository_folder");
+}
+export async function registerOwnedPickedRepository(serial: number, id: string, name: string): Promise<void> {
+  if (!isNativeApp()) throw new Error("Windows Tauri 앱에서만 등록할 수 있습니다.");
+  await invoke<void>("register_owned_picked_repository", { serial, id, name });
+}
+export async function cancelOwnedPickedRepository(serial: number): Promise<void> {
+  if (!isNativeApp()) return;
+  await invoke<void>("cancel_owned_picked_repository", { serial });
+}
+
 export type ManagedAction = "status" | "prepare" | "start" | "stop" | "restart";
 export interface ManagedResult {
   available: boolean;
