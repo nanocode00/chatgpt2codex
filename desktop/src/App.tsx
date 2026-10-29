@@ -5,7 +5,7 @@ import {
   Settings2, ShieldCheck, TerminalSquare, Wifi, WifiOff
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { checkRuntime, inspectInstalledCli, inspectInstalledCliLogs, inspectPublicTunnel, manageOwnedCli, inspectOwnedCatalog, selectOwnedRepository, closePreviewWindow, hidePreviewWindow, openTrustedLink, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type CliInspection, type CliLogPreview, type CliLogComponent, type ManagedAction, type ManagedResult, type CatalogInspection, type PublicTunnelHealth, type RuntimeHealth, type TrustedLink } from "./runtime";
+import { checkRuntime, inspectInstalledCli, inspectInstalledCliLogs, inspectPublicTunnel, manageOwnedCli, inspectOwnedCatalog, selectOwnedRepository, pickOwnedRepositoryFolder, registerOwnedPickedRepository, cancelOwnedPickedRepository, closePreviewWindow, hidePreviewWindow, openTrustedLink, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type CliInspection, type CliLogPreview, type CliLogComponent, type ManagedAction, type ManagedResult, type CatalogInspection, type PickedRepositoryFolder, type PublicTunnelHealth, type RuntimeHealth, type TrustedLink } from "./runtime";
 import { ManagementControls, LegacyConnectionControls, LegacyDiagnosticsControls, LegacySettingsControls } from "./LegacyControls";
 import { MigrationPreflight } from "./MigrationPreflight";
 import { inspectLegacyMigration, saveLegacySettingsSnapshot, inspectCredentialBackup, createCredentialBackup, rehearseCredentialRestore, type LegacyMigrationReport, type CredentialBackupReport, type RestoreRehearsalReport } from "./runtime";
@@ -67,6 +67,12 @@ function App() {
   const [selectionBusy, setSelectionBusy] = useState(false);
   const [selectionError, setSelectionError] = useState("");
   const [selectionNotice, setSelectionNotice] = useState("");
+  const [pickedFolder, setPickedFolder] = useState<PickedRepositoryFolder | null>(null);
+  const [folderName, setFolderName] = useState("");
+  const [folderId, setFolderId] = useState("");
+  const [folderBusy, setFolderBusy] = useState(false);
+  const [folderError, setFolderError] = useState("");
+  const [folderNotice, setFolderNotice] = useState("");
   const [migrationReport, setMigrationReport] = useState<LegacyMigrationReport | null>(null);
   const [migrationBusy, setMigrationBusy] = useState(false);
   const [migrationError, setMigrationError] = useState("");
@@ -197,6 +203,68 @@ function App() {
       await refreshCatalog();
     } finally {
       setSelectionBusy(false);
+    }
+  }
+
+  async function browseOwnedFolder() {
+    if (owned?.running || ownedBusy || folderBusy || selectionBusy) return;
+    setFolderBusy(true);
+    setFolderError("");
+    setFolderNotice("");
+    try {
+      const picked = await pickOwnedRepositoryFolder();
+      setPickedFolder(picked);
+      setFolderName(picked?.suggestedName ?? "");
+      setFolderId(picked?.suggestedId ?? "");
+    } catch (error) {
+      setPickedFolder(null);
+      setFolderError(error instanceof Error ? error.message : "폴더 선택에 실패했습니다.");
+    } finally {
+      setFolderBusy(false);
+    }
+  }
+
+  async function discardOwnedFolder() {
+    const choice = pickedFolder;
+    setPickedFolder(null);
+    setFolderError("");
+    if (!choice) return;
+    try {
+      await cancelOwnedPickedRepository(choice.serial);
+    } catch (error) {
+      setFolderError(error instanceof Error ? error.message : "선택 취소에 실패했습니다.");
+    }
+  }
+
+  async function registerOwnedFolder() {
+    const choice = pickedFolder;
+    const name = folderName.trim();
+    const id = folderId.trim();
+    if (!choice || !catalog?.available || owned?.running || ownedBusy || selectionBusy || folderBusy) return;
+    if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(id) || id.includes("..")) {
+      setFolderError("프로젝트 ID는 영문 소문자·숫자로 시작하며 최대 64자여야 합니다.");
+      return;
+    }
+    if (!name || name.length > 160 || name.startsWith("-")) {
+      setFolderError("프로젝트 이름은 1~160자이며 '-'로 시작할 수 없습니다.");
+      return;
+    }
+    if (!window.confirm(
+      `다음 폴더를 Tauri 전용 프로젝트로 등록할까요?\n\n경로: ${choice.path}\n이름: ${name}\nID: ${id}\n\n기존 WinForms/7979는 변경되지 않으며 등록만 하고 서버를 시작하지 않습니다.`
+    )) return;
+    setFolderBusy(true);
+    setFolderError("");
+    setFolderNotice("");
+    try {
+      await registerOwnedPickedRepository(choice.serial, id, name);
+      setPickedFolder(null);
+      await refreshCatalog();
+      setFolderNotice(`"${name}"(${id}) 프로젝트를 Tauri 전용 목록에 등록했습니다. 사용하려면 드롭다운에서 선택하고 저장하세요.`);
+    } catch (error) {
+      setFolderError(error instanceof Error ? error.message : "프로젝트 등록에 실패했습니다.");
+      await refreshCatalog();
+    } finally {
+      setFolderBusy(false);
     }
   }
 
@@ -513,6 +581,10 @@ function App() {
             catalog={catalog} catalogBusy={catalogBusy} catalogError={catalogError} onRefreshCatalog={() => { void refreshCatalog(); }}
             draftRepository={draftRepository} onDraftRepository={setDraftRepository} selectionBusy={selectionBusy}
             selectionError={selectionError} selectionNotice={selectionNotice} onConfirmRepository={() => { void confirmOwnedRepository(); }}
+            pickedFolder={pickedFolder} folderBusy={folderBusy} folderName={folderName} onFolderName={setFolderName}
+            folderId={folderId} onFolderId={setFolderId} folderError={folderError} folderNotice={folderNotice}
+            onBrowseFolder={() => { void browseOwnedFolder(); }} onCancelFolder={() => { void discardOwnedFolder(); }}
+            onRegisterFolder={() => { void registerOwnedFolder(); }}
             onOwnedAction={(action) => { void runOwnedAction(action); }} onCopyToken={() => { void copyOwnedToken(); }}/>
         </>}
 
