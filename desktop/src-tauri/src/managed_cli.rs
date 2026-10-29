@@ -371,6 +371,15 @@ pub(crate) fn register_picked_repository(folder: &Path, id: &str, name: &str) ->
     if !canonical.is_dir() {
         return Err("선택한 경로가 디렉터리가 아닙니다.".into());
     }
+    // Match the canonical Node CLI's inspectProjectRoot project-marker policy.
+    // A random document/download directory is not a runnable C2C project.
+    const PROJECT_MARKERS: &[&str] = &[
+        ".git", "package.json", "pubspec.yaml", "go.mod",
+        "Cargo.toml", "requirements.txt", ".chatgpt2codex",
+    ];
+    if !PROJECT_MARKERS.iter().any(|marker| canonical.join(marker).exists()) {
+        return Err("개발 프로젝트로 인식되지 않는 폴더입니다. .git, package.json, requirements.txt 등 프로젝트 식별 파일이 있는 폴더를 선택하세요.".into());
+    }
     let full_path = canonical.to_str().ok_or("프로젝트 경로의 문자를 인식하지 못했습니다.")?;
 
     let existing = cli_command(&root, &["repository", "list"], Duration::from_secs(12))?;
