@@ -37,6 +37,7 @@ pub struct CatalogInspection {
     pub available: bool,
     pub projects: Vec<CatalogRepository>,
     pub profiles: Vec<CatalogProfile>,
+    pub selected_repository: Option<String>,
     pub legacy_project: Option<String>,
     pub legacy_project_exists: bool,
     pub details: String,
@@ -122,20 +123,24 @@ fn inspect_catalog() -> Result<CatalogInspection, String> {
     let catalog = (|| {
         let projects = repositories(managed_cli::read_catalog_command("repository")?)?;
         let profiles = profiles(managed_cli::read_catalog_command("profile")?)?;
-        Ok::<_, String>((projects, profiles))
+        let selected = managed_cli::inspect_selected_repository()?;
+        if selected.as_ref().is_some_and(|id| !projects.iter().any(|entry| &entry.id == id)) {
+            return Err("선택된 프로젝트가 Tauri 전용 목록에 없습니다.".into());
+        }
+        Ok::<_, String>((projects, profiles, selected))
     })();
-    let (available, projects, profiles, details) = match catalog {
-        Ok((projects, profiles)) => (
-            true, projects, profiles,
-            "Tauri 전용 CLI 목록을 읽었습니다. 변경·선택은 아직 지원하지 않습니다.".into(),
+    let (available, projects, profiles, selected_repository, details) = match catalog {
+        Ok((projects, profiles, selected)) => (
+            true, projects, profiles, selected,
+            "Tauri 전용 CLI 카탈로그입니다. 등록된 프로젝트만 선택할 수 있으며, 프로필은 조회 전용입니다.".into(),
         ),
         Err(reason) => (
-            false, vec![], vec![],
+            false, vec![], vec![], None,
             format!("격리된 CLI 목록을 조회하지 못했습니다: {reason}"),
         ),
     };
     Ok(CatalogInspection {
-        available, projects, profiles, legacy_project, legacy_project_exists, details,
+        available, projects, profiles, selected_repository, legacy_project, legacy_project_exists, details,
     })
 }
 
