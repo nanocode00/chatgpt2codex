@@ -341,6 +341,76 @@ pub(crate) fn inspect_selected_repository() -> Result<Option<String>, String> {
     selected_repository(&payload()?)
 }
 
+/// F5-C2 only: the native picker holds the folder; the WebView can supply
+/// a bounded project id/name but NEVER a path or a CLI command.
+pub(crate) fn verify_preview_bundle() -> Result<(), String> {
+    payload().map(|_| ())
+}
+
+pub(crate) fn register_picked_repository(folder: &Path, id: &str, name: &str) -> Result<(), String> {
+    if !valid_repository_id(id) {
+        return Err("프로젝트 ID는 영문 소문자·숫자로 시작하며 64자 이하여야 합니다.".into());
+    }
+    if name.is_empty() || name.len() > 160 || name.starts_with('-')
+        || name.chars().any(char::is_control) {
+        return Err("프로젝트 표시 이름의 형식이 올바르지 않습니다.".into());
+    }
+
+    let root = payload()?;
+    let lock = MUTATION_LOCK.get_or_init(|| Mutex::new(()));
+    let _guard = lock.lock().map_err(|_| "프로젝트 등록 잠금을 얻지 못했습니다.")?;
+    ensure_workspace(&root)?;
+    // The canonical CLI 'repository add' can live-reload its own catalogs;
+    // forbid running/stale owned runtime records so registration is inert.
+    if record_if_any(&root)?.is_some() || port_occupied() {
+        return Err("전용 서버가 실행 중이거나 인스턴스 기록이 있습니다. 정상 종료 후 다시 시도하세요.".into());
+    }
+
+    let canonical = fs::canonicalize(folder)
+        .map_err(|_| "선택한 프로젝트 폴더를 확인할 수 없습니다.".to_string())?;
+    if !canonical.is_dir() {
+        return Err("선택한 경로가 디렉터리가 아닙니다.".into());
+    }
+    let full_path = canonical.to_str().ok_or("프로젝트 경로의 문자를 인식하지 못했습니다.")?;
+
+    let existing = cli_command(&root, &["repository", "list"], Duration::from_secs(12))?;
+    let items = existing["repositories"].as_array()
+        .filter(|items| items.len() < 128)
+        .ok_or("Tauri 전용 프로젝트 목록이 유효하지 않거나 가득 찼습니다.")?;
+    for item in items {
+        if item["id"] == id {
+            return Err("같은 ID의 Tauri 전용 프로젝트가 이미 등록돼 있습니다.".into());
+        }
+        if let Some(path) = item["root"].as_str() {
+            if fs::canonicalize(path).ok().as_ref() == Some(&canonical) {
+                return Err("해당 폴더는 Tauri 전용 프로젝트로 이미 등록돼 있습니다.".into());
+            }
+        }
+    }
+
+    // No shell, no legacy executable, no default/home namespace, no tunnel.
+    let registered = cli_command(
+        &root, &["repository", "add", full_path, "--id", id, "--name", name],
+        Duration::from_secs(20)
+    )?;
+    if registered["added"] != true || registered["id"] != id
+        || registered["name"] != name {
+        return Err("CLI가 프로젝트 등록을 확인하지 못했습니다. 목록을 새로 확인하세요.".into());
+    }
+    let after = cli_command(&root, &["repository", "list"], Duration::from_secs(12))?;
+    let confirmed = after["repositories"].as_array()
+        .and_then(|items| items.iter().find(|item| item["id"] == id));
+    let Some(confirmed) = confirmed else {
+        return Err("등록 후 목록에서 프로젝트를 확인하지 못했습니다.".into());
+    };
+    let observed = confirmed["root"].as_str()
+        .and_then(|value| fs::canonicalize(value).ok());
+    if observed.as_ref() != Some(&canonical) || confirmed["available"] != true {
+        return Err("등록 경로 또는 디렉터리 상태가 일치하지 않습니다.".into());
+    }
+    Ok(())
+}
+
 fn ensure_workspace(root: &Payload) -> Result<(), String> {
     fs::create_dir_all(&root.home).map_err(|_| "격리된 CLI 저장 공간을 만들지 못했습니다.")?;
     fs::create_dir_all(root.home.join(".config")).map_err(|_| "격리 설정 디렉터리를 만들지 못했습니다.")?;
