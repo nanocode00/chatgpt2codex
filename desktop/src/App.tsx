@@ -196,7 +196,8 @@ function App() {
 
   async function confirmOwnedRepository() {
     const choice = catalog?.projects.find(item => item.id === draftRepository && item.available);
-    if (!catalog?.available || (draftRepository && !choice) || owned?.running || selectionBusy || ownedBusy) return;
+    if (!catalog?.available || (draftRepository && !choice) || owned?.running || selectionBusy || ownedBusy ||
+        unregisterBusy || unregisterTarget !== null) return;
     const title = choice ? `"${choice.name}"(${choice.id})` : "기본 격리 작업 공간";
     if (!window.confirm(
       `Tauri 전용 인스턴스(tauri-preview-v1:18797)의 다음 시작 프로젝트를 ${title}(으)로 변경할까요?\n\n기존 WinForms(default:7979)는 변경되지 않으며 서버를 자동 시작·재시작하지 않습니다.`
@@ -218,7 +219,7 @@ function App() {
   }
 
   async function browseOwnedFolder() {
-    if (owned?.running || ownedBusy || folderBusy || selectionBusy) return;
+    if (owned?.running || ownedBusy || folderBusy || selectionBusy || unregisterBusy || unregisterTarget !== null) return;
     setFolderBusy(true);
     setFolderError("");
     setFolderNotice("");
@@ -251,7 +252,8 @@ function App() {
     const choice = pickedFolder;
     const name = folderName.trim();
     const id = folderId.trim();
-    if (!choice || !catalog?.available || owned?.running || ownedBusy || selectionBusy || folderBusy) return;
+    if (!choice || !catalog?.available || owned?.running || ownedBusy || selectionBusy || folderBusy ||
+        unregisterBusy || unregisterTarget !== null) return;
     if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(id) || id.includes("..")) {
       setFolderError("프로젝트 ID는 영문 소문자·숫자로 시작하며 최대 64자여야 합니다.");
       return;
