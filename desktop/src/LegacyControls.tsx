@@ -54,7 +54,9 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
   catalog, catalogBusy, catalogError, onRefreshCatalog,
   draftRepository, onDraftRepository, selectionBusy, selectionError, selectionNotice, onConfirmRepository,
   pickedFolder, folderBusy, folderName, onFolderName, folderId, onFolderId, folderError, folderNotice,
-  onBrowseFolder, onCancelFolder, onRegisterFolder }: {
+  onBrowseFolder, onCancelFolder, onRegisterFolder,
+  unregisterTarget, unregisterTyped, onUnregisterTyped, unregisterBusy, unregisterError, unregisterNotice,
+  onRequestUnregister, onCancelUnregister, onConfirmUnregister }: {
   onConnections: () => void; onSettings: () => void;
   onExit: () => void; exitError: string;
   onHide: () => void; trayError: string;
@@ -72,6 +74,11 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
   folderId: string; onFolderId: (value: string) => void;
   folderError: string; folderNotice: string;
   onBrowseFolder: () => void; onCancelFolder: () => void; onRegisterFolder: () => void;
+  unregisterTarget: string | null; unregisterTyped: string;
+  onUnregisterTyped: (value: string) => void; unregisterBusy: boolean;
+  unregisterError: string; unregisterNotice: string;
+  onRequestUnregister: (id: string) => void; onCancelUnregister: () => void;
+  onConfirmUnregister: () => void;
 }) {
   return <>
     <section className="panel page-panel">
@@ -149,18 +156,48 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
           <span className="legacy-value">{catalog?.available ? catalog.projects.length + "개" : "확인 필요"}</span>
         </div>
         {catalog?.available && (catalog.projects.length
-          ? <ul aria-label="Tauri 전용 프로젝트 목록">
+          ? <ul className="legacy-owned-projects" aria-label="Tauri 전용 프로젝트 목록">
               {catalog.projects.map(item => <li key={item.id}>
-                <strong>{item.name}</strong> ({item.id}) · {item.available ? "디렉터리 확인됨" : "디렉터리 없음"}
+                <span><strong>{item.name}</strong> ({item.id}) · {item.available ? "디렉터리 확인됨" : "디렉터리 없음"}
+                  {catalog.selectedRepository === item.id ? " · 현재 선택됨" : ""}</span>
+                <button type="button" className="legacy-action" onClick={() => onRequestUnregister(item.id)}
+                  aria-label={`${item.name} (${item.id})의 Tauri 등록 해제`}
+                  disabled={!!owned?.running || ownedBusy || selectionBusy || folderBusy ||
+                    catalogBusy || unregisterBusy || unregisterTarget !== null ||
+                    catalog.selectedRepository === item.id}>
+                  등록 해제
+                </button>
               </li>)}
             </ul>
           : <p className="legacy-footnote">등록된 전용 프로젝트가 없습니다.</p>)}
+        {unregisterTarget && <div className="legacy-register-preview" role="group"
+          aria-label="Tauri 프로젝트 등록 해제 확인">
+          <strong>프로젝트 등록 해제: {catalog?.projects.find(item => item.id === unregisterTarget)?.name ?? unregisterTarget} ({unregisterTarget})</strong>
+          <p className="legacy-footnote">Tauri 전용 목록에서만 제거합니다. 실제 폴더, 소스 코드, Git 저장소는 삭제하지 않습니다. 현재 선택된 프로젝트는 다른 프로젝트나 기본 격리 작업 공간으로 변경한 뒤 등록 해제할 수 있습니다.</p>
+          <FormRow label="확인할 프로젝트 ID" help={`진행하려면 ${unregisterTarget} 을(를) 정확히 입력하세요.`}>
+            <input className="legacy-field" value={unregisterTyped} onChange={event => onUnregisterTyped(event.target.value)}
+              aria-label="등록 해제 확인 프로젝트 ID" autoComplete="off" spellCheck={false}
+              disabled={unregisterBusy} />
+          </FormRow>
+          <div className="legacy-actions">
+            <button className="legacy-action available" type="button" onClick={onConfirmUnregister}
+              disabled={unregisterBusy || unregisterTyped !== unregisterTarget || ownedBusy ||
+                selectionBusy || folderBusy || catalogBusy || !!owned?.running ||
+                catalog?.selectedRepository === unregisterTarget}>
+              {unregisterBusy ? "처리 중..." : "등록 해제 확인"}
+            </button>
+            <button className="legacy-action available" type="button" onClick={onCancelUnregister}
+              disabled={unregisterBusy}>취소</button>
+          </div>
+        </div>}
+        {unregisterError && <p className="form-error" role="alert">{unregisterError}</p>}
+        {unregisterNotice && <p className="form-ok" role="status">{unregisterNotice}</p>}
         <div className="legacy-pref-row">
           <div><strong>프로젝트 폴더 등록</strong>
             <p>Windows 폴더 선택기를 사용합니다. 등록은 Tauri 전용 목록에만 저장되고 기존 서버는 변경하지 않습니다.</p>
           </div>
           <button type="button" className="legacy-action available" onClick={onBrowseFolder}
-            disabled={!catalog?.available || !!owned?.running || ownedBusy || selectionBusy || folderBusy || catalogBusy}>
+            disabled={!catalog?.available || !!owned?.running || ownedBusy || selectionBusy || folderBusy || unregisterBusy || unregisterTarget !== null || catalogBusy}>
             <FolderOpen size={16}/>{folderBusy ? "작업 중..." : "폴더 찾아보기"}
           </button>
         </div>
@@ -179,7 +216,7 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
           </FormRow>
           <div className="legacy-actions">
             <button className="legacy-action available" type="button" onClick={onRegisterFolder}
-              disabled={folderBusy || ownedBusy || selectionBusy || !!owned?.running}>등록 확인</button>
+              disabled={folderBusy || ownedBusy || selectionBusy || unregisterBusy || unregisterTarget !== null || !!owned?.running}>등록 확인</button>
             <button className="legacy-action available" type="button" onClick={onCancelFolder}
               disabled={folderBusy}>취소</button>
           </div>
@@ -190,7 +227,7 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
           <div className="legacy-inline">
             <select className="legacy-field" aria-label="Tauri 전용 프로젝트 선택" value={draftRepository}
               onChange={event => onDraftRepository(event.target.value)}
-              disabled={!catalog?.available || catalogBusy || selectionBusy || ownedBusy || !!owned?.running}>
+              disabled={!catalog?.available || catalogBusy || selectionBusy || unregisterBusy || unregisterTarget !== null || ownedBusy || !!owned?.running}>
               <option value="">기본 격리된 프리뷰 작업 공간</option>
               {catalog?.projects.filter(item => item.available).map(item => (
                 <option key={item.id} value={item.id}>{item.name} ({item.id})</option>
@@ -199,7 +236,7 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
             <button className="legacy-action available" type="button" onClick={onConfirmRepository}
               disabled={!catalog?.available || draftRepository === (catalog.selectedRepository ?? "") ||
                 (draftRepository !== "" && !catalog.projects.some(item => item.id === draftRepository && item.available)) ||
-                catalogBusy || selectionBusy || ownedBusy || !!owned?.running}>
+                catalogBusy || selectionBusy || unregisterBusy || unregisterTarget !== null || ownedBusy || !!owned?.running}>
               {selectionBusy ? "저장 중..." : "선택 확인 및 저장"}
             </button>
           </div>
@@ -209,7 +246,7 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
           : "기본 격리 작업 공간"} · 인스턴스 tauri-preview-v1:18797 전용</p>
         {selectionError && <p className="form-error" role="alert">{selectionError}</p>}
         {selectionNotice && <p className="form-ok" role="status">{selectionNotice}</p>}
-        <p className="legacy-footnote">등록과 선택은 별개의 작업입니다. 실행 중인 전용 서버나 기록이 남은 인스턴스에서는 변경을 거부하며, 자동 재시작하지 않습니다. 프로젝트 삭제는 아직 CLI에서만 지원합니다.</p>
+        <p className="legacy-footnote">등록·선택·등록 해제는 별개의 작업입니다. 등록 해제는 Tauri 목록에서만 제거하며 실제 폴더와 파일은 보존합니다. 실행 중인 전용 서버나 기록이 남은 인스턴스에서는 변경을 거부하고 자동 재시작하지 않습니다.</p>
         <div className="legacy-pref-row">
           <div><strong>Tauri 전용 CLI 프로필</strong>
             <p>Python/Docker 프로필은 조회 전용입니다. CLI에는 활성 프로필을 고르는 별도의 use 명령이 없어 적용 기능은 아직 제공하지 않습니다.</p>

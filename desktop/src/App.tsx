@@ -5,7 +5,7 @@ import {
   Settings2, ShieldCheck, TerminalSquare, Wifi, WifiOff
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { checkRuntime, inspectInstalledCli, inspectInstalledCliLogs, inspectPublicTunnel, manageOwnedCli, inspectOwnedCatalog, selectOwnedRepository, pickOwnedRepositoryFolder, registerOwnedPickedRepository, cancelOwnedPickedRepository, closePreviewWindow, hidePreviewWindow, openTrustedLink, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type CliInspection, type CliLogPreview, type CliLogComponent, type ManagedAction, type ManagedResult, type CatalogInspection, type PickedRepositoryFolder, type PublicTunnelHealth, type RuntimeHealth, type TrustedLink } from "./runtime";
+import { checkRuntime, inspectInstalledCli, inspectInstalledCliLogs, inspectPublicTunnel, manageOwnedCli, inspectOwnedCatalog, selectOwnedRepository, unregisterOwnedRepository, pickOwnedRepositoryFolder, registerOwnedPickedRepository, cancelOwnedPickedRepository, closePreviewWindow, hidePreviewWindow, openTrustedLink, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type CliInspection, type CliLogPreview, type CliLogComponent, type ManagedAction, type ManagedResult, type CatalogInspection, type PickedRepositoryFolder, type PublicTunnelHealth, type RuntimeHealth, type TrustedLink } from "./runtime";
 import { ManagementControls, LegacyConnectionControls, LegacyDiagnosticsControls, LegacySettingsControls } from "./LegacyControls";
 import { MigrationPreflight } from "./MigrationPreflight";
 import { inspectLegacyMigration, saveLegacySettingsSnapshot, inspectCredentialBackup, createCredentialBackup, rehearseCredentialRestore, type LegacyMigrationReport, type CredentialBackupReport, type RestoreRehearsalReport } from "./runtime";
@@ -79,6 +79,11 @@ function App() {
   const [folderBusy, setFolderBusy] = useState(false);
   const [folderError, setFolderError] = useState("");
   const [folderNotice, setFolderNotice] = useState("");
+  const [unregisterTarget, setUnregisterTarget] = useState<string | null>(null);
+  const [unregisterTyped, setUnregisterTyped] = useState("");
+  const [unregisterBusy, setUnregisterBusy] = useState(false);
+  const [unregisterError, setUnregisterError] = useState("");
+  const [unregisterNotice, setUnregisterNotice] = useState("");
   const [migrationReport, setMigrationReport] = useState<LegacyMigrationReport | null>(null);
   const [migrationBusy, setMigrationBusy] = useState(false);
   const [migrationError, setMigrationError] = useState("");
@@ -191,7 +196,8 @@ function App() {
 
   async function confirmOwnedRepository() {
     const choice = catalog?.projects.find(item => item.id === draftRepository && item.available);
-    if (!catalog?.available || (draftRepository && !choice) || owned?.running || selectionBusy || ownedBusy) return;
+    if (!catalog?.available || (draftRepository && !choice) || owned?.running || selectionBusy || ownedBusy ||
+        unregisterBusy || unregisterTarget !== null) return;
     const title = choice ? `"${choice.name}"(${choice.id})` : "기본 격리 작업 공간";
     if (!window.confirm(
       `Tauri 전용 인스턴스(tauri-preview-v1:18797)의 다음 시작 프로젝트를 ${title}(으)로 변경할까요?\n\n기존 WinForms(default:7979)는 변경되지 않으며 서버를 자동 시작·재시작하지 않습니다.`
@@ -213,7 +219,7 @@ function App() {
   }
 
   async function browseOwnedFolder() {
-    if (owned?.running || ownedBusy || folderBusy || selectionBusy) return;
+    if (owned?.running || ownedBusy || folderBusy || selectionBusy || unregisterBusy || unregisterTarget !== null) return;
     setFolderBusy(true);
     setFolderError("");
     setFolderNotice("");
@@ -246,7 +252,8 @@ function App() {
     const choice = pickedFolder;
     const name = folderName.trim();
     const id = folderId.trim();
-    if (!choice || !catalog?.available || owned?.running || ownedBusy || selectionBusy || folderBusy) return;
+    if (!choice || !catalog?.available || owned?.running || ownedBusy || selectionBusy || folderBusy ||
+        unregisterBusy || unregisterTarget !== null) return;
     if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(id) || id.includes("..")) {
       setFolderError("프로젝트 ID는 영문 소문자·숫자로 시작하며 최대 64자여야 합니다.");
       return;
@@ -271,6 +278,45 @@ function App() {
       await refreshCatalog();
     } finally {
       setFolderBusy(false);
+    }
+  }
+
+  function requestUnregister(id: string) {
+    if (unregisterBusy || selectionBusy || folderBusy || ownedBusy || catalogBusy || owned?.running ||
+        !catalog?.available || catalog.selectedRepository === id ||
+        !catalog.projects.some(item => item.id === id)) return;
+    setUnregisterTarget(id);
+    setUnregisterTyped("");
+    setUnregisterError("");
+    setUnregisterNotice("");
+  }
+
+  function cancelUnregister() {
+    if (unregisterBusy) return;
+    setUnregisterTarget(null);
+    setUnregisterTyped("");
+    setUnregisterError("");
+  }
+
+  async function confirmUnregister() {
+    const id = unregisterTarget;
+    if (!id || unregisterTyped !== id || unregisterBusy || selectionBusy || folderBusy ||
+        catalogBusy || ownedBusy || owned?.running || !catalog?.available ||
+        catalog.selectedRepository === id || !catalog.projects.some(item => item.id === id)) return;
+    setUnregisterBusy(true);
+    setUnregisterError("");
+    setUnregisterNotice("");
+    try {
+      await unregisterOwnedRepository(id);
+      setUnregisterTarget(null);
+      setUnregisterTyped("");
+      await refreshCatalog();
+      setUnregisterNotice(`"${id}"의 Tauri 전용 등록을 해제했습니다. 실제 프로젝트 폴더와 파일은 삭제하지 않았습니다.`);
+    } catch (error) {
+      setUnregisterError(nativeFailureMessage(error, "프로젝트 등록 해제에 실패했습니다."));
+      await refreshCatalog();
+    } finally {
+      setUnregisterBusy(false);
     }
   }
 
@@ -591,6 +637,11 @@ function App() {
             folderId={folderId} onFolderId={setFolderId} folderError={folderError} folderNotice={folderNotice}
             onBrowseFolder={() => { void browseOwnedFolder(); }} onCancelFolder={() => { void discardOwnedFolder(); }}
             onRegisterFolder={() => { void registerOwnedFolder(); }}
+            unregisterTarget={unregisterTarget} unregisterTyped={unregisterTyped}
+            onUnregisterTyped={setUnregisterTyped} unregisterBusy={unregisterBusy}
+            unregisterError={unregisterError} unregisterNotice={unregisterNotice}
+            onRequestUnregister={requestUnregister} onCancelUnregister={cancelUnregister}
+            onConfirmUnregister={() => { void confirmUnregister(); }}
             onOwnedAction={(action) => { void runOwnedAction(action); }} onCopyToken={() => { void copyOwnedToken(); }}/>
         </>}
 
