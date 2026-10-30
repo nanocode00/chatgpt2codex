@@ -197,7 +197,7 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
             <p>Windows 폴더 선택기를 사용합니다. 등록은 Tauri 전용 목록에만 저장되고 기존 서버는 변경하지 않습니다.</p>
           </div>
           <button type="button" className="legacy-action available" onClick={onBrowseFolder}
-            disabled={!catalog?.available || !!owned?.running || ownedBusy || selectionBusy || folderBusy || unregisterBusy || catalogBusy}>
+            disabled={!catalog?.available || !!owned?.running || ownedBusy || selectionBusy || folderBusy || unregisterBusy || unregisterTarget !== null || catalogBusy}>
             <FolderOpen size={16}/>{folderBusy ? "작업 중..." : "폴더 찾아보기"}
           </button>
         </div>
@@ -216,7 +216,7 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
           </FormRow>
           <div className="legacy-actions">
             <button className="legacy-action available" type="button" onClick={onRegisterFolder}
-              disabled={folderBusy || ownedBusy || selectionBusy || !!owned?.running}>등록 확인</button>
+              disabled={folderBusy || ownedBusy || selectionBusy || unregisterBusy || unregisterTarget !== null || !!owned?.running}>등록 확인</button>
             <button className="legacy-action available" type="button" onClick={onCancelFolder}
               disabled={folderBusy}>취소</button>
           </div>
@@ -227,7 +227,7 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
           <div className="legacy-inline">
             <select className="legacy-field" aria-label="Tauri 전용 프로젝트 선택" value={draftRepository}
               onChange={event => onDraftRepository(event.target.value)}
-              disabled={!catalog?.available || catalogBusy || selectionBusy || ownedBusy || !!owned?.running}>
+              disabled={!catalog?.available || catalogBusy || selectionBusy || unregisterBusy || unregisterTarget !== null || ownedBusy || !!owned?.running}>
               <option value="">기본 격리된 프리뷰 작업 공간</option>
               {catalog?.projects.filter(item => item.available).map(item => (
                 <option key={item.id} value={item.id}>{item.name} ({item.id})</option>
@@ -236,7 +236,7 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
             <button className="legacy-action available" type="button" onClick={onConfirmRepository}
               disabled={!catalog?.available || draftRepository === (catalog.selectedRepository ?? "") ||
                 (draftRepository !== "" && !catalog.projects.some(item => item.id === draftRepository && item.available)) ||
-                catalogBusy || selectionBusy || ownedBusy || !!owned?.running}>
+                catalogBusy || selectionBusy || unregisterBusy || unregisterTarget !== null || ownedBusy || !!owned?.running}>
               {selectionBusy ? "저장 중..." : "선택 확인 및 저장"}
             </button>
           </div>
