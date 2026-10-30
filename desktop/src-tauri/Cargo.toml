@@ -28,4 +28,6 @@ ureq = { version = "2.12", default-features = false, features = ["tls"] }
 # Pin a 1.77.2-compatible 2.x plugin until the project's MSRV is raised.
 [target.'cfg(target_os = "windows")'.dependencies]
 tauri-plugin-single-instance = "=2.3.2"
+# MSRV-compatible native Rust folder picker. No WebView dialog permissions.
+tauri-plugin-dialog = "=2.0.1"
 winreg = "0.52"

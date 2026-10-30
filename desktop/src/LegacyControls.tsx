@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { CliLogComponent, CliLogPreview, ManagedResult, ManagedAction, CatalogInspection, PublicTunnelState } from "./runtime";
+import type { CliLogComponent, CliLogPreview, ManagedResult, ManagedAction, CatalogInspection, PickedRepositoryFolder, PublicTunnelState } from "./runtime";
 import {
   ArrowRight, Cloud, Copy, Download, ExternalLink, FileText, FolderOpen,
   Globe2, HeartPulse, KeyRound, Monitor, Play, Power, RefreshCcw,
@@ -52,7 +52,9 @@ function LockedField({ placeholder = "CLI 설정을 연결한 후 표시됩니�
 export function ManagementControls({ onConnections, onSettings, onExit, exitError, onHide, trayError,
   owned, ownedBusy, ownedError, ownedToken, onOwnedAction, onCopyToken,
   catalog, catalogBusy, catalogError, onRefreshCatalog,
-  draftRepository, onDraftRepository, selectionBusy, selectionError, selectionNotice, onConfirmRepository }: {
+  draftRepository, onDraftRepository, selectionBusy, selectionError, selectionNotice, onConfirmRepository,
+  pickedFolder, folderBusy, folderName, onFolderName, folderId, onFolderId, folderError, folderNotice,
+  onBrowseFolder, onCancelFolder, onRegisterFolder }: {
   onConnections: () => void; onSettings: () => void;
   onExit: () => void; exitError: string;
   onHide: () => void; trayError: string;
@@ -65,6 +67,11 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
   draftRepository: string; onDraftRepository: (id: string) => void;
   selectionBusy: boolean; selectionError: string; selectionNotice: string;
   onConfirmRepository: () => void;
+  pickedFolder: PickedRepositoryFolder | null; folderBusy: boolean;
+  folderName: string; onFolderName: (value: string) => void;
+  folderId: string; onFolderId: (value: string) => void;
+  folderError: string; folderNotice: string;
+  onBrowseFolder: () => void; onCancelFolder: () => void; onRegisterFolder: () => void;
 }) {
   return <>
     <section className="panel page-panel">
@@ -148,6 +155,37 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
               </li>)}
             </ul>
           : <p className="legacy-footnote">등록된 전용 프로젝트가 없습니다.</p>)}
+        <div className="legacy-pref-row">
+          <div><strong>프로젝트 폴더 등록</strong>
+            <p>Windows 폴더 선택기를 사용합니다. 등록은 Tauri 전용 목록에만 저장되고 기존 서버는 변경하지 않습니다.</p>
+          </div>
+          <button type="button" className="legacy-action available" onClick={onBrowseFolder}
+            disabled={!catalog?.available || !!owned?.running || ownedBusy || selectionBusy || folderBusy || catalogBusy}>
+            <FolderOpen size={16}/>{folderBusy ? "작업 중..." : "폴더 찾아보기"}
+          </button>
+        </div>
+        {pickedFolder && <div className="legacy-register-preview">
+          <p className="legacy-footnote">선택한 폴더를 확인하고 이름과 ID를 지정하세요. 등록 전에는 아무 설정도 저장하지 않습니다.</p>
+          <FormRow label="선택된 폴더">
+            <input className="legacy-field" value={pickedFolder.path} readOnly aria-label="선택한 프로젝트 경로" />
+          </FormRow>
+          <FormRow label="프로젝트 이름">
+            <input className="legacy-field" value={folderName} maxLength={160}
+              onChange={e => onFolderName(e.target.value)} aria-label="등록할 프로젝트 이름" disabled={folderBusy}/>
+          </FormRow>
+          <FormRow label="프로젝트 ID" help="영문 소문자와 숫자로 시작하며 영문 소문자·숫자·점·밑줄·하이픈만 사용할 수 있습니다.">
+            <input className="legacy-field" value={folderId} maxLength={64}
+              onChange={e => onFolderId(e.target.value)} aria-label="등록할 프로젝트 ID" disabled={folderBusy}/>
+          </FormRow>
+          <div className="legacy-actions">
+            <button className="legacy-action available" type="button" onClick={onRegisterFolder}
+              disabled={folderBusy || ownedBusy || selectionBusy || !!owned?.running}>등록 확인</button>
+            <button className="legacy-action available" type="button" onClick={onCancelFolder}
+              disabled={folderBusy}>취소</button>
+          </div>
+        </div>}
+        {folderError && <p className="form-error" role="alert">{folderError}</p>}
+        {folderNotice && <p className="form-ok" role="status">{folderNotice}</p>}
         <FormRow label="다음 시작에 사용할 Tauri 전용 프로젝트" help="등록된 프로젝트 중 디렉터리가 확인된 항목만 선택합니다. 확인 후 저장되며 실행 중인 서버는 변경되지 않습니다.">
           <div className="legacy-inline">
             <select className="legacy-field" aria-label="Tauri 전용 프로젝트 선택" value={draftRepository}
@@ -171,7 +209,7 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
           : "기본 격리 작업 공간"} · 인스턴스 tauri-preview-v1:18797 전용</p>
         {selectionError && <p className="form-error" role="alert">{selectionError}</p>}
         {selectionNotice && <p className="form-ok" role="status">{selectionNotice}</p>}
-        <p className="legacy-footnote">프로젝트 등록·삭제는 아직 CLI에서만 지원합니다. 실행 중인 전용 서버나 기록이 남은 인스턴스에서는 변경을 거부하며, 자동 재시작하지 않습니다.</p>
+        <p className="legacy-footnote">등록과 선택은 별개의 작업입니다. 실행 중인 전용 서버나 기록이 남은 인스턴스에서는 변경을 거부하며, 자동 재시작하지 않습니다. 프로젝트 삭제는 아직 CLI에서만 지원합니다.</p>
         <div className="legacy-pref-row">
           <div><strong>Tauri 전용 CLI 프로필</strong>
             <p>Python/Docker 프로필은 조회 전용입니다. CLI에는 활성 프로필을 고르는 별도의 use 명령이 없어 적용 기능은 아직 제공하지 않습니다.</p>

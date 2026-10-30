@@ -4,6 +4,7 @@ mod public_health;
 mod managed_cli;
 mod catalog;
 mod ui_actions;
+mod owned_repository_picker;
 mod migration;
 mod migration_backup;
 mod cutover_readiness;
@@ -134,6 +135,8 @@ pub fn run() {
         // preview focus and may contain sensitive user-specific paths.
         tray_lifecycle::restore_main(app);
     }));
+    #[cfg(target_os = "windows")]
+    let builder = builder.plugin(tauri_plugin_dialog::init());
     builder
         .plugin(tauri_plugin_opener::init())
         // The tray controls only this preview window. No installed CLI or
@@ -147,7 +150,7 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             tray_lifecycle::on_window_event(_window, _event);
         })
-        .invoke_handler(tauri::generate_handler![runtime_health, cli_health::inspect_cli_health, cli_operations::inspect_cli_logs, cli_operations::close_preview_window, public_health::inspect_public_tunnel_health, managed_cli::manage_owned_cli, managed_cli::select_owned_repository, catalog::inspect_owned_catalog, ui_actions::hide_preview_window, ui_actions::open_trusted_link, migration::inspect_legacy_migration, migration::save_legacy_settings_snapshot, migration_backup::inspect_credential_backup, migration_backup::create_credential_backup, migration_backup::rehearse_credential_restore, cutover_readiness::inspect_cutover_readiness, startup::inspect_preview_autostart, startup::set_preview_autostart])
+        .invoke_handler(tauri::generate_handler![runtime_health, cli_health::inspect_cli_health, cli_operations::inspect_cli_logs, cli_operations::close_preview_window, public_health::inspect_public_tunnel_health, managed_cli::manage_owned_cli, managed_cli::select_owned_repository, owned_repository_picker::pick_owned_repository_folder, owned_repository_picker::register_owned_picked_repository, owned_repository_picker::cancel_owned_picked_repository, catalog::inspect_owned_catalog, ui_actions::hide_preview_window, ui_actions::open_trusted_link, migration::inspect_legacy_migration, migration::save_legacy_settings_snapshot, migration_backup::inspect_credential_backup, migration_backup::create_credential_backup, migration_backup::rehearse_credential_restore, cutover_readiness::inspect_cutover_readiness, startup::inspect_preview_autostart, startup::set_preview_autostart])
         .run(tauri::generate_context!())
         .expect("failed to start ChatGPT To Codex desktop");
 }

@@ -169,6 +169,12 @@ button:focus-visible,input:focus-visible{outline:2px solid #999;outline-offset:2
 .legacy-health-advanced .legacy-footnote{margin-top:10px}
 .legacy-health-advanced .legacy-actions{margin-top:10px}
 
+/* Native folder registration preview; no webview filesystem access. */
+.legacy-register-preview{margin-top:14px;border:1px solid #414141;background:#1b1b1b;border-radius:11px;padding:10px 17px 18px;min-width:0}
+.legacy-register-preview .legacy-footnote{margin:8px 0 12px}
+.legacy-register-preview .legacy-field{overflow-wrap:anywhere}
+.legacy-register-preview .legacy-actions{margin-top:14px}
+
 /* Independent remote Health status; not a claim about CLI process ownership. */
 .tunnel-status{display:flex;align-items:flex-start;gap:11px;padding:14px 16px;border:1px solid #3d3d3d;background:#262626;border-radius:11px;margin:0 0 14px;color:#bcbcbc}
 .tunnel-status svg{flex:none;margin-top:2px}
