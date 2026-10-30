@@ -156,12 +156,42 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
           <span className="legacy-value">{catalog?.available ? catalog.projects.length + "개" : "확인 필요"}</span>
         </div>
         {catalog?.available && (catalog.projects.length
-          ? <ul aria-label="Tauri 전용 프로젝트 목록">
+          ? <ul className="legacy-owned-projects" aria-label="Tauri 전용 프로젝트 목록">
               {catalog.projects.map(item => <li key={item.id}>
-                <strong>{item.name}</strong> ({item.id}) · {item.available ? "디렉터리 확인됨" : "디렉터리 없음"}
+                <span><strong>{item.name}</strong> ({item.id}) · {item.available ? "디렉터리 확인됨" : "디렉터리 없음"}
+                  {catalog.selectedRepository === item.id ? " · 현재 선택됨" : ""}</span>
+                <button type="button" className="legacy-action" onClick={() => onRequestUnregister(item.id)}
+                  aria-label={`${item.name} (${item.id})의 Tauri 등록 해제`}
+                  disabled={!!owned?.running || ownedBusy || selectionBusy || folderBusy ||
+                    catalogBusy || unregisterBusy || unregisterTarget !== null ||
+                    catalog.selectedRepository === item.id}>
+                  등록 해제
+                </button>
               </li>)}
             </ul>
           : <p className="legacy-footnote">등록된 전용 프로젝트가 없습니다.</p>)}
+        {unregisterTarget && <div className="legacy-register-preview" role="group"
+          aria-label="Tauri 프로젝트 등록 해제 확인">
+          <strong>프로젝트 등록 해제: {catalog?.projects.find(item => item.id === unregisterTarget)?.name ?? unregisterTarget} ({unregisterTarget})</strong>
+          <p className="legacy-footnote">Tauri 전용 목록에서만 제거합니다. 실제 폴더, 소스 코드, Git 저장소는 삭제하지 않습니다. 현재 선택된 프로젝트는 다른 프로젝트나 기본 격리 작업 공간으로 변경한 뒤 등록 해제할 수 있습니다.</p>
+          <FormRow label="확인할 프로젝트 ID" help={`진행하려면 ${unregisterTarget} 을(를) 정확히 입력하세요.`}>
+            <input className="legacy-field" value={unregisterTyped} onChange={event => onUnregisterTyped(event.target.value)}
+              aria-label="등록 해제 확인 프로젝트 ID" autoComplete="off" spellCheck={false}
+              disabled={unregisterBusy} />
+          </FormRow>
+          <div className="legacy-actions">
+            <button className="legacy-action available" type="button" onClick={onConfirmUnregister}
+              disabled={unregisterBusy || unregisterTyped !== unregisterTarget || ownedBusy ||
+                selectionBusy || folderBusy || catalogBusy || !!owned?.running ||
+                catalog?.selectedRepository === unregisterTarget}>
+              {unregisterBusy ? "처리 중..." : "등록 해제 확인"}
+            </button>
+            <button className="legacy-action available" type="button" onClick={onCancelUnregister}
+              disabled={unregisterBusy}>취소</button>
+          </div>
+        </div>}
+        {unregisterError && <p className="form-error" role="alert">{unregisterError}</p>}
+        {unregisterNotice && <p className="form-ok" role="status">{unregisterNotice}</p>
         <div className="legacy-pref-row">
           <div><strong>프로젝트 폴더 등록</strong>
             <p>Windows 폴더 선택기를 사용합니다. 등록은 Tauri 전용 목록에만 저장되고 기존 서버는 변경하지 않습니다.</p>
