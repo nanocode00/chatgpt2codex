@@ -54,7 +54,9 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
   catalog, catalogBusy, catalogError, onRefreshCatalog,
   draftRepository, onDraftRepository, selectionBusy, selectionError, selectionNotice, onConfirmRepository,
   pickedFolder, folderBusy, folderName, onFolderName, folderId, onFolderId, folderError, folderNotice,
-  onBrowseFolder, onCancelFolder, onRegisterFolder }: {
+  onBrowseFolder, onCancelFolder, onRegisterFolder,
+  unregisterTarget, unregisterTyped, onUnregisterTyped, unregisterBusy, unregisterError, unregisterNotice,
+  onRequestUnregister, onCancelUnregister, onConfirmUnregister }: {
   onConnections: () => void; onSettings: () => void;
   onExit: () => void; exitError: string;
   onHide: () => void; trayError: string;
@@ -72,6 +74,11 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
   folderId: string; onFolderId: (value: string) => void;
   folderError: string; folderNotice: string;
   onBrowseFolder: () => void; onCancelFolder: () => void; onRegisterFolder: () => void;
+  unregisterTarget: string | null; unregisterTyped: string;
+  onUnregisterTyped: (value: string) => void; unregisterBusy: boolean;
+  unregisterError: string; unregisterNotice: string;
+  onRequestUnregister: (id: string) => void; onCancelUnregister: () => void;
+  onConfirmUnregister: () => void;
 }) {
   return <>
     <section className="panel page-panel">
@@ -160,7 +167,7 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
             <p>Windows 폴더 선택기를 사용합니다. 등록은 Tauri 전용 목록에만 저장되고 기존 서버는 변경하지 않습니다.</p>
           </div>
           <button type="button" className="legacy-action available" onClick={onBrowseFolder}
-            disabled={!catalog?.available || !!owned?.running || ownedBusy || selectionBusy || folderBusy || catalogBusy}>
+            disabled={!catalog?.available || !!owned?.running || ownedBusy || selectionBusy || folderBusy || unregisterBusy || catalogBusy}>
             <FolderOpen size={16}/>{folderBusy ? "작업 중..." : "폴더 찾아보기"}
           </button>
         </div>
@@ -209,7 +216,7 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
           : "기본 격리 작업 공간"} · 인스턴스 tauri-preview-v1:18797 전용</p>
         {selectionError && <p className="form-error" role="alert">{selectionError}</p>}
         {selectionNotice && <p className="form-ok" role="status">{selectionNotice}</p>}
-        <p className="legacy-footnote">등록과 선택은 별개의 작업입니다. 실행 중인 전용 서버나 기록이 남은 인스턴스에서는 변경을 거부하며, 자동 재시작하지 않습니다. 프로젝트 삭제는 아직 CLI에서만 지원합니다.</p>
+        <p className="legacy-footnote">등록·선택·등록 해제는 별개의 작업입니다. 등록 해제는 Tauri 목록에서만 제거하며 실제 폴더와 파일은 보존합니다. 실행 중인 전용 서버나 기록이 남은 인스턴스에서는 변경을 거부하고 자동 재시작하지 않습니다.</p>
         <div className="legacy-pref-row">
           <div><strong>Tauri 전용 CLI 프로필</strong>
             <p>Python/Docker 프로필은 조회 전용입니다. CLI에는 활성 프로필을 고르는 별도의 use 명령이 없어 적용 기능은 아직 제공하지 않습니다.</p>
