@@ -420,6 +420,89 @@ pub(crate) fn register_picked_repository(folder: &Path, id: &str, name: &str) ->
     Ok(())
 }
 
+// F5-C3: removing a repository means only unregistering its ID from the
+// isolated Tauri CLI catalog. It must never touch the physical project folder.
+fn validate_unregistration(
+    id: &str,
+    selected: Option<&str>,
+    repositories: &[serde_json::Value],
+) -> Result<(), String> {
+    if !valid_repository_id(id) {
+        return Err("프로젝트 ID가 올바르지 않습니다.".into());
+    }
+    if selected == Some(id) {
+        return Err("현재 사용하도록 선택된 프로젝트는 제거할 수 없습니다. 먼저 기본 격리 작업 공간이나 다른 프로젝트를 선택하여 저장하세요.".into());
+    }
+    if repositories.len() > 128 {
+        return Err("프로젝트 목록이 허용 범위를 초과해 제거하지 않습니다.".into());
+    }
+    if repositories.iter().filter(|item| item["id"] == id).count() != 1 {
+        return Err("제거하려는 프로젝트가 목록에 정확히 한 번 등록된 상태가 아닙니다. 목록을 새로 확인하세요.".into());
+    }
+    Ok(())
+}
+
+fn unregister_repository(root: &Payload, id: &str) -> Result<(), String> {
+    if !valid_repository_id(id) {
+        return Err("프로젝트 ID가 올바르지 않습니다.".into());
+    }
+    let lock = MUTATION_LOCK.get_or_init(|| Mutex::new(()));
+    let _guard = lock.lock().map_err(|_| "프로젝트 제거 잠금을 얻지 못했습니다.")?;
+    ensure_workspace(root)?;
+    // Even a stale runtime record must block deletion. We never stop or
+    // restart a process, and never touch default:7979 or its config files.
+    if record_if_any(root)?.is_some() || port_occupied() {
+        return Err("전용 인스턴스 기록 또는 18797 포트 사용이 감지됐습니다. 정상 종료한 뒤 목록 제거를 진행하세요.".into());
+    }
+    let current_selection = selected_repository(root)?;
+    let catalog = cli_command(root, &["repository", "list"], Duration::from_secs(12))?;
+    let repositories = catalog["repositories"].as_array()
+        .ok_or("Tauri 전용 프로젝트 목록을 읽지 못했습니다.")?;
+    validate_unregistration(id, current_selection.as_deref(), repositories)?;
+
+    // Only the fixed CLI 'repository remove <id>' verb is allowed. No shell,
+    // filesystem deletion, arbitrary path, credential, or tunnel operation.
+    let result = cli_command(root, &["repository", "remove", id], Duration::from_secs(20))?;
+    if result["removed"] != true || result["id"] != id {
+        return Err("CLI가 프로젝트 등록 해제를 확인하지 못했습니다. 목록을 다시 확인하세요.".into());
+    }
+    let afterward = cli_command(root, &["repository", "list"], Duration::from_secs(12))?;
+    let remaining = afterward["repositories"].as_array()
+        .ok_or("제거 후 프로젝트 목록 형식을 확인하지 못했습니다.")?;
+    if remaining.iter().any(|item| item["id"] == id) {
+        return Err("등록 해제 후에도 프로젝트가 목록에 남아 있습니다. 목록을 새로 확인하세요.".into());
+    }
+    if selected_repository(root)?.as_deref() == Some(id) {
+        return Err("등록 해제 뒤 선택 설정이 일치하지 않습니다. 설정을 점검하세요.".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn unregister_owned_repository(id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = payload()?;
+        unregister_repository(&root, &id)
+    }).await.map_err(|_| "프로젝트 등록 해제 작업이 중단됐습니다.".to_string())?
+}
+
+#[cfg(test)]
+mod f5c3_unregistration_tests {
+    use super::*;
+    #[test]
+    fn rejects_selected_invalid_missing_and_ambiguous_project_ids() {
+        let entries = vec![serde_json::json!({"id":"first","available":true}),
+                           serde_json::json!({"id":"gone","available":false})];
+        assert!(validate_unregistration("first", Some("first"), &entries).is_err());
+        assert!(validate_unregistration("../other", None, &entries).is_err());
+        assert!(validate_unregistration("not-here", None, &entries).is_err());
+        assert!(validate_unregistration("first", None, &[entries[0].clone(), entries[0].clone()]).is_err());
+        assert!(validate_unregistration("gone", None, &entries).is_ok());
+        assert!(validate_unregistration("first", Some("gone"), &entries).is_ok());
+        assert!(validate_unregistration("first", None, &vec![entries[0].clone(); 129]).is_err());
+    }
+}
+
 fn ensure_workspace(root: &Payload) -> Result<(), String> {
     fs::create_dir_all(&root.home).map_err(|_| "격리된 CLI 저장 공간을 만들지 못했습니다.")?;
     fs::create_dir_all(root.home.join(".config")).map_err(|_| "격리 설정 디렉터리를 만들지 못했습니다.")?;
