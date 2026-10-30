@@ -154,6 +154,12 @@ export async function selectOwnedRepository(id: string): Promise<string | null> 
   return invoke<string | null>("select_owned_repository", { id });
 }
 
+/** Unregister an entry from the isolated Tauri CLI catalog only; never delete its directory. */
+export async function unregisterOwnedRepository(id: string): Promise<void> {
+  if (!isNativeApp()) throw new Error("Windows Tauri 앱에서만 프로젝트 등록을 해제할 수 있습니다.");
+  await invoke<void>("unregister_owned_repository", { id });
+}
+
 /** Native OS-picked folder preview. Its serial is a one-shot registration token;
  * registration never takes a path supplied by the frontend. */
 export interface PickedRepositoryFolder {
