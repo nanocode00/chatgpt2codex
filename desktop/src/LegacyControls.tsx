@@ -191,7 +191,7 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
           </div>
         </div>}
         {unregisterError && <p className="form-error" role="alert">{unregisterError}</p>}
-        {unregisterNotice && <p className="form-ok" role="status">{unregisterNotice}</p>
+        {unregisterNotice && <p className="form-ok" role="status">{unregisterNotice}</p>}
         <div className="legacy-pref-row">
           <div><strong>프로젝트 폴더 등록</strong>
             <p>Windows 폴더 선택기를 사용합니다. 등록은 Tauri 전용 목록에만 저장되고 기존 서버는 변경하지 않습니다.</p>
