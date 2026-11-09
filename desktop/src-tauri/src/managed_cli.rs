@@ -36,6 +36,10 @@ pub struct ManagedResult {
     pub instance: &'static str,
     pub port: u16,
     pub details: String,
+    pub tunnel_capable: bool,
+    pub tunnel_running: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub public_connector: Option<String>,
     // Only populated when the user explicitly chooses "Prepare". Never
     // logged, persisted in the frontend, or returned by any other action.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -56,6 +60,7 @@ fn response(available: bool, ready: bool, running: bool, details: impl Into<Stri
     ManagedResult {
         available, ready, running, instance: INSTANCE, port: PORT,
         details: details.into(), one_time_owner_token: None,
+        tunnel_capable: false, tunnel_running: false, public_connector: None,
     }
 }
 
@@ -165,13 +170,24 @@ fn expected_record(root: &Payload, record: &serde_json::Value) -> bool {
         owned_workspace.as_ref() == Some(observed) ||
             previous_workspace.as_ref() == Some(observed)
     });
+    let no_tunnel = record["tunnelMode"] == "none" &&
+        record["tunnelPid"].is_null() &&
+        record["publicUrl"] == format!("http://127.0.0.1:{PORT}");
+    let quick_tunnel = root.cloudflared.is_some() && record["tunnelMode"] == "cloudflare" &&
+        record["tunnelPid"].as_u64().is_some_and(|pid| pid > 0) &&
+        record["publicUrl"].as_str().is_some_and(|origin| {
+            crate::public_health::quick_tunnel_health_url(&format!("{origin}/mcp")).is_some()
+        }) &&
+        record["tunnelLogPath"].as_str().is_some_and(|log| {
+            let expected = root.home.join(".local").join("share").join("chatgpt2codex")
+                .join("logs").join(format!("{INSTANCE}.cloudflared.log"));
+            fs::canonicalize(log).ok().is_some_and(|observed|
+                fs::canonicalize(expected).ok().as_ref() == Some(&observed))
+        });
     expected_cli.is_some() && expected_cli == observed_cli &&
         workspace_owned &&
         record["name"] == INSTANCE && record["port"] == PORT &&
-        record["host"] == "127.0.0.1" &&
-        record["tunnelMode"] == "none" &&
-        record["tunnelPid"].is_null() &&
-        record["publicUrl"] == format!("http://127.0.0.1:{PORT}")
+        record["host"] == "127.0.0.1" && (no_tunnel || quick_tunnel)
 }
 
 fn record_if_any(root: &Payload) -> Result<Option<serde_json::Value>, String> {
@@ -211,6 +227,11 @@ fn cli_command(root: &Payload, args: &[&str], timeout: Duration) -> Result<serde
     command.env("USERPROFILE", &root.home)
         .env("HOME", &root.home)
         .env("XDG_CONFIG_HOME", &config);
+    // The canonical CLI performs its own audited tunnel process ownership
+    // checks. Supply an exact SHA-verified executable path, never PATH lookup.
+    if let Some(binary) = &root.cloudflared {
+        command.env("CHATGPT2CODEX_MANAGED_CLOUDFLARED", binary);
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -515,17 +536,30 @@ fn status(root: &Payload) -> Result<ManagedResult, String> {
     ensure_workspace(root)?;
     let ready = owner_configured(root)?;
     let record = record_if_any(root)?;
-    let running = if record.is_some() {
-        let state = cli_command(root, &["status", "--instance", INSTANCE], Duration::from_secs(10))?;
-        state["alive"] == true && state["healthy"] == true
-    } else { false };
-    Ok(response(true, ready, running, if running {
-        "Tauri 전용 CLI 인스턴스가 정상 동작하고 있습니다."
+    let state = if record.is_some() {
+        Some(cli_command(root, &["status", "--instance", INSTANCE], Duration::from_secs(10))?)
+    } else { None };
+    let running = state.as_ref().is_some_and(|v| v["alive"] == true && v["healthy"] == true);
+    let tunnel_running = running && state.as_ref().is_some_and(|v| v["tunnelAlive"] == true)
+        && record.as_ref().is_some_and(|v| v["tunnelMode"] == "cloudflare");
+    let connector = if tunnel_running {
+        record.as_ref().and_then(|v| v["publicUrl"].as_str())
+            .map(|origin| format!("{origin}/mcp"))
+            .filter(|url| crate::public_health::quick_tunnel_health_url(url).is_some())
+    } else { None };
+    let mut result = response(true, ready, running, if tunnel_running {
+        "Tauri 전용 MCP 및 Quick Tunnel이 실행 중입니다. 공개 HTTPS Health는 별도로 확인해야 합니다."
+    } else if running {
+        "Tauri 전용 로컬 MCP 인스턴스가 정상 동작하고 있습니다."
     } else if !ready {
         "독립된 Tauri 인스턴스를 사용하려면 먼저 준비 버튼을 눌러 토큰을 생성하세요."
     } else {
         "전용 인스턴스가 중지돼 있습니다. WinForms 서버는 별도로 유지됩니다."
-    }))
+    });
+    result.tunnel_capable = root.cloudflared.is_some();
+    result.tunnel_running = tunnel_running;
+    result.public_connector = connector;
+    Ok(result)
 }
 
 fn operate(root: Payload, action: &str) -> Result<ManagedResult, String> {
@@ -546,16 +580,16 @@ fn operate(root: Payload, action: &str) -> Result<ManagedResult, String> {
             value.one_time_owner_token = Some(token.to_string());
             Ok(value)
         }
-        "start" | "stop" | "restart" => {
+        "start" | "start-public" | "stop" | "restart" => {
             let ready = owner_configured(&root)?;
             if !ready { return Err("먼저 전용 인스턴스 준비를 완료하세요.".into()); }
             let record = record_if_any(&root)?;
-            if action == "start" && record.is_some() {
+            if (action == "start" || action == "start-public") && record.is_some() {
                 let value = status(&root)?;
                 if value.running { return Ok(value); }
                 return Err("기존 인스턴스 기록이 있습니다. 수동으로 상태를 확인하세요.".into());
             }
-            if action != "start" && record.is_none() {
+            if action != "start" && action != "start-public" && record.is_none() {
                 return if action == "stop" {
                     Ok(response(true, ready, false, "중지할 Tauri 전용 인스턴스가 없습니다."))
                 } else {
@@ -572,7 +606,7 @@ fn operate(root: Payload, action: &str) -> Result<ManagedResult, String> {
                     return Err("CLI가 인스턴스 중지를 확인하지 못했습니다.".into());
                 }
             }
-            if action == "start" || action == "restart" {
+            if action == "start" || action == "start-public" || action == "restart" {
                 if port_occupied() {
                     return Err("Tauri 전용 포트 18797이 사용 중입니다. 다른 프로세스는 종료하지 않습니다.".into());
                 }
@@ -580,10 +614,18 @@ fn operate(root: Payload, action: &str) -> Result<ManagedResult, String> {
                 // are independently loaded by the CLI catalog and addressed
                 // through projectId, without a GUI "default project".
                 clear_startup_repository_preference(&root)?;
+                let was_public = action == "restart" && record.as_ref().is_some_and(|v|
+                    v["tunnelMode"] == "cloudflare");
+                let public_start = action == "start-public" || was_public;
+                if public_start && root.cloudflared.is_none() {
+                    return Err("검증된 Cloudflare Quick Tunnel 번들이 없습니다.".into());
+                }
+                let tunnel_mode = if public_start { "cloudflare" } else { "none" };
                 let args = ["start", "--instance", INSTANCE,
                     "--workspace", root.workspace.to_str().ok_or("유효하지 않은 경로입니다.")?,
-                    "--host", "127.0.0.1", "--port", "18797", "--tunnel", "none"];
-                let started = cli_command(&root, &args, Duration::from_secs(35))?;
+                    "--host", "127.0.0.1", "--port", "18797", "--tunnel", tunnel_mode];
+                let started = cli_command(&root, &args,
+                    Duration::from_secs(if public_start { 100 } else { 35 }))?;
                 if started["started"] != true || started["healthy"] != true {
                     return Err("CLI의 시작 및 Health 확인에 실패했습니다.".into());
                 }
@@ -599,7 +641,7 @@ fn operate(root: Payload, action: &str) -> Result<ManagedResult, String> {
 
 #[tauri::command]
 pub async fn manage_owned_cli(action: String) -> Result<ManagedResult, String> {
-    if !matches!(action.as_str(), "status" | "prepare" | "start" | "stop" | "restart") {
+    if !matches!(action.as_str(), "status" | "prepare" | "start" | "start-public" | "stop" | "restart") {
         return Err("허용되지 않은 CLI 작업입니다.".into());
     }
     tauri::async_runtime::spawn_blocking(move || {
