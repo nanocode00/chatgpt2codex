@@ -664,6 +664,48 @@ mod tests {
     use super::*;
 
     #[test]
+    fn owned_quick_tunnel_requires_exact_origin_log_path_and_binary() {
+        let temp = std::env::temp_dir().join(format!("c2c-owned-quick-fixture-{}", std::process::id()));
+        let workspace = temp.join("workspace");
+        let cli = temp.join("c2c-runtime").join("dist").join("cli.js");
+        let node = temp.join("c2c-runtime").join("bin").join("node.exe");
+        let cloudflared = temp.join("c2c-runtime").join("bin").join("cloudflared.exe");
+        let logs = temp.join("isolated-home").join(".local").join("share")
+            .join("chatgpt2codex").join("logs");
+        let tunnel_log = logs.join(format!("{INSTANCE}.cloudflared.log"));
+        fs::create_dir_all(&workspace).unwrap();
+        fs::create_dir_all(cli.parent().unwrap()).unwrap();
+        fs::create_dir_all(node.parent().unwrap()).unwrap();
+        fs::create_dir_all(&logs).unwrap();
+        for file in [&cli, &node, &cloudflared, &tunnel_log] {
+            fs::write(file, b"fixture").unwrap();
+        }
+        let root = Payload {
+            node, cli: cli.clone(), home: temp.join("isolated-home"),
+            workspace: workspace.clone(), cloudflared: Some(cloudflared),
+        };
+        let mut record = serde_json::json!({
+            "entrypoint": cli.to_string_lossy().to_string(),
+            "workspace": workspace.to_string_lossy().to_string(),
+            "name": INSTANCE, "port": PORT, "host": "127.0.0.1",
+            "tunnelMode": "cloudflare", "tunnelPid": 123456,
+            "publicUrl": "https://safety-test.trycloudflare.com",
+            "tunnelLogPath": tunnel_log.to_string_lossy().to_string()
+        });
+        assert!(expected_record(&root, &record));
+        record["publicUrl"] = serde_json::json!("https://localhost");
+        assert!(!expected_record(&root, &record));
+        record["publicUrl"] = serde_json::json!("https://safety-test.trycloudflare.com");
+        record["tunnelLogPath"] = serde_json::json!("C:\\Users\\other\\cloudflared.log");
+        assert!(!expected_record(&root, &record));
+        record["tunnelLogPath"] = serde_json::json!(tunnel_log.to_string_lossy().to_string());
+        let mut unsigned = root;
+        unsigned.cloudflared = None;
+        assert!(!expected_record(&unsigned, &record));
+        fs::remove_dir_all(temp).unwrap();
+    }
+
+    #[test]
     fn never_claim_foreign_pid_record_belongs_to_tauri() {
         let root = Payload {
             node: PathBuf::from(r"C:\preview\c2c-runtime\bin\node.exe"),
