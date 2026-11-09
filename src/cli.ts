@@ -1493,8 +1493,16 @@ async function startCloudflareTunnel(options: {
   credential?: string;
   env?: NodeJS.ProcessEnv;
 }): Promise<{ pid: number; publicUrl: string; logPath: string }> {
-  if (!(await checkCommand("cloudflared", ["--version"]))) {
-    throw new Error("cloudflared is not available on PATH");
+  const managedExecutable = process.env.CHATGPT2CODEX_MANAGED_CLOUDFLARED?.trim();
+  if (managedExecutable && (
+    !path.isAbsolute(managedExecutable) ||
+    path.basename(managedExecutable).toLowerCase() !== "cloudflared.exe"
+  )) {
+    throw new Error("managed cloudflared must be an absolute cloudflared.exe path");
+  }
+  const cloudflaredExecutable = managedExecutable || "cloudflared";
+  if (!(await checkCommand(cloudflaredExecutable, ["--version"]))) {
+    throw new Error("cloudflared is not available or its owned executable is invalid");
   }
 
   const logPath = path.join(options.stateDir, "logs", options.instance + ".cloudflared.log");
@@ -1518,7 +1526,7 @@ async function startCloudflareTunnel(options: {
     publicUrl = "https://" + options.publicHostname;
   } else {
     args = ["tunnel", "--no-autoupdate", "--url", options.localUrl];
-    const pid = await spawnDetachedLogged("cloudflared", args, logPath);
+    const pid = await spawnDetachedLogged(cloudflaredExecutable, args, logPath);
     try {
       publicUrl = await waitForQuickTunnelUrl(logPath, pid);
       return { pid, publicUrl, logPath };
@@ -1528,7 +1536,7 @@ async function startCloudflareTunnel(options: {
     }
   }
 
-  const pid = await spawnDetachedLogged("cloudflared", args, logPath, tunnelEnv);
+  const pid = await spawnDetachedLogged(cloudflaredExecutable, args, logPath, tunnelEnv);
   await new Promise((resolve) => setTimeout(resolve, 800));
   if (!isProcessAlive(pid)) {
     const log = await fs.readFile(logPath, "utf8").catch(() => "");

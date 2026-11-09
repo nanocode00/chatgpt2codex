@@ -66,6 +66,7 @@ function App() {
   const [ownedBusy, setOwnedBusy] = useState(false);
   const [ownedError, setOwnedError] = useState("");
   const [ownedToken, setOwnedToken] = useState<string | null>(null);
+  const [ownedUrlNotice, setOwnedUrlNotice] = useState("");
   const [catalog, setCatalog] = useState<CatalogInspection | null>(null);
   const [catalogBusy, setCatalogBusy] = useState(false);
   const [catalogError, setCatalogError] = useState("");
@@ -151,8 +152,12 @@ function App() {
 
 
   const runOwnedAction = useCallback(async (action: ManagedAction) => {
+    if (action === "start-public" && !window.confirm(
+      "Tauri 전용 MCP를 Cloudflare Quick Tunnel로 외부에 공개할까요?\\n\\n별도 18797 인스턴스만 사용하며 기존 WinForms/7979는 변경하지 않습니다. 공개 주소는 재시작 때 변경될 수 있고, 연결에는 인증 승인이 필요합니다."
+    )) return;
     setOwnedBusy(true);
     setOwnedError("");
+    setOwnedUrlNotice("");
     try {
       const next = await manageOwnedCli(action);
       if (next.oneTimeOwnerToken) {
@@ -162,7 +167,7 @@ function App() {
         setOwned(next);
       }
     } catch (error) {
-      setOwnedError(error instanceof Error ? error.message : "전용 CLI 작업에 실패했습니다.");
+      setOwnedError(nativeFailureMessage(error, "전용 CLI 작업에 실패했습니다."));
     } finally {
       setOwnedBusy(false);
     }
@@ -287,6 +292,16 @@ function App() {
       await refreshCatalog();
     } finally {
       setUnregisterBusy(false);
+    }
+  }
+
+  async function copyOwnedConnector() {
+    if (!owned?.tunnelRunning || !owned.publicConnector) return;
+    try {
+      await navigator.clipboard.writeText(owned.publicConnector);
+      setOwnedUrlNotice("전용 Quick Tunnel 주소를 복사했습니다. 접속 및 OAuth 인증은 별도로 확인하세요.");
+    } catch {
+      setOwnedUrlNotice("공개 주소를 복사하지 못했습니다. 텍스트 상자에서 직접 복사할 수 있습니다.");
     }
   }
 
@@ -600,6 +615,7 @@ function App() {
           <ManagementControls onConnections={() => setScreen("connections")} onSettings={() => setScreen("settings")} onExit={() => { void exitPreview(); }} exitError={exitError}
             onHide={() => { void hideToTray(); }} trayError={trayError}
             owned={owned} ownedBusy={ownedBusy} ownedError={ownedError} ownedToken={ownedToken}
+            ownedUrlNotice={ownedUrlNotice} onCopyOwnedConnector={() => { void copyOwnedConnector(); }}
             catalog={catalog} catalogBusy={catalogBusy} catalogError={catalogError} onRefreshCatalog={() => { void refreshCatalog(); }}
             pickedFolder={pickedFolder} folderBusy={folderBusy} folderName={folderName} onFolderName={setFolderName}
             folderId={folderId} onFolderId={setFolderId} folderError={folderError} folderNotice={folderNotice}

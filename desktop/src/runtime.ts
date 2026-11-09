@@ -174,11 +174,14 @@ export async function cancelOwnedPickedRepository(serial: number): Promise<void>
   await invoke<void>("cancel_owned_picked_repository", { serial });
 }
 
-export type ManagedAction = "status" | "prepare" | "start" | "stop" | "restart";
+export type ManagedAction = "status" | "prepare" | "start" | "start-public" | "stop" | "restart";
 export interface ManagedResult {
   available: boolean;
   ready: boolean;
   running: boolean;
+  tunnelCapable: boolean;
+  tunnelRunning: boolean;
+  publicConnector?: string;
   instance: string;
   port: number;
   details: string;
@@ -186,7 +189,7 @@ export interface ManagedResult {
 }
 export async function manageOwnedCli(action: ManagedAction): Promise<ManagedResult> {
   if (!isNativeApp()) {
-    return { available: false, ready: false, running: false,
+    return { available: false, ready: false, running: false, tunnelCapable: false, tunnelRunning: false,
       instance: "tauri-preview-v1", port: 18797, details: "Windows Tauri 프리뷰에서만 지원합니다." };
   }
   return invoke<ManagedResult>("manage_owned_cli", { action });
