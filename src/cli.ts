@@ -1268,7 +1268,9 @@ async function cmdControl(positional: string[], flags: Record<string, string | b
 
 async function checkCommand(cmd: string, args: string[]): Promise<string | undefined> {
   try {
-    const { stdout } = await execFileAsync(cmd, args, { timeout: 5000 });
+    // Tauri runs the CLI headlessly; probing cloudflared --version must not
+    // flash a console window on Windows.
+    const { stdout } = await execFileAsync(cmd, args, { timeout: 5000, windowsHide: true });
     return stdout.trim().split("\n")[0];
   } catch {
     return undefined;
@@ -1450,6 +1452,10 @@ async function spawnDetachedLogged(
     return await new Promise<number>((resolve, reject) => {
       const child = spawn(command, args, {
         detached: true,
+        // Both the detached MCP node.exe and cloudflared.exe must remain
+        // headless on Windows; Tauri's CREATE_NO_WINDOW affects only its
+        // direct CLI child, not children launched by that CLI.
+        windowsHide: true,
         stdio: ["ignore", log.fd, log.fd],
         env,
       });
