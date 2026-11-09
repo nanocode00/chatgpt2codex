@@ -578,20 +578,27 @@ fn operate(root: Payload, action: &str) -> Result<ManagedResult, String> {
             let mut value = response(true, true, false,
                 "전용 Owner Token을 생성했습니다. 한 번만 보여주므로 안전하게 보관하세요.");
             value.one_time_owner_token = Some(token.to_string());
+            value.tunnel_capable = root.cloudflared.is_some();
             Ok(value)
         }
         "start" | "start-public" | "stop" | "restart" => {
             let ready = owner_configured(&root)?;
             if !ready { return Err("먼저 전용 인스턴스 준비를 완료하세요.".into()); }
             let record = record_if_any(&root)?;
+            if action == "start-public" && root.cloudflared.is_none() {
+                return Err("검증된 Cloudflare Quick Tunnel 번들이 없습니다.".into());
+            }
             if (action == "start" || action == "start-public") && record.is_some() {
                 let value = status(&root)?;
+                if value.running && action == "start-public" && !value.tunnel_running {
+                    return Err("로컬 전용 MCP가 이미 실행 중입니다. 안전하게 중지한 후 공개 연결을 시작하세요.".into());
+                }
                 if value.running { return Ok(value); }
                 return Err("기존 인스턴스 기록이 있습니다. 수동으로 상태를 확인하세요.".into());
             }
             if action != "start" && action != "start-public" && record.is_none() {
                 return if action == "stop" {
-                    Ok(response(true, ready, false, "중지할 Tauri 전용 인스턴스가 없습니다."))
+                    status(&root)
                 } else {
                     Err("재시작할 전용 인스턴스가 없습니다.".into())
                 };
