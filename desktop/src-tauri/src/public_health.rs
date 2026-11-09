@@ -3,6 +3,7 @@ use std::io::Read;
 use std::time::Duration;
 
 use crate::cli_health::{inspect_local_cli, valid_instance};
+use crate::managed_cli;
 
 /// This stage is read-only and intentionally supports Cloudflare *Quick*
 /// Tunnels only. Arbitrary URL probing or user-supplied hosts could turn a
@@ -69,6 +70,12 @@ fn inspect_public_tunnel(instance: String) -> PublicTunnelHealth {
     let Some(connector) = cli.public_connector else {
         return snapshot("unavailable", None, "CLI에 공개 HTTPS 커넥터 주소가 기록되지 않았습니다.");
     };
+    probe_quick_tunnel(connector)
+}
+
+/// Probe only a fully validated Cloudflare Quick Tunnel hostname. No
+/// redirects, no user-supplied URL, no token and no internal network access.
+fn probe_quick_tunnel(connector: String) -> PublicTunnelHealth {
     let Some(health_url) = quick_tunnel_health_url(&connector) else {
         return snapshot(
             "unsupported",
@@ -113,6 +120,28 @@ fn inspect_public_tunnel(instance: String) -> PublicTunnelHealth {
             "공개 주소에 접근할 수 없습니다. 절전 복귀 후 터널 종료 또는 DNS 주소 만료 가능성이 있습니다.",
         ),
     }
+}
+
+fn inspect_owned_public_tunnel() -> PublicTunnelHealth {
+    match managed_cli::owned_public_connector() {
+        Ok(Some(connector)) => probe_quick_tunnel(connector),
+        Ok(None) => snapshot(
+            "unavailable", None,
+            "Tauri 전용 공개 MCP가 실행 중이지 않습니다. 관리 화면에서 공개 MCP를 먼저 시작하세요.",
+        ),
+        Err(error) => snapshot(
+            "unavailable", None, &format!("Tauri 전용 인스턴스를 검증하지 못했습니다: {error}"),
+        ),
+    }
+}
+
+/// Separate from legacy default: no remote input, no legacy credentials,
+/// no arbitrary hostname probing. Returns HTTPS identity only, not OAuth.
+#[tauri::command]
+pub async fn inspect_owned_public_tunnel_health() -> Result<PublicTunnelHealth, String> {
+    tauri::async_runtime::spawn_blocking(inspect_owned_public_tunnel)
+        .await
+        .map_err(|_| "Tauri 전용 공개 연결 검사에 실패했습니다.".to_string())
 }
 
 #[tauri::command]
