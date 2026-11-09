@@ -197,6 +197,26 @@ registration or connector authorization state.
 
 The Management page can now operate an independently bundled, audited Node C2C instance on port 18797. This requires the complete Windows preview ZIP (including c2c-runtime/) and explicit one-time token preparation. The installed WinForms instance, port 7979 and token remain untouched. See [isolated CLI lifecycle notes](../docs/TAURI_OWNED_CLI_PREVIEW.md).
 
+## F5-D2 — explicitly owned Quick Tunnel (preview)
+
+The **Manage** panel can start the Tauri-owned instance in local-only mode,
+or start it *explicitly* with a Cloudflare Quick Tunnel. The public path uses
+only the official version-pinned, SHA-256-verified `cloudflared.exe` shipped
+beside the audited CLI, never an untrusted PATH executable. The runtime and
+Quick Tunnel are scoped to instance `tauri-preview-v1` on local port 18797;
+the installed WinForms `default:7979` remains untouched.
+
+The preview displays the recorded `https://*.trycloudflare.com/mcp` URL
+when the CLI reports a live tunnel, but **a recorded address is not proof
+of public HTTPS reachability or successful ChatGPT OAuth authorization**.
+The URL can change when Quick Tunnel restarts; update the ChatGPT connector
+if it does. The local-only server cannot be changed into a public server
+without explicitly stopping and starting it again. Process stop/restart
+continues to require strict CLI and runtime-record PID ownership validation.
+
+Do not share the Owner Token. Public health validation and actual ChatGPT
+authorization roundtrip will be verified in subsequent F5-D3.
+
 ## F5-C3 — projects are a catalog, not a startup selection
 
 In the preview **Manage** panel you can add an existing development folder
