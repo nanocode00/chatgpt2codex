@@ -562,6 +562,18 @@ fn status(root: &Payload) -> Result<ManagedResult, String> {
     Ok(result)
 }
 
+/// Read-only and instance-owned: never use the installed WinForms health
+/// probe for the Tauri public Quick Tunnel. No arbitrary WebView URL accepted.
+pub(crate) fn owned_public_connector() -> Result<Option<String>, String> {
+    let root = payload()?;
+    let result = status(&root)?;
+    if result.running && result.tunnel_running {
+        Ok(result.public_connector)
+    } else {
+        Ok(None)
+    }
+}
+
 fn operate(root: Payload, action: &str) -> Result<ManagedResult, String> {
     ensure_workspace(&root)?;
     let lock = MUTATION_LOCK.get_or_init(|| Mutex::new(()));

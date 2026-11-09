@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { CliLogComponent, CliLogPreview, ManagedResult, ManagedAction, CatalogInspection, PickedRepositoryFolder, PublicTunnelState } from "./runtime";
+import type { CliLogComponent, CliLogPreview, ManagedResult, ManagedAction, CatalogInspection, PickedRepositoryFolder, PublicTunnelState, PublicTunnelHealth } from "./runtime";
 import {
   ArrowRight, Cloud, Copy, Download, ExternalLink, FileText, FolderOpen,
   Globe2, HeartPulse, KeyRound, Monitor, Play, Power, RefreshCcw,
@@ -50,7 +50,8 @@ function LockedField({ placeholder = "CLI 설정을 연결한 후 표시됩니�
 }
 
 export function ManagementControls({ onConnections, onSettings, onExit, exitError, onHide, trayError,
-  owned, ownedBusy, ownedError, ownedToken, ownedUrlNotice, onCopyOwnedConnector, onOwnedAction, onCopyToken,
+  owned, ownedBusy, ownedError, ownedToken, ownedUrlNotice, onCopyOwnedConnector,
+  ownedPublicHealth, ownedPublicChecking, onCheckOwnedPublicHealth, onOwnedAction, onCopyToken,
   catalog, catalogBusy, catalogError, onRefreshCatalog,
   pickedFolder, folderBusy, folderName, onFolderName, folderId, onFolderId, folderError, folderNotice,
   onBrowseFolder, onCancelFolder, onRegisterFolder,
@@ -62,6 +63,8 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
   owned: ManagedResult | null; ownedBusy: boolean; ownedError: string;
   ownedToken: string | null;
   ownedUrlNotice: string; onCopyOwnedConnector: () => void;
+  ownedPublicHealth: PublicTunnelHealth | null;
+  ownedPublicChecking: boolean; onCheckOwnedPublicHealth: () => void;
   onOwnedAction: (action: ManagedAction) => void;
   onCopyToken: () => void;
   catalog: CatalogInspection | null; catalogBusy: boolean; catalogError: string;
@@ -118,14 +121,26 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
         {ownedError && <p className="tunnel-warning" role="alert">{ownedError}</p>}
         {owned?.tunnelRunning && owned.publicConnector && <div className="legacy-register-preview">
           <strong>전용 Quick Tunnel 주소 — 외부 연결 미검증</strong>
-          <p className="legacy-footnote">이 주소는 Tauri 전용 CLI가 기록한 값입니다. 공개 HTTPS Health와 ChatGPT OAuth 연결 성공은 아직 증명되지 않았습니다. Quick Tunnel 주소는 서버 재시작 시 바뀔 수 있습니다.</p>
+          <p className="legacy-footnote">이 주소는 Tauri 전용 CLI가 기록한 값입니다. 아래 버튼으로 외부 HTTPS Health를 확인할 수 있지만, 성공해도 ChatGPT OAuth 승인은 별도로 필요합니다. Quick Tunnel 주소는 서버 재시작 시 바뀔 수 있습니다.</p>
           <FormRow label="ChatGPT용 전용 MCP URL">
             <input className="legacy-field" type="text" readOnly value={owned.publicConnector}
               aria-label="Tauri 전용 Quick Tunnel URL (미검증)" />
           </FormRow>
-          <button className="legacy-action available" type="button" onClick={onCopyOwnedConnector}>
-            <Copy size={16}/>전용 공개 URL 복사
-          </button>
+          <div className="legacy-actions">
+            <button className="legacy-action available" type="button" onClick={onCheckOwnedPublicHealth}
+              disabled={ownedPublicChecking}>
+              <RefreshCcw size={16}/>{ownedPublicChecking ? "외부 확인 중..." : "전용 공개 HTTPS 확인"}
+            </button>
+            <button className="legacy-action available" type="button" onClick={onCopyOwnedConnector}>
+              <Copy size={16}/>전용 공개 URL 복사
+            </button>
+          </div>
+          {ownedPublicHealth && <p className="legacy-footnote" role="status">
+            외부 HTTPS 상태: {ownedPublicHealth.endpoint === owned.publicConnector &&
+              ownedPublicHealth.state === "online" ? "C2C Health 확인됨" :
+              ownedPublicHealth.state === "offline" ? "오프라인" : "확인 불가"}
+            {" · "}{ownedPublicHealth.details}
+          </p>}
           {ownedUrlNotice && <p className="legacy-footnote" role="status">{ownedUrlNotice}</p>}
         </div>}
         {owned?.tunnelCapable && !owned.tunnelRunning && <p className="legacy-footnote">전용 Cloudflare 실행 파일이 검증됐습니다. 공개 연결 시작은 명시적으로 클릭해야 하며, 기존 7979 서버와 터널은 그대로 유지됩니다.</p>}

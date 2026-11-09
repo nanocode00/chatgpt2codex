@@ -197,6 +197,21 @@ registration or connector authorization state.
 
 The Management page can now operate an independently bundled, audited Node C2C instance on port 18797. This requires the complete Windows preview ZIP (including c2c-runtime/) and explicit one-time token preparation. The installed WinForms instance, port 7979 and token remain untouched. See [isolated CLI lifecycle notes](../docs/TAURI_OWNED_CLI_PREVIEW.md).
 
+## F5-D3 — external public HTTPS identity (not OAuth)
+
+On the **Manage** screen, after starting the *owned* Quick Tunnel, click
+**전용 공개 HTTPS 확인**. The Rust host reads only the hash-verified owned
+instance record and exact `https://*.trycloudflare.com/mcp` URL, then
+requests `/healthz` over HTTPS without redirects, credentials or arbitrary
+caller-provided hosts. Only HTTP 200 and the expected C2C service identity
+mean that the external Health check passed.
+
+A positive result is **not** an OAuth/session/ChatGPT tool-call proof. Copy the
+owned connector URL into the ChatGPT connector setup, approve with this
+preview's **separate** Owner Token, and perform an actual MCP tool call as
+a manual acceptance check. If the Quick Tunnel URL rotates, update the
+connector endpoint. The installed WinForms/default connector is untouched.
+
 ## F5-D2 — explicitly owned Quick Tunnel (preview)
 
 The **Manage** panel can start the Tauri-owned instance in local-only mode,
