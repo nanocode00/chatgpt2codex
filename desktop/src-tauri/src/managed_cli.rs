@@ -532,6 +532,18 @@ fn port_occupied() -> bool {
     ).is_ok()
 }
 
+
+// The credential store retains only a hash; the old token cannot be copied.
+// Rotation is allowed only with no Tauri-owned runtime record or live port,
+// because the CLI also clears previously issued OAuth clients/tokens.
+fn rotation_preflight(record_exists: bool, port_busy: bool) -> Result<(), &'static str> {
+    if record_exists || port_busy {
+        Err("Owner Token 재발급 전 Tauri 전용 MCP를 정상 중지하세요. 실행 중이거나 인스턴스 기록이 남아 있습니다.")
+    } else {
+        Ok(())
+    }
+}
+
 fn status(root: &Payload) -> Result<ManagedResult, String> {
     ensure_workspace(root)?;
     let ready = owner_configured(root)?;
@@ -589,6 +601,28 @@ fn operate(root: Payload, action: &str) -> Result<ManagedResult, String> {
                 .ok_or("CLI가 새 토큰을 반환하지 않았습니다.")?;
             let mut value = response(true, true, false,
                 "전용 Owner Token을 생성했습니다. 한 번만 보여주므로 안전하게 보관하세요.");
+            value.one_time_owner_token = Some(token.to_string());
+            value.tunnel_capable = root.cloudflared.is_some();
+            Ok(value)
+        }
+        "rotate-token" => {
+            if !owner_configured(&root)? {
+                return Err("기존 Owner Token이 없습니다. 전용 인스턴스 준비를 사용하세요.".into());
+            }
+            rotation_preflight(record_if_any(&root)?.is_some(), port_occupied())?;
+            // Only the isolated preview HOME. The CLI never returns the
+            // previous token; --rotate stores the new hash and invalidates
+            // previously approved OAuth clients. No process is restarted.
+            let result = cli_command(&root, &["owner-token", "--rotate"], Duration::from_secs(15))?;
+            let token = result["ownerToken"].as_str()
+                .filter(|token| token.len() >= 20 && token.bytes().all(|b|
+                    b.is_ascii_alphanumeric() || b == b'-' || b == b'_'))
+                .ok_or("재발급 응답에 새 토큰이 없어 복구할 수 없습니다. 재발급 상태를 확인하세요.")?;
+            if result["configured"] != true || result["rotated"] != true || !owner_configured(&root)? {
+                return Err("새 Owner Token 설정을 검증하지 못했습니다. 연결을 재설정하기 전에 상태를 확인하세요.".into());
+            }
+            let mut value = response(true, true, false,
+                "Tauri 전용 Owner Token을 재발급했습니다. 기존 OAuth 승인은 무효화됐으며 ChatGPT를 다시 연결해야 합니다.");
             value.one_time_owner_token = Some(token.to_string());
             value.tunnel_capable = root.cloudflared.is_some();
             Ok(value)
@@ -660,7 +694,7 @@ fn operate(root: Payload, action: &str) -> Result<ManagedResult, String> {
 
 #[tauri::command]
 pub async fn manage_owned_cli(action: String) -> Result<ManagedResult, String> {
-    if !matches!(action.as_str(), "status" | "prepare" | "start" | "start-public" | "stop" | "restart") {
+    if !matches!(action.as_str(), "status" | "prepare" | "rotate-token" | "start" | "start-public" | "stop" | "restart") {
         return Err("허용되지 않은 CLI 작업입니다.".into());
     }
     tauri::async_runtime::spawn_blocking(move || {
@@ -674,6 +708,14 @@ pub async fn manage_owned_cli(action: String) -> Result<ManagedResult, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn token_rotation_requires_a_fully_stopped_owned_instance() {
+        assert!(rotation_preflight(false, false).is_ok());
+        assert!(rotation_preflight(true, false).is_err());
+        assert!(rotation_preflight(false, true).is_err());
+        assert!(rotation_preflight(true, true).is_err());
+    }
 
     #[test]
     fn owned_quick_tunnel_requires_exact_origin_log_path_and_binary() {
