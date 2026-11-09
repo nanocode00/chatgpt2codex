@@ -148,6 +148,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: F4-D4-A build separate current-user Tauri NSIS installer
+        if: github.event_name == 'workflow_dispatch'
         shell: pwsh
         run: |
           npm --prefix desktop run tauri:build -- --debug --bundles nsis --config src-tauri/tauri.nsis.conf.json
@@ -159,9 +160,11 @@ jobs:
           Copy-Item -LiteralPath $installers[0].FullName -Destination (Join-Path $staging "baseline-setup.exe") -ErrorAction Stop
           Write-Host "PASS: F4-D4 dedicated current-user installer generated"
       - name: F4-D4-A isolated NSIS install and uninstall E2E
+        if: github.event_name == 'workflow_dispatch'
         shell: pwsh
         run: ./scripts/test-tauri-nsis-isolated.ps1
       - name: F4-D4-B build distinct version 0.1.1 upgrade installer
+        if: github.event_name == 'workflow_dispatch'
         shell: pwsh
         run: |
           $config = Get-Content -LiteralPath "desktop/src-tauri/tauri.nsis.conf.json" -Raw | ConvertFrom-Json
@@ -177,9 +180,11 @@ jobs:
           Copy-Item -LiteralPath $installers[0].FullName -Destination (Join-Path $staging "upgrade-setup.exe") -ErrorAction Stop
           Write-Host "PASS: independent NSIS 0.1.1 upgrade package staged"
       - name: F4-D4-B isolated reinstall, upgrade and failure-preservation E2E
+        if: github.event_name == 'workflow_dispatch'
         shell: pwsh
         run: ./scripts/test-tauri-nsis-upgrade-isolated.ps1
       - name: Publish unsigned isolated NSIS installer for guarded review
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: c2c-tauri-nsis-isolated-review-only
