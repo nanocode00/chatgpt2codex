@@ -50,7 +50,7 @@ function LockedField({ placeholder = "CLI 설정을 연결한 후 표시됩니�
 }
 
 export function ManagementControls({ onConnections, onSettings, onExit, exitError, onHide, trayError,
-  owned, ownedBusy, ownedError, ownedToken, onOwnedAction, onCopyToken,
+  owned, ownedBusy, ownedError, ownedToken, ownedUrlNotice, onCopyOwnedConnector, onOwnedAction, onCopyToken,
   catalog, catalogBusy, catalogError, onRefreshCatalog,
   pickedFolder, folderBusy, folderName, onFolderName, folderId, onFolderId, folderError, folderNotice,
   onBrowseFolder, onCancelFolder, onRegisterFolder,
@@ -61,6 +61,7 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
   onHide: () => void; trayError: string;
   owned: ManagedResult | null; ownedBusy: boolean; ownedError: string;
   ownedToken: string | null;
+  ownedUrlNotice: string; onCopyOwnedConnector: () => void;
   onOwnedAction: (action: ManagedAction) => void;
   onCopyToken: () => void;
   catalog: CatalogInspection | null; catalogBusy: boolean; catalogError: string;
@@ -83,8 +84,8 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
       <div className="legacy-body">
         <p className="legacy-explanation"><ShieldCheck size={17}/>
           기존 WinForms v0.3.1 서버 (7979)는 그대로 유지합니다.
-          이 화면은 격리된 별도 인스턴스 (18797)와 자체 Owner Token만 사용하며,
-          Cloudflare 터널은 생성하지 않습니다.
+          이 화면은 격리된 별도 인스턴스 (18797)와 자체 Owner Token만 사용합니다.
+          공개 연결은 사용자가 별도로 시작한 경우에만 Tauri 전용 Quick Tunnel을 생성합니다.
         </p>
         <div className="legacy-owned-status" role="status">
           <strong>{owned?.available
@@ -103,6 +104,10 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
           <button className="legacy-action available" type="button" onClick={() => onOwnedAction("start")} disabled={ownedBusy || !owned?.ready || owned.running}>
             <Play size={17}/>MCP 시작
           </button>
+          <button className="legacy-action available" type="button" onClick={() => onOwnedAction("start-public")}
+            disabled={ownedBusy || !owned?.ready || owned?.running || !owned?.tunnelCapable}>
+            <Wifi size={17}/>공개 MCP 시작 (Quick Tunnel)
+          </button>
           <button className="legacy-action available" type="button" onClick={() => onOwnedAction("stop")} disabled={ownedBusy || !owned?.running}>
             <Square size={17}/>MCP 중지
           </button>
@@ -111,6 +116,19 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
           </button>
         </div>
         {ownedError && <p className="tunnel-warning" role="alert">{ownedError}</p>}
+        {owned?.tunnelRunning && owned.publicConnector && <div className="legacy-register-preview">
+          <strong>전용 Quick Tunnel 주소 — 외부 연결 미검증</strong>
+          <p className="legacy-footnote">이 주소는 Tauri 전용 CLI가 기록한 값입니다. 공개 HTTPS Health와 ChatGPT OAuth 연결 성공은 아직 증명되지 않았습니다. Quick Tunnel 주소는 서버 재시작 시 바뀔 수 있습니다.</p>
+          <FormRow label="ChatGPT용 전용 MCP URL">
+            <input className="legacy-field" type="text" readOnly value={owned.publicConnector}
+              aria-label="Tauri 전용 Quick Tunnel URL (미검증)" />
+          </FormRow>
+          <button className="legacy-action available" type="button" onClick={onCopyOwnedConnector}>
+            <Copy size={16}/>전용 공개 URL 복사
+          </button>
+          {ownedUrlNotice && <p className="legacy-footnote" role="status">{ownedUrlNotice}</p>}
+        </div>}
+        {owned?.tunnelCapable && !owned.tunnelRunning && <p className="legacy-footnote">전용 Cloudflare 실행 파일이 검증됐습니다. 공개 연결 시작은 명시적으로 클릭해야 하며, 기존 7979 서버와 터널은 그대로 유지됩니다.</p>}
         {ownedToken && <div className="legacy-token-notice" role="status">
           <strong>전용 Owner Token이 생성됐습니다 (최초 1회 표시)</strong>
           <p>기존 WinForms 토큰과 무관합니다. 화면에 내용을 그대로 표시하지 않으며,
