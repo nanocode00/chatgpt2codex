@@ -104,6 +104,10 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
           <button className="legacy-action available" type="button" onClick={() => onOwnedAction("prepare")} disabled={ownedBusy || !owned?.available || owned.ready}>
             <KeyRound size={16}/>전용 인스턴스 준비
           </button>
+          <button className="legacy-action available" type="button" onClick={() => onOwnedAction("rotate-token")}
+            disabled={ownedBusy || !owned?.available || !owned.ready || owned.running || !!ownedToken}>
+            <KeyRound size={16}/>전용 Owner Token 재발급
+          </button>
           <button className="legacy-action available" type="button" onClick={() => onOwnedAction("start")} disabled={ownedBusy || !owned?.ready || owned.running}>
             <Play size={17}/>MCP 시작
           </button>
@@ -144,10 +148,16 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
           {ownedUrlNotice && <p className="legacy-footnote" role="status">{ownedUrlNotice}</p>}
         </div>}
         {owned?.tunnelCapable && !owned.tunnelRunning && <p className="legacy-footnote">전용 Cloudflare 실행 파일이 검증됐습니다. 공개 연결 시작은 명시적으로 클릭해야 하며, 기존 7979 서버와 터널은 그대로 유지됩니다.</p>}
+        {owned?.ready && <p className="legacy-footnote">
+          Owner Token은 원문을 저장하지 않아 다시 조회할 수 없습니다.
+          분실했다면 전용 MCP를 중지한 후 재발급하세요.
+          재발급 시 Tauri 전용 OAuth 승인이 무효화되며 ChatGPT 재연결이 필요합니다.
+          기존 WinForms/7979의 인증정보는 변경하지 않습니다.
+        </p>}
         {ownedToken && <div className="legacy-token-notice" role="status">
-          <strong>전용 Owner Token이 생성됐습니다 (최초 1회 표시)</strong>
-          <p>기존 WinForms 토큰과 무관합니다. 화면에 내용을 그대로 표시하지 않으며,
-            복사하면 앱 내 임시 값은 즉시 지워집니다.</p>
+          <strong>전용 Owner Token이 발급됐습니다 (최초 1회만 복사 가능)</strong>
+          <p>이 토큰은 기존 WinForms 토큰과 무관합니다. 복사 후 앱의 임시 값은 즉시 지워집니다.
+            안전한 비밀번호 관리 프로그램에 저장하세요.</p>
           <button className="legacy-action available" type="button" onClick={onCopyToken}>
             <Copy size={16}/>새 토큰 복사 및 화면에서 지우기
           </button>
