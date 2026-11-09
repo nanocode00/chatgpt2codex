@@ -169,6 +169,12 @@ button:focus-visible,input:focus-visible{outline:2px solid #999;outline-offset:2
 .legacy-health-advanced .legacy-footnote{margin-top:10px}
 .legacy-health-advanced .legacy-actions{margin-top:10px}
 
+/* F5-C3: keep each owned repository entry and unregister control aligned. */
+.legacy-owned-projects{list-style:none;padding:0;margin:12px 0}
+.legacy-owned-projects li{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid #383838}
+.legacy-owned-projects li span{min-width:0;overflow-wrap:anywhere;flex:1}
+.legacy-owned-projects .legacy-action{flex-shrink:0}
+
 /* Native folder registration preview; no webview filesystem access. */
 .legacy-register-preview{margin-top:14px;border:1px solid #414141;background:#1b1b1b;border-radius:11px;padding:10px 17px 18px;min-width:0}
 .legacy-register-preview .legacy-footnote{margin:8px 0 12px}
