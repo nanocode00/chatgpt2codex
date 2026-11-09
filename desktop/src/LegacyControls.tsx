@@ -232,7 +232,7 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
             </ul>
           : <p className="legacy-footnote">등록된 전용 프로필이 없습니다.</p>)}
         <p className="legacy-footnote" role="status">{catalog?.details ?? "읽기 전용 목록 조회를 시작하지 않았습니다."}</p>
-        <p className="legacy-footnote">전용 프로젝트 선택은 등록된 항목에만 적용됩니다. 기존 WinForms 설정과 서버 7979 및 CLI 프로필 설정은 변경하지 않습니다.</p>
+        <p className="legacy-footnote">등록된 프로젝트는 ChatGPT가 projectId로 개별 지정해 사용합니다. 기존 WinForms 설정과 서버 7979 및 CLI 프로필 설정은 변경하지 않습니다.</p>
       </div>
     </section>
     <section className="panel page-panel legacy-spaced">
