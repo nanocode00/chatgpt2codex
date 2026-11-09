@@ -134,7 +134,6 @@ export interface CatalogInspection {
   available: boolean;
   projects: CatalogRepository[];
   profiles: CatalogProfile[];
-  selectedRepository: string | null;
   legacyProject: string | null;
   legacyProjectExists: boolean;
   details: string;
@@ -142,16 +141,10 @@ export interface CatalogInspection {
 /** Read-only. Lists use the isolated hash-verified preview CLI, not WinForms. */
 export async function inspectOwnedCatalog(): Promise<CatalogInspection> {
   if (!isNativeApp()) {
-    return { available: false, projects: [], profiles: [], selectedRepository: null, legacyProject: null,
+    return { available: false, projects: [], profiles: [], legacyProject: null,
       legacyProjectExists: false, details: "프로젝트/프로필 조회는 Windows Tauri 앱에서만 지원합니다." };
   }
   return invoke<CatalogInspection>("inspect_owned_catalog");
-}
-
-/** Canonical CLI `repository use --instance tauri-preview-v1`; never mutates WinForms. */
-export async function selectOwnedRepository(id: string): Promise<string | null> {
-  if (!isNativeApp()) throw new Error("Windows Tauri 앱에서만 프로젝트를 선택할 수 있습니다.");
-  return invoke<string | null>("select_owned_repository", { id });
 }
 
 /** Unregister an entry from the isolated Tauri CLI catalog only; never delete its directory. */
