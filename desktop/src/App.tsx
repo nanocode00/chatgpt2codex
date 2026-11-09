@@ -5,7 +5,7 @@ import {
   Settings2, ShieldCheck, TerminalSquare, Wifi, WifiOff
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { checkRuntime, inspectInstalledCli, inspectInstalledCliLogs, inspectPublicTunnel, manageOwnedCli, inspectOwnedCatalog, unregisterOwnedRepository, pickOwnedRepositoryFolder, registerOwnedPickedRepository, cancelOwnedPickedRepository, closePreviewWindow, hidePreviewWindow, openTrustedLink, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type CliInspection, type CliLogPreview, type CliLogComponent, type ManagedAction, type ManagedResult, type CatalogInspection, type PickedRepositoryFolder, type PublicTunnelHealth, type RuntimeHealth, type TrustedLink } from "./runtime";
+import { checkRuntime, inspectInstalledCli, inspectInstalledCliLogs, inspectPublicTunnel, manageOwnedCli, inspectOwnedPublicTunnelHealth, inspectOwnedCatalog, unregisterOwnedRepository, pickOwnedRepositoryFolder, registerOwnedPickedRepository, cancelOwnedPickedRepository, closePreviewWindow, hidePreviewWindow, openTrustedLink, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type CliInspection, type CliLogPreview, type CliLogComponent, type ManagedAction, type ManagedResult, type CatalogInspection, type PickedRepositoryFolder, type PublicTunnelHealth, type RuntimeHealth, type TrustedLink } from "./runtime";
 import { ManagementControls, LegacyConnectionControls, LegacyDiagnosticsControls, LegacySettingsControls } from "./LegacyControls";
 import { MigrationPreflight } from "./MigrationPreflight";
 import { inspectLegacyMigration, saveLegacySettingsSnapshot, inspectCredentialBackup, createCredentialBackup, rehearseCredentialRestore, type LegacyMigrationReport, type CredentialBackupReport, type RestoreRehearsalReport } from "./runtime";
@@ -67,6 +67,8 @@ function App() {
   const [ownedError, setOwnedError] = useState("");
   const [ownedToken, setOwnedToken] = useState<string | null>(null);
   const [ownedUrlNotice, setOwnedUrlNotice] = useState("");
+  const [ownedPublicHealth, setOwnedPublicHealth] = useState<PublicTunnelHealth | null>(null);
+  const [ownedPublicChecking, setOwnedPublicChecking] = useState(false);
   const [catalog, setCatalog] = useState<CatalogInspection | null>(null);
   const [catalogBusy, setCatalogBusy] = useState(false);
   const [catalogError, setCatalogError] = useState("");
@@ -160,6 +162,8 @@ function App() {
     setOwnedUrlNotice("");
     try {
       const next = await manageOwnedCli(action);
+      setOwnedPublicHealth(previous =>
+        previous?.endpoint && previous.endpoint === next.publicConnector ? previous : null);
       if (next.oneTimeOwnerToken) {
         setOwnedToken(next.oneTimeOwnerToken);
         setOwned({ ...next, oneTimeOwnerToken: undefined });
@@ -292,6 +296,20 @@ function App() {
       await refreshCatalog();
     } finally {
       setUnregisterBusy(false);
+    }
+  }
+
+  async function checkOwnedPublicHealth() {
+    if (ownedPublicChecking) return;
+    setOwnedPublicChecking(true);
+    setOwnedUrlNotice("");
+    try {
+      setOwnedPublicHealth(await inspectOwnedPublicTunnelHealth());
+    } catch (error) {
+      setOwnedPublicHealth({ state: "unavailable", endpoint: null,
+        details: nativeFailureMessage(error, "Tauri 전용 외부 연결 확인에 실패했습니다.") });
+    } finally {
+      setOwnedPublicChecking(false);
     }
   }
 
@@ -616,6 +634,8 @@ function App() {
             onHide={() => { void hideToTray(); }} trayError={trayError}
             owned={owned} ownedBusy={ownedBusy} ownedError={ownedError} ownedToken={ownedToken}
             ownedUrlNotice={ownedUrlNotice} onCopyOwnedConnector={() => { void copyOwnedConnector(); }}
+            ownedPublicHealth={ownedPublicHealth} ownedPublicChecking={ownedPublicChecking}
+            onCheckOwnedPublicHealth={() => { void checkOwnedPublicHealth(); }}
             catalog={catalog} catalogBusy={catalogBusy} catalogError={catalogError} onRefreshCatalog={() => { void refreshCatalog(); }}
             pickedFolder={pickedFolder} folderBusy={folderBusy} folderName={folderName} onFolderName={setFolderName}
             folderId={folderId} onFolderId={setFolderId} folderError={folderError} folderNotice={folderNotice}
