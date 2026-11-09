@@ -197,6 +197,25 @@ registration or connector authorization state.
 
 The Management page can now operate an independently bundled, audited Node C2C instance on port 18797. This requires the complete Windows preview ZIP (including c2c-runtime/) and explicit one-time token preparation. The installed WinForms instance, port 7979 and token remain untouched. See [isolated CLI lifecycle notes](../docs/TAURI_OWNED_CLI_PREVIEW.md).
 
+## Windows console flash and isolated Owner Token recovery
+
+The Tauri preview spawns its bundled Node MCP server and Cloudflare Quick
+Tunnel as background processes with hidden Windows console windows. If
+console windows still flash after upgrading the *complete* preview ZIP,
+record which button triggered them for process-specific investigation.
+
+The Tauri **Manage** screen shows a one-time **Copy new Owner Token** button
+when a new token is created. C2C stores only its SHA-256 digest, so a
+forgotten token cannot be redisplayed. After **stopping the Tauri-owned
+MCP** and its Quick Tunnel, use **전용 Owner Token 재발급** and type
+`재발급` to confirm. The CLI's scoped `owner-token --rotate` command
+generates a new token in the isolated preview HOME and *revokes all
+previous OAuth approvals for this preview*. Copy the token once, store it
+securely, and reconnect ChatGPT. This never rotates or reveals the installed
+WinForms/default:7979 token. An active/stale Tauri instance record or
+occupied preview port blocks rotation; do not delete runtime records or
+kill unrelated processes to bypass this check.
+
 ## F5-D3 — external public HTTPS identity (not OAuth)
 
 On the **Manage** screen, after starting the *owned* Quick Tunnel, click

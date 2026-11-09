@@ -183,7 +183,7 @@ export async function inspectOwnedPublicTunnelHealth(): Promise<PublicTunnelHeal
   return invoke<PublicTunnelHealth>("inspect_owned_public_tunnel_health");
 }
 
-export type ManagedAction = "status" | "prepare" | "start" | "start-public" | "stop" | "restart";
+export type ManagedAction = "status" | "prepare" | "rotate-token" | "start" | "start-public" | "stop" | "restart";
 export interface ManagedResult {
   available: boolean;
   ready: boolean;
