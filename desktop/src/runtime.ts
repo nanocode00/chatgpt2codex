@@ -174,6 +174,15 @@ export async function cancelOwnedPickedRepository(serial: number): Promise<void>
   await invoke<void>("cancel_owned_picked_repository", { serial });
 }
 
+/** External HTTPS identity probe for the exact Tauri-owned Quick Tunnel.
+ * Never uses the installed WinForms/default connector or a WebView URL. */
+export async function inspectOwnedPublicTunnelHealth(): Promise<PublicTunnelHealth> {
+  if (!isNativeApp()) {
+    return { state: "unavailable", endpoint: null, details: "Windows Tauri 앱에서만 외부 연결을 검사합니다." };
+  }
+  return invoke<PublicTunnelHealth>("inspect_owned_public_tunnel_health");
+}
+
 export type ManagedAction = "status" | "prepare" | "start" | "start-public" | "stop" | "restart";
 export interface ManagedResult {
   available: boolean;
