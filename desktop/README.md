@@ -197,6 +197,29 @@ registration or connector authorization state.
 
 The Management page can now operate an independently bundled, audited Node C2C instance on port 18797. This requires the complete Windows preview ZIP (including c2c-runtime/) and explicit one-time token preparation. The installed WinForms instance, port 7979 and token remain untouched. See [isolated CLI lifecycle notes](../docs/TAURI_OWNED_CLI_PREVIEW.md).
 
+## F5-C3 — projects are a catalog, not a startup selection
+
+In the preview **Manage** panel you can add an existing development folder
+with the native Windows folder picker, or unregister any listed folder
+(after typing its exact project ID). **Unregister does not delete files** or
+the Git repository.
+
+The GUI no longer exposes the legacy `repository use` startup-project
+preference. The verified bundled CLI starts in Tauri's fixed isolated workspace
+and loads all registered repositories. ChatGPT operations name their own
+`projectId`; the CLI's per-session permissions/leases are unchanged.
+
+Existing preview installs from F5-C1 may have a saved startup repository.
+The next explicit stopped-instance unregister/start action clears that
+*preview-instance-only* preference and verifies the result. If a prior
+preview server still runs in its selected project, Tauri retains guarded
+recognition of its exact runtime record for safe shutdown; it does not
+take over `default:7979`. Catalog mutations are blocked while an owned
+runtime record is present or port 18797 is occupied.
+
+The higher-level project/lease redesign is deferred to
+[issue #82](https://github.com/nanocode00/chatgpt2codex/issues/82).
+
 ## WinForms migration preflight
 
 **Settings → WinForms → Tauri 전환 준비** is a native read-only inventory of legacy
