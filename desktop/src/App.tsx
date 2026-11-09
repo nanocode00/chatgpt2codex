@@ -157,6 +157,14 @@ function App() {
     if (action === "start-public" && !window.confirm(
       "Tauri 전용 MCP를 Cloudflare Quick Tunnel로 외부에 공개할까요?\\n\\n별도 18797 인스턴스만 사용하며 기존 WinForms/7979는 변경하지 않습니다. 공개 주소는 재시작 때 변경될 수 있고, 연결에는 인증 승인이 필요합니다."
     )) return;
+    if (action === "rotate-token") {
+      const confirmation = window.prompt(
+        "Tauri 전용 Owner Token을 새로 발급할까요?\\n\\n기존 Token을 복구할 수 없으며, 기존 OAuth 승인이 모두 무효화돼 ChatGPT를 다시 연결해야 합니다.\\n\\n전용 MCP를 중지한 상태에서만 가능합니다. 진행하려면 '재발급'을 입력하세요."
+      );
+      if (confirmation !== "재발급") return;
+      setOwnedToken(null);
+      setOwnedPublicHealth(null);
+    }
     setOwnedBusy(true);
     setOwnedError("");
     setOwnedUrlNotice("");
