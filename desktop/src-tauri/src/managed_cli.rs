@@ -24,6 +24,7 @@ struct Manifest {
     node_sha256: String,
     instance: String,
     tunnel: String,
+    cloudflared_sha256: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -46,6 +47,9 @@ struct Payload {
     cli: PathBuf,
     home: PathBuf,
     workspace: PathBuf,
+    // A future F5-D operation will consume the *verified* owned executable,
+    // never a cloudflared found on PATH or inside the legacy installation.
+    cloudflared: Option<PathBuf>,
 }
 
 fn response(available: bool, ready: bool, running: bool, details: impl Into<String>) -> ManagedResult {
@@ -67,14 +71,17 @@ fn sha256_file(path: &Path) -> Result<String, String> {
     Ok(format!("{:x}", digest.finalize()))
 }
 
-fn verify_manifest(root: &Path) -> Result<(PathBuf, PathBuf), String> {
+fn verify_manifest(root: &Path) -> Result<(PathBuf, PathBuf, Option<PathBuf>), String> {
     let payload = root.join("c2c-runtime");
     let manifest_text = fs::read_to_string(payload.join("manifest.json"))
         .map_err(|_| "번들 CLI가 없습니다. 배포된 프리뷰 ZIP 전체를 압축 해제하세요.")?;
     let manifest: Manifest = serde_json::from_str(manifest_text.trim_start_matches('\u{feff}'))
         .map_err(|_| "번들 CLI 매니페스트를 읽을 수 없습니다.")?;
+    let quick_ready = manifest.tunnel == "quick-ready";
     if manifest.version != 1 || manifest.kind != MANIFEST_KIND ||
-        manifest.instance != INSTANCE || manifest.tunnel != "none" {
+        manifest.instance != INSTANCE ||
+        (manifest.tunnel != "none" && !quick_ready) ||
+        (!quick_ready && manifest.cloudflared_sha256.is_some()) {
         return Err("검증되지 않은 번들 CLI 매니페스트입니다.".into());
     }
     let node = payload.join("bin").join("node.exe");
@@ -90,7 +97,22 @@ fn verify_manifest(root: &Path) -> Result<(PathBuf, PathBuf), String> {
        sha256_file(&cli_real)? != manifest.cli_sha256 {
         return Err("번들 CLI 체크섬이 일치하지 않습니다. 프리뷰 ZIP을 다시 압축 해제하세요.".into());
     }
-    Ok((node_real, cli_real))
+    let cloudflared = if quick_ready {
+        let declared = manifest.cloudflared_sha256.as_deref()
+            .ok_or("Cloudflare 번들 해시가 누락됐습니다.")?;
+        if declared.len() != 64 || !declared.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err("Cloudflare 번들 해시가 유효하지 않습니다.".into());
+        }
+        let binary = fs::canonicalize(payload.join("bin").join("cloudflared.exe"))
+            .map_err(|_| "Cloudflare 번들 실행 파일이 없습니다.")?;
+        if !binary.starts_with(&payload_real) || sha256_file(&binary)? != declared {
+            return Err("Cloudflare 번들 파일 경로나 SHA-256이 일치하지 않습니다.".into());
+        }
+        Some(binary)
+    } else {
+        None // F5-C1/C2/C3 local-only artifacts remain readable.
+    };
+    Ok((node_real, cli_real, cloudflared))
 }
 
 fn payload_for(executable_dir: &Path, local_appdata: &Path) -> Result<Payload, String> {
@@ -102,11 +124,11 @@ fn payload_for(executable_dir: &Path, local_appdata: &Path) -> Result<Payload, S
     } else {
         executable_dir.join("resources")
     };
-    let (node, cli) = verify_manifest(&resource_root)?;
+    let (node, cli, cloudflared) = verify_manifest(&resource_root)?;
     let base = local_appdata.join("ChatGPTToCodex-Tauri-Preview");
     let home = base.join("isolated-home");
     let workspace = base.join("workspace");
-    Ok(Payload { node, cli, home, workspace })
+    Ok(Payload { node, cli, home, workspace, cloudflared })
 }
 
 fn payload() -> Result<Payload, String> {
@@ -599,6 +621,7 @@ mod tests {
             cli: PathBuf::from(r"C:\preview\c2c-runtime\dist\cli.js"),
             home: PathBuf::from(r"C:\Users\test\AppData\Local\ChatGPTToCodex-Tauri-Preview\isolated-home"),
             workspace: PathBuf::from(r"C:\Users\test\AppData\Local\ChatGPTToCodex-Tauri-Preview\workspace"),
+            cloudflared: None,
         };
         let other = serde_json::json!({
             "name":"default","port":7979,"host":"127.0.0.1",
@@ -620,6 +643,43 @@ mod tests {
         for id in ["", "../legacy", "..", "--instance", "Project", "a b", "한글", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"] {
             assert!(!valid_repository_id(id), "{id}");
         }
+    }
+
+    #[test]
+    fn verified_quick_tunnel_manifest_rejects_tamper_and_accepts_old_no_tunnel() {
+        let dir = std::env::temp_dir().join(format!("c2c-f5d1-manifest-{}", std::process::id()));
+        let bundle = dir.join("c2c-runtime");
+        let bin = bundle.join("bin");
+        let dist = bundle.join("dist");
+        fs::create_dir_all(&bin).unwrap();
+        fs::create_dir_all(&dist).unwrap();
+        let node = bin.join("node.exe");
+        let cli = dist.join("cli.js");
+        let tunnel = bin.join("cloudflared.exe");
+        fs::write(&node, b"test-node").unwrap();
+        fs::write(&cli, b"test-cli").unwrap();
+        fs::write(&tunnel, b"test-tunnel").unwrap();
+        let manifest_path = bundle.join("manifest.json");
+        let base = serde_json::json!({
+            "version": 1, "kind": MANIFEST_KIND,
+            "instance": INSTANCE, "tunnel": "quick-ready",
+            "nodeSha256": sha256_file(&node).unwrap(),
+            "cliSha256": sha256_file(&cli).unwrap(),
+            "cloudflaredSha256": sha256_file(&tunnel).unwrap()
+        });
+        fs::write(&manifest_path, base.to_string()).unwrap();
+        assert!(verify_manifest(&dir).unwrap().2.is_some());
+        fs::write(&tunnel, b"tampered").unwrap();
+        assert!(verify_manifest(&dir).is_err());
+        let mut broken = base.clone();
+        broken.as_object_mut().unwrap().remove("cloudflaredSha256");
+        fs::write(&manifest_path, broken.to_string()).unwrap();
+        assert!(verify_manifest(&dir).is_err());
+        let mut legacy = broken;
+        legacy["tunnel"] = serde_json::json!("none");
+        fs::write(&manifest_path, legacy.to_string()).unwrap();
+        assert!(verify_manifest(&dir).unwrap().2.is_none());
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
