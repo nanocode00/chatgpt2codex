@@ -41,12 +41,14 @@ import {
   runtimeProcessMatchesRecord,
   runtimeTunnelMatchesRecord,
   writeRuntimeInstance,
+  type RuntimeInstanceRecord,
 } from "./runtime/instances.js";
 import {
   reloadRunningRuntimeCatalogs,
   signalRuntimeCatalogReload,
   type RuntimeCatalogReloadSummary,
 } from "./runtime/live-reload.js";
+import { startWindowsReloadControl } from "./runtime/windows-reload.js";
 import {
   getRuntimeSecret,
   defaultRuntimeConfigDir,
@@ -437,6 +439,7 @@ async function cmdServeHttp(flags: Record<string, string | boolean>): Promise<vo
 
   let httpServer: ReturnType<ReturnType<typeof createHttpServer>["app"]["listen"]> | undefined;
   let closeHttpServer: () => void = () => undefined;
+  let stopWindowsReload: (() => Promise<void>) | undefined;
   let shuttingDown = false;
   const shutdown = (exitCode = 0) => {
     if (shuttingDown) return;
@@ -446,7 +449,10 @@ async function cmdServeHttp(flags: Record<string, string | boolean>): Promise<vo
     const finish = () => {
       if (finished) return;
       finished = true;
-      void removeRuntimeInstance(ctx.stateDir, instance).finally(() => process.exit(exitCode));
+      void (async () => {
+        await stopWindowsReload?.().catch(() => undefined);
+        await removeRuntimeInstance(ctx.stateDir, instance).catch(() => undefined);
+      })().finally(() => process.exit(exitCode));
     };
     if (httpServer) {
       httpServer.close(finish);
@@ -485,7 +491,7 @@ async function cmdServeHttp(flags: Record<string, string | boolean>): Promise<vo
     }
   });
 
-  await writeRuntimeInstance(ctx.stateDir, {
+  const runtimeRecord: RuntimeInstanceRecord = {
     version: 1,
     name: instance,
     pid: process.pid,
@@ -495,7 +501,19 @@ async function cmdServeHttp(flags: Record<string, string | boolean>): Promise<vo
     port,
     publicUrl,
     startedAt: Date.now(),
-  });
+  };
+  await writeRuntimeInstance(ctx.stateDir, runtimeRecord);
+  if (process.platform === "win32") {
+    try {
+      stopWindowsReload = await startWindowsReloadControl(
+        ctx.stateDir, runtimeRecord, () => reloadLiveRuntimeConfiguration(ctx),
+      );
+    } catch {
+      // A failed reload listener must not break an otherwise healthy MCP
+      // session. The CLI reload command will fail explicitly and safely.
+      console.error("chatgpt2codex: Windows live reload control is unavailable");
+    }
+  }
 
   await ctx.ledger.append({ type: "workspace.opened", workspaceRoot: ctx.workspaceRoot, transport: "http" });
 
@@ -1595,7 +1613,7 @@ async function cmdReload(flags: Record<string, string | boolean>): Promise<void>
   const instance = normalizeInstanceName(flags.instance);
   const record = await readRuntimeInstance(defaultStateDir(), instance);
   if (!record) throw new Error("instance is not running: " + instance);
-  await signalRuntimeCatalogReload(record);
+  await signalRuntimeCatalogReload(record, { stateDir: defaultStateDir() });
   console.log(JSON.stringify({
     reloaded: true,
     instance,
