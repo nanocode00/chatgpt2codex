@@ -8,7 +8,7 @@ import type { CatalogInspection, ManagedAction, ManagedResult, PublicTunnelHealt
 import { publicView, runtimeView, startAction } from "./dashboard-state";
 import "./dashboard.css";
 
-type Destination = "manage" | "cli" | "connections" | "diagnostics" | "settings";
+type Destination = "projects" | "manage" | "cli" | "connections" | "diagnostics" | "settings";
 interface DashboardProps {
   native: boolean;
   owned: ManagedResult | null;
@@ -162,7 +162,7 @@ export function Dashboard({
         <strong className="dash-summary-value">{hasProjects ? catalog.projects.length + "개" : "—"}</strong>
         <p>{catalogError || (catalogBusy ? "프로젝트 목록 확인 중..." :
           hasProjects ? "실제 작업 대상은 도구 호출 시 projectId로 지정합니다." : "전용 프로젝트 목록을 확인하지 못했습니다.")}</p>
-        <button type="button" className="dash-card-button" onClick={() => onNavigate("manage")}>
+        <button type="button" className="dash-card-button" onClick={() => onNavigate("projects")}>
           프로젝트 관리 <ArrowRight size={15}/>
         </button>
       </section>
@@ -193,7 +193,7 @@ export function Dashboard({
         <div className="dash-shortcuts">
           <button type="button" onClick={() => onNavigate("diagnostics")}><Activity size={16}/> 진단·로그 <ArrowRight size={14}/></button>
           <button type="button" onClick={() => onNavigate("settings")}><Settings2 size={16}/> 앱 설정 <ArrowRight size={14}/></button>
-          <button type="button" onClick={() => onNavigate("manage")}><FolderCode size={16}/> MCP·프로젝트 관리 <ArrowRight size={14}/></button>
+          <button type="button" onClick={() => onNavigate("projects")}><FolderCode size={16}/> 프로젝트 관리 <ArrowRight size={14}/></button>
         </div>
       </section>
     </div>
