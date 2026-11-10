@@ -139,6 +139,28 @@ fn plan(r: &CliParityRequest) -> Result<CommandPlan, String> {
             if !control.is_empty() { args.extend(["--control-services".into(), control]); }
             mutating = true;
         }
+        "profile-add-both" => {
+            // Both kinds must pass native validation before a single CLI write.
+            // The canonical profile add command validates Python and persists
+            // Python/Docker in one atomic managed-profiles file update.
+            let executable = field(&r.value, "Python 실행 파일 경로")?;
+            let path = Path::new(executable);
+            if !path.is_absolute() || !path.is_file()
+                || !path.file_name().is_some_and(|s| s.to_string_lossy().eq_ignore_ascii_case("python.exe")) {
+                return Err("실제로 존재하는 절대 경로의 python.exe 파일만 등록할 수 있습니다.".into());
+            }
+            let compose = compose_file(&r.compose_file)?;
+            let project = simple_identifier(&r.project_name, "프로젝트 이름")?;
+            let services = csv_identifiers(&r.services, "서비스", false)?;
+            let control = csv_identifiers(&r.control_services, "제어 서비스", true)?;
+            args.extend(["profile".into(), "add".into(), alias(&r.alias)?.into(),
+                "--python".into(), executable.into(),
+                "--compose-file".into(), compose.into(),
+                "--project-name".into(), project.into(),
+                "--services".into(), services]);
+            if !control.is_empty() { args.extend(["--control-services".into(), control]); }
+            mutating = true;
+        }
         "profile-remove-python" | "profile-remove-docker" | "profile-remove-all" => {
             args.extend(["profile".into(), "remove".into(), alias(&r.alias)?.into()]);
             match r.operation.as_str() {
@@ -351,6 +373,37 @@ mod tests {
         r.key = Some("tunnel".into());
         r.value = Some("evil".into());
         assert!(plan(&r).is_err());
+    }
+
+    #[test]
+    fn combined_python_docker_profile_is_one_audited_cli_invocation() {
+        let mut req = request("profile-add-both");
+        req.alias = Some("combined-dev".into());
+        req.compose_file = Some("compose.yaml".into());
+        req.project_name = Some("dev".into());
+        req.services = Some("api,db".into());
+        req.control_services = Some("api".into());
+        assert!(plan(&req).is_err()); // Python is mandatory for the combined operation.
+
+        let root = std::env::temp_dir().join(format!(
+            "c2c-profile-both-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock").as_nanos()
+        ));
+        std::fs::create_dir_all(&root).expect("create temporary folder");
+        let python = root.join("python.exe");
+        std::fs::write(&python, b"test executable placeholder").expect("create test path");
+        req.value = Some(python.to_string_lossy().into_owned());
+        let plan_value = plan(&req).expect("one audited combined CLI plan");
+        assert!(plan_value.mutating);
+        assert_eq!(plan_value.args[..3], ["profile", "add", "combined-dev"]);
+        for flag in ["--python", "--compose-file", "--project-name", "--services", "--control-services"] {
+            assert!(plan_value.args.contains(&flag.to_string()));
+        }
+        req.services = Some("api;rm".into());
+        assert!(plan(&req).is_err());
+        std::fs::remove_dir_all(&root).expect("clean temporary folder");
     }
 
     #[test]
