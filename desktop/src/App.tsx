@@ -8,6 +8,8 @@ import { checkRuntime, inspectInstalledCli, inspectInstalledCliLogs, inspectPubl
 import { ManagementControls, LegacyConnectionControls, LegacyDiagnosticsControls, LegacySettingsControls } from "./LegacyControls";
 import { CliParityPanel } from "./CliParityPanel";
 import { Dashboard } from "./Dashboard";
+import { Toast, type AppToast } from "./Toast";
+import { storedPublicPreference } from "./dashboard-state";
 import { parseUiPort, storedHealthPort, storedAutoRefresh } from "./ui-preferences";
 import { MigrationPreflight } from "./MigrationPreflight";
 import { inspectLegacyMigration, saveLegacySettingsSnapshot, inspectCredentialBackup, createCredentialBackup, rehearseCredentialRestore, type LegacyMigrationReport, type CredentialBackupReport, type RestoreRehearsalReport } from "./runtime";
@@ -32,6 +34,10 @@ function loadAutoRefresh(): boolean {
   try { return storedAutoRefresh(localStorage.getItem("c2c.desktop.autorefresh")); }
   catch { return true; }
 }
+function loadPublicPreference(): boolean {
+  try { return storedPublicPreference(localStorage.getItem("c2c.desktop.public-preferred")); }
+  catch { return false; }
+}
 function timeLabel(): string {
   return new Intl.DateTimeFormat("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date());
 }
@@ -51,6 +57,8 @@ function App() {
   const [port, setPort] = useState(loadPort);
   const [draftPort, setDraftPort] = useState(String(loadPort()));
   const [autoRefresh, setAutoRefresh] = useState(loadAutoRefresh);
+  const [publicPreferred, setPublicPreferred] = useState(loadPublicPreference);
+  const [toast, setToast] = useState<AppToast | null>(null);
   const [status, setStatus] = useState<RuntimeHealth | null>(null);
   const [checking, setChecking] = useState(false);
   const [cliChecking, setCliChecking] = useState(false);
@@ -105,6 +113,16 @@ function App() {
   const requestCounter = useRef(0);
   const tunnelBusy = useRef(false);
   const lastTunnel = useRef<PublicTunnelHealth | null>(null);
+  const publicProbeBusy = useRef(false);
+  const toastId = useRef(0);
+  const notify = useCallback((message: string, tone: "info" | "error" = "info") => {
+    setToast({ id: ++toastId.current, message, tone });
+  }, []);
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), 3600);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
 
   const runCheck = useCallback(async () => {
     const current = ++requestCounter.current;
@@ -181,12 +199,22 @@ function App() {
       } else {
         setOwned(next);
       }
+      if (action !== "status") {
+        const labels: Record<ManagedAction, string> = {
+          status: "상태 조회", prepare: "MCP 준비", "rotate-token": "토큰 재발급",
+          start: "MCP 시작", "start-public": "MCP 및 공개 연결 시작",
+          stop: "MCP 중지", restart: "MCP 재시작"
+        };
+        notify(labels[action] + " 완료");
+      }
     } catch (error) {
-      setOwnedError(nativeFailureMessage(error, "전용 CLI 작업에 실패했습니다."));
+      const message = nativeFailureMessage(error, "전용 CLI 작업에 실패했습니다.");
+      setOwnedError(message);
+      notify(message, "error");
     } finally {
       setOwnedBusy(false);
     }
-  }, []);
+  }, [notify]);
 
   const refreshCatalog = useCallback(async () => {
     setCatalogBusy(true);
@@ -310,17 +338,50 @@ function App() {
     }
   }
 
-  async function checkOwnedPublicHealth() {
-    if (ownedPublicChecking) return;
+  const checkOwnedPublicHealth = useCallback(async () => {
+    if (publicProbeBusy.current) return;
+    publicProbeBusy.current = true;
     setOwnedPublicChecking(true);
-    setOwnedUrlNotice("");
     try {
       setOwnedPublicHealth(await inspectOwnedPublicTunnelHealth());
     } catch (error) {
       setOwnedPublicHealth({ state: "unavailable", endpoint: null,
         details: nativeFailureMessage(error, "Tauri 전용 외부 연결 확인에 실패했습니다.") });
     } finally {
+      publicProbeBusy.current = false;
       setOwnedPublicChecking(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!native || !owned?.running || !owned.tunnelRunning || !owned.publicConnector) {
+      setOwnedPublicHealth(null);
+      return;
+    }
+    void checkOwnedPublicHealth();
+    const timer = window.setInterval(() => { void checkOwnedPublicHealth(); }, 30_000);
+    const onResume = () => { void checkOwnedPublicHealth(); };
+    window.addEventListener("focus", onResume);
+    window.addEventListener("online", onResume);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onResume);
+      window.removeEventListener("online", onResume);
+    };
+  }, [native, owned?.running, owned?.tunnelRunning, owned?.publicConnector, checkOwnedPublicHealth]);
+
+  function togglePublicPreference(enable: boolean) {
+    if (owned?.running) {
+      notify("실행 중 터널 변경에는 OAuth 주소 갱신이 필요합니다. 안전한 연결·해제 기능을 구현한 뒤 사용할 수 있습니다.", "error");
+      return; // Never claim a tunnel mode changed when the runtime did not change.
+    }
+    if (!native || !owned?.available || !owned.tunnelCapable || ownedBusy) return;
+    try {
+      localStorage.setItem("c2c.desktop.public-preferred", String(enable));
+      setPublicPreferred(enable);
+      notify(enable ? "외부 공개를 다음 MCP 시작에 적용하도록 저장했습니다." : "다음 MCP 시작은 로컬 전용으로 설정했습니다.");
+    } catch {
+      notify("외부 공개 설정을 저장하지 못했습니다. 변경사항은 적용되지 않았습니다.", "error");
     }
   }
 
@@ -328,9 +389,10 @@ function App() {
     if (!owned?.tunnelRunning || !owned.publicConnector) return;
     try {
       await navigator.clipboard.writeText(owned.publicConnector);
-      setOwnedUrlNotice("전용 Quick Tunnel 주소를 복사했습니다. 접속 및 OAuth 인증은 별도로 확인하세요.");
+      setOwnedUrlNotice("");
+      notify("공개 MCP 주소를 복사했습니다. 연결은 OAuth 인증 후 확인하세요.");
     } catch {
-      setOwnedUrlNotice("공개 주소를 복사하지 못했습니다. 텍스트 상자에서 직접 복사할 수 있습니다.");
+      notify("공개 주소를 복사하지 못했습니다. 직접 선택해 복사하세요.", "error");
     }
   }
 
@@ -626,14 +688,15 @@ function App() {
         {screen === "overview" && <Dashboard
           native={native}
           owned={owned} ownedBusy={ownedBusy} ownedError={ownedError}
-          ownedUrlNotice={ownedUrlNotice} ownedPublicHealth={ownedPublicHealth}
-          ownedPublicChecking={ownedPublicChecking}
+          ownedPublicHealth={ownedPublicHealth} ownedPublicChecking={ownedPublicChecking}
+          publicPreferred={publicPreferred}
           catalog={catalog} catalogBusy={catalogBusy} catalogError={catalogError}
           onRefreshOwned={() => { void runOwnedAction("status"); }}
           onRefreshCatalog={() => { void refreshCatalog(); }}
           onOwnedAction={action => { void runOwnedAction(action); }}
-          onCheckPublic={() => { void checkOwnedPublicHealth(); }}
+          onTogglePublic={togglePublicPreference}
           onCopyPublic={() => { void copyOwnedConnector(); }}
+          onNotify={notify}
           onNavigate={to => setScreen(to)}
         />}
 
@@ -731,6 +794,7 @@ function App() {
         </div>
         </div>
       </main>
+      <Toast toast={toast}/>
     </div>
   );
 }
