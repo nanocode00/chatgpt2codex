@@ -175,7 +175,7 @@ export function ProjectsScreen({
             placeholder="이름 또는 ID 검색" aria-label="프로젝트 이름 또는 ID 검색"/>
           {search && <button type="button" onClick={() => setSearch("")} aria-label="검색 지우기"><X size={14}/></button>}
         </div>
-        <div className="projects-entries">
+        <div className="projects-entries" role="region" aria-label="프로젝트 목록 스크롤 영역" tabIndex={0}>
           {catalogBusy && !catalog && <div className="projects-empty">목록을 확인하고 있습니다.</div>}
           {!catalogBusy && catalog?.available && entries.length === 0 && <div className="projects-empty">
             <FolderSearch2 size={28}/>
