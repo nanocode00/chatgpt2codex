@@ -38,6 +38,7 @@ export function ProfilesScreen({ catalog, catalogBusy, catalogError, onRefresh, 
   const native = isNativeApp();
   const [query, setQuery] = useState("");
   const [selectedAlias, setSelectedAlias] = useState<string | null>(null);
+  const [activeKind, setActiveKind] = useState<Kind>("python");
   const [detail, setDetail] = useState<ProfileDetails | null>(null);
   const [detailError, setDetailError] = useState("");
   const [detailBusy, setDetailBusy] = useState(false);
@@ -54,6 +55,7 @@ export function ProfilesScreen({ catalog, catalogBusy, catalogError, onRefresh, 
   const items = catalog?.available ? catalog.profiles : [];
   const filtered = useMemo(() => filterProfiles(items, query), [items, query]);
   const selected = filtered.find(p => p.alias === selectedAlias) ?? filtered[0] ?? null;
+  const visibleKind: Kind = selected?.python && selected?.docker ? activeKind : selected?.docker ? "docker" : "python";
   const countPython = items.filter(p => p.python).length;
   const countDocker = items.filter(p => p.docker).length;
   const busy = saving || testBusy || detailBusy || catalogBusy;
@@ -81,6 +83,7 @@ export function ProfilesScreen({ catalog, catalogBusy, catalogError, onRefresh, 
 
   function selectProfile(item: CatalogProfile) {
     setSelectedAlias(item.alias);
+    setActiveKind(item.python ? "python" : "docker");
     setEditorKind(null);
     setRemoveAll(false); setRemoveTyped("");
     setResult(null); setOperationError("");
@@ -130,7 +133,7 @@ export function ProfilesScreen({ catalog, catalogBusy, catalogError, onRefresh, 
           : { composeFile: values.composeFile, projectName: values.projectName,
               services: values.services, controlServices: values.controlServices })
       });
-      setQuery(""); setSelectedAlias(alias); setEditorKind(null); setRevision(v => v + 1);
+      setQuery(""); setSelectedAlias(alias); setActiveKind(editorKind); setEditorKind(null); setRevision(v => v + 1);
       onNotify((editorKind === "python" ? "Python" : "Docker") + " 프로필 설정을 저장했습니다.");
       await onRefresh();
     } catch (error) {
@@ -315,42 +318,62 @@ export function ProfilesScreen({ catalog, catalogBusy, catalogError, onRefresh, 
           </div>
           {detailBusy && <p className="profiles-hint profiles-loading"><LoaderCircle size={14} className="profiles-spinning"/> 등록 정보를 확인하는 중입니다.</p>}
           {detailError && <div className="profiles-error" role="alert"><AlertCircle size={15}/>{detailError}</div>}
-          <div className="profiles-settings-grid">
-            <div className="profiles-kind-panel">
-              <div className="profiles-kind-title"><Code2 size={17}/><strong>Python</strong>
-                <span>{selected.python ? "등록됨" : "미등록"}</span></div>
-              {selected.python ? <>
-                <p className="profiles-field-label">실행 파일</p>
-                <code className="profiles-path">{detail?.python ?? (detailBusy ? "조회 중..." : "상세 확인 필요")}</code>
+          {selected.python && selected.docker && <div className="profiles-detail-switch" role="group" aria-label="상세 실행 환경 선택">
+            <button type="button" aria-pressed={visibleKind === "python"} className={visibleKind === "python" ? "active" : ""}
+              onClick={() => setActiveKind("python")}><Code2 size={15}/> Python</button>
+            <button type="button" aria-pressed={visibleKind === "docker"} className={visibleKind === "docker" ? "active" : ""}
+              onClick={() => setActiveKind("docker")}><Box size={15}/> Docker</button>
+          </div>}
+
+          <div className="profiles-main-runtime">
+            <div className="profiles-kind-panel profiles-kind-focused">
+              {visibleKind === "python" ? <>
+                <div className="profiles-kind-title">
+                  <Code2 size={18}/><strong>Python 실행 환경</strong><span>등록됨</span>
+                </div>
+                <div className="profiles-detail-field">
+                  <p className="profiles-field-label">Python 실행 파일</p>
+                  <code className="profiles-path">{detail?.python ?? (detailBusy ? "조회 중..." : "상세 확인 필요")}</code>
+                </div>
+                <p className="profiles-kind-description">설정 검사는 등록된 Python 실행 파일의 가용성과 버전을 확인합니다.</p>
                 <div className="profiles-card-actions">
                   <button type="button" className="profiles-button secondary" disabled={!available || busy || !detail}
-                    onClick={() => beginEditor("python", true)}>설정 / 교체</button>
+                    onClick={() => beginEditor("python", true)}>Python 설정 / 교체</button>
                   <button type="button" className="profiles-button danger" disabled={!available || busy}
-                    onClick={() => { void remove("python"); }}><Trash2 size={14}/> 제거</button>
+                    onClick={() => { void remove("python"); }}><Trash2 size={14}/> Python 제거</button>
                 </div>
-              </> : <button type="button" className="profiles-button secondary profiles-full" disabled={!available || busy}
-                onClick={() => beginEditor("python", true)}><Plus size={15}/> Python 추가</button>}
-            </div>
-            <div className="profiles-kind-panel">
-              <div className="profiles-kind-title"><Box size={17}/><strong>Docker</strong>
-                <span>{selected.docker ? "등록됨" : "미등록"}</span></div>
-              {selected.docker ? <>
-                <p className="profiles-field-label">Compose 파일</p>
-                <code className="profiles-path">{detail?.docker?.composeFile ?? (detailBusy ? "조회 중..." : "상세 확인 필요")}</code>
-                {detail?.docker && <p className="profiles-inline">
-                  프로젝트: <strong>{detail.docker.projectName}</strong><span> · </span>
-                  서비스: <strong>{detail.docker.services.join(", ") || "없음"}</strong>
-                </p>}
+              </> : <>
+                <div className="profiles-kind-title">
+                  <Box size={18}/><strong>Docker Compose 실행 환경</strong><span>등록됨</span>
+                </div>
+                <div className="profiles-detail-field">
+                  <p className="profiles-field-label">Compose 파일</p>
+                  <code className="profiles-path">{detail?.docker?.composeFile ?? (detailBusy ? "조회 중..." : "상세 확인 필요")}</code>
+                </div>
+                <div className="profiles-docker-fields">
+                  <div><span>Compose 프로젝트</span><strong>{detail?.docker?.projectName ?? "정보 없음"}</strong></div>
+                  <div><span>서비스</span><strong>{detail?.docker?.services.join(", ") || "정보 없음"}</strong></div>
+                  <div><span>제어 서비스</span><strong>{detail?.docker?.controlServices.join(", ") || "지정되지 않음"}</strong></div>
+                </div>
+                <p className="profiles-kind-description">설정 검사는 등록된 값만 확인합니다. Docker 데몬 연결이나 컨테이너 실행 여부를 검사하지 않습니다.</p>
                 <div className="profiles-card-actions">
                   <button type="button" className="profiles-button secondary" disabled={!available || busy || !detail}
-                    onClick={() => beginEditor("docker", true)}>설정 / 교체</button>
+                    onClick={() => beginEditor("docker", true)}>Docker 설정 / 교체</button>
                   <button type="button" className="profiles-button danger" disabled={!available || busy}
-                    onClick={() => { void remove("docker"); }}><Trash2 size={14}/> 제거</button>
+                    onClick={() => { void remove("docker"); }}><Trash2 size={14}/> Docker 제거</button>
                 </div>
-              </> : <button type="button" className="profiles-button secondary profiles-full" disabled={!available || busy}
-                onClick={() => beginEditor("docker", true)}><Plus size={15}/> Docker 추가</button>}
+              </>}
             </div>
           </div>
+          {selected.python !== selected.docker && <div className="profiles-secondary-kind">
+            <div><strong>{selected.python ? "Docker" : "Python"}도 같은 별칭에 추가할 수 있어요.</strong>
+              <p>현재 프로필 설정을 유지하면서 다른 실행 환경을 추가합니다.</p>
+            </div>
+            <button type="button" className="profiles-button secondary" disabled={!available || busy}
+              onClick={() => beginEditor(selected.python ? "docker" : "python", true)}>
+              <Plus size={15}/> {selected.python ? "Docker 추가" : "Python 추가"}
+            </button>
+          </div>}
 
           {result && <div className="profiles-test-result" role="status">
             <div><CheckCircle2 size={16}/><strong>CLI 검사 결과</strong></div>
