@@ -16,6 +16,7 @@ const MAX_FIELD: usize = 512;
 pub struct CliParityRequest {
     operation: String,
     alias: Option<String>,
+    target: Option<String>,
     value: Option<String>,
     key: Option<String>,
     compose_file: Option<String>,
@@ -92,6 +93,16 @@ fn csv_identifiers(value: &Option<String>, name: &str, optional: bool) -> Result
         return Err(format!("{name}은 쉼표로 구분한 서비스 이름 1~16개여야 합니다."));
     }
     Ok(parts.join(","))
+}
+
+fn target<'a>(value: &'a Option<String>) -> Result<&'a str, String> {
+    let v = field(value, "조회 대상 ID")?;
+    if v.len() > 128 || !v.bytes().all(|b|
+        b.is_ascii_alphanumeric() || b"._:-".contains(&b)
+    ) || v.starts_with('-') || v.contains("..") {
+        return Err("조회 대상 ID에는 영문·숫자·._:-만 허용합니다 (1~128자).".into());
+    }
+    Ok(v)
 }
 
 fn plan(r: &CliParityRequest) -> Result<CommandPlan, String> {
@@ -175,6 +186,25 @@ fn plan(r: &CliParityRequest) -> Result<CommandPlan, String> {
             args.extend([r.operation.clone(), "--instance".into(), INSTANCE.into()]);
             allow_nonzero = r.operation == "health"; // CLI returns JSON + exit 1 when offline
         }
+        "repository-show" => {
+            args.extend(["repository".into(), "show".into(), target(&r.target)?.into()]);
+        }
+        "secret-list" => {
+            // Names only. No secret fetch/read command exists in the CLI.
+            args.extend(["secret".into(), "list".into()]);
+        }
+        "lock-list" => args.extend(["lock".into(), "list".into()]),
+        "job-list" => args.extend(["job".into(), "list".into()]),
+        "job-status" | "job-logs" => {
+            args.extend(["job".into(),
+                if r.operation == "job-status" { "status" } else { "logs" }.into(),
+                target(&r.target)?.into()]);
+            if r.operation == "job-logs" {
+                args.extend(["--limit".into(), "10".into()]);
+            }
+        }
+        "control-list" => args.extend(["control".into(), "list".into()]),
+        "control-auto-status" => args.extend(["control".into(), "auto".into(), "status".into()]),
         "doctor" => {
             args.extend(["doctor".into(), "--workspace".into(), ".".into()]);
             text = true;
@@ -185,7 +215,7 @@ fn plan(r: &CliParityRequest) -> Result<CommandPlan, String> {
                 "--lines".into(), "80".into()]);
             text = true;
         }
-        _ => return Err("허용되지 않은 CLI 명령입니다. 임의 명령, secret/job/lock/control은 UI에서 실행하지 않습니다.".into()),
+        _ => return Err("허용되지 않은 CLI 명령입니다. secret/job/lock/control 변경 명령은 여기서 실행하지 않습니다.".into()),
     }
     Ok(CommandPlan { args, mutating, require_record, text, allow_nonzero })
 }
@@ -208,6 +238,35 @@ fn redacted_text(raw: &str) -> String {
     clean.chars().rev().take(16_384).collect::<String>().chars().rev().collect()
 }
 
+// Keep structured CLI metadata bounded when showing it in the local WebView.
+// Some job/control records may carry user-provided text in nested fields.
+fn redact_json(value: Value, depth: usize) -> Value {
+    if depth > 12 { return Value::String("[중첩 깊이 제한]".into()); }
+    match value {
+        Value::Object(map) => Value::Object(map.into_iter().map(|(key, child)| {
+            let lowered = key.to_ascii_lowercase();
+            let redact = ["authorization", "password", "bearer", "api_key",
+                "client_secret", "private_key", "accesstoken", "access_token",
+                "ownertoken", "owner_token", "tunnel_token"]
+                .iter().any(|part| lowered.contains(part));
+            (key, if redact { Value::String("[민감 값 숨김]".into()) }
+                else { redact_json(child, depth + 1) })
+        }).collect()),
+        Value::Array(values) => Value::Array(values.into_iter().take(128)
+            .map(|v| redact_json(v, depth + 1)).collect()),
+        Value::String(text) => {
+            let lowered = text.to_ascii_lowercase();
+            if ["bearer ", "owner_token=", "authorization:", "client_secret="]
+                .iter().any(|needle| lowered.contains(needle)) {
+                Value::String("[민감 값 숨김]".into())
+            } else {
+                Value::String(text.chars().take(2048).collect())
+            }
+        }
+        other => other,
+    }
+}
+
 fn execute(request: CliParityRequest) -> Result<CliParityResponse, String> {
     let p = plan(&request)?;
     let raw = managed_cli::parity_cli(&p.args, p.mutating, p.require_record, p.text, p.allow_nonzero)?;
@@ -216,7 +275,7 @@ fn execute(request: CliParityRequest) -> Result<CliParityResponse, String> {
     } else {
         let value: Value = serde_json::from_str(&raw)
             .map_err(|_| "전용 CLI가 유효한 JSON을 반환하지 않았습니다.".to_string())?;
-        (Some(value), None)
+        (Some(redact_json(value, 0)), None)
     };
     let args_preview = p.args.iter().map(|a| {
         if a.contains('\\') || a.contains('/') || a.len() > 80 { "[경로/긴 값]".to_string() }
@@ -240,7 +299,7 @@ mod tests {
 
     fn request(operation: &str) -> CliParityRequest {
         CliParityRequest {
-            operation: operation.into(), alias: None, value: None, key: None,
+            operation: operation.into(), alias: None, target: None, value: None, key: None,
             compose_file: None, project_name: None, services: None, control_services: None,
         }
     }
@@ -255,6 +314,21 @@ mod tests {
         assert!(plan(&request("secret-set")).is_err());
         assert!(plan(&request("serve")).is_err());
         assert!(plan(&request("profile-import-env")).is_err());
+        for operation in ["secret-list", "lock-list", "job-list",
+                          "control-list", "control-auto-status"] {
+            let p = plan(&request(operation)).unwrap();
+            assert!(!p.mutating && !p.require_record);
+        }
+        for operation in ["secret-set", "job-cancel", "lock-release",
+                          "control-approve", "control-kill"] {
+            assert!(plan(&request(operation)).is_err());
+        }
+        let mut job = request("job-status");
+        assert!(plan(&job).is_err());
+        job.target = Some("job-abc_123".into());
+        assert_eq!(plan(&job).unwrap().args[2], "job-abc_123");
+        job.target = Some("../path".into());
+        assert!(plan(&job).is_err());
         assert!(plan(&request("config-import")).is_err());
         let p = plan(&request("reload")).unwrap();
         assert!(p.mutating && p.require_record && p.args.contains(&INSTANCE.to_string()));
@@ -295,6 +369,21 @@ mod tests {
         r.services = Some("api".into());
         r.alias = Some("--help".into());
         assert!(plan(&r).is_err());
+    }
+
+    #[test]
+    fn read_only_json_hides_secret_bearing_metadata() {
+        let parsed = serde_json::json!({
+            "name": "task",
+            "access_token": "private",
+            "metadata": { "ownerToken": "really-private" },
+            "records": [{"message":"Bearer secret-value"}]
+        });
+        let output = redact_json(parsed, 0).to_string();
+        assert!(!output.contains("really-private"));
+        assert!(!output.contains("secret-value"));
+        assert!(!output.contains("private"));
+        assert!(output.contains("task"));
     }
 
     #[test]
