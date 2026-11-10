@@ -49,8 +49,57 @@ describe("runtime catalog live reload", () => {
     })).rejects.toThrow("recorded pid could not be verified");
 
     await expect(signalRuntimeCatalogReload(target, {
+      platform: "darwin",
+    })).rejects.toThrow("requires Linux/WSL or Windows");
+  });
+
+  it("uses an acknowledged Windows reload control only after process ownership verification", async () => {
+    const target = record("alpha", 111);
+    const signal = vi.fn();
+    const windowsRequest = vi.fn(async () => undefined);
+    await signalRuntimeCatalogReload(target, {
       platform: "win32",
-    })).rejects.toThrow("requires Linux/WSL");
+      stateDir: "/isolated-state",
+      processAlive: () => true,
+      processMatches: async () => true,
+      windowsRequest,
+      signal,
+    });
+    expect(windowsRequest).toHaveBeenCalledWith("/isolated-state", target);
+    expect(signal).not.toHaveBeenCalled();
+
+    const blocked = vi.fn();
+    await expect(signalRuntimeCatalogReload(target, {
+      platform: "win32", stateDir: "/isolated-state",
+      processAlive: () => true, processMatches: async () => false,
+      windowsRequest: blocked,
+    })).rejects.toThrow("recorded pid could not be verified");
+    expect(blocked).not.toHaveBeenCalled();
+
+    await expect(signalRuntimeCatalogReload(target, {
+      platform: "win32", processAlive: () => true,
+      processMatches: async () => true, windowsRequest: blocked,
+    })).rejects.toThrow("state directory");
+    expect(blocked).not.toHaveBeenCalled();
+  });
+
+  it("auto reloads verified Windows instances and reports a failed acknowledgement", async () => {
+    const a = record("alpha", 101);
+    const b = record("beta", 202);
+    const windowsRequest = vi.fn(async (_stateDir: string, target: RuntimeInstanceRecord) => {
+      if (target.name === "beta") throw new Error("pipe unavailable");
+    });
+    const result = await reloadRunningRuntimeCatalogs("/isolated-state", {
+      platform: "win32", listInstances: async () => [a, b],
+      processAlive: () => true, processMatches: async () => true,
+      windowsRequest,
+    });
+    expect(result).toEqual({
+      supported: true, restartRequired: false,
+      reloaded: ["alpha"], notRunning: [],
+      failed: [{ instance: "beta", pid: 202, error: "pipe unavailable" }],
+    });
+    expect(windowsRequest).toHaveBeenCalledTimes(2);
   });
 
   it("reloads every verified running instance and skips stale records", async () => {
