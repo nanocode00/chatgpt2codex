@@ -113,7 +113,7 @@ export function CliParityPanel() {
           <div className="legacy-form-row"><label className="legacy-form-label" htmlFor="cli-python-path">
             <strong>Python 경로</strong><span>이미 설치된 python.exe 절대 경로</span></label>
             <div className="legacy-form-control"><input id="cli-python-path" className="legacy-field" value={pythonPath}
-              onChange={e => setPythonPath(e.target.value)} placeholder="C:\Python311\python.exe" maxLength={512}/></div></div>
+              onChange={e => setPythonPath(e.target.value)} placeholder="C:\\Python311\\python.exe" maxLength={512}/></div></div>
           <div className="legacy-actions">
             <button type="button" disabled={!native || busy || !alias || !pythonPath} className="legacy-action available"
               onClick={() => run("profile-add-python", { ...profileArgs, value: pythonPath.trim() }, profileConfirm("profile add --python"))}>
