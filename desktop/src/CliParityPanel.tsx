@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { RefreshCcw, TerminalSquare, Settings2, Activity, Layers, Play, Trash2, CircleAlert } from "lucide-react";
 import { isNativeApp, runOwnedCliParity, type OwnedCliParityRequest, type OwnedCliParityOperation, type OwnedCliParityResponse } from "./runtime";
+import { parseJobList, type JobListItem } from "./job-list";
 
 type Profile = { alias: string; python: boolean; docker: boolean };
 type Group = "profiles" | "config" | "operations" | "advanced";
@@ -30,8 +31,12 @@ function missingInput(request: OwnedCliParityRequest): string | null {
     if (!request.projectName?.trim()) return "Docker Compose 프로젝트 이름을 입력하세요.";
     if (!request.services?.trim()) return "Docker 서비스 이름을 하나 이상 입력하세요.";
   }
-  if (["repository-show", "job-status", "job-logs"].includes(operation) && !request.target?.trim()) {
-    return "조회할 프로젝트 또는 작업 ID를 입력하세요.";
+  if (operation === "repository-show" && !request.target?.trim()) {
+    return "조회할 프로젝트 ID를 입력하세요.";
+  }
+  if ((operation === "job-status" || operation === "job-logs") &&
+      !/^loop-[A-Za-z0-9.-]+$/.test(request.target?.trim() ?? "")) {
+    return "유효한 작업 ID(loop-...)가 필요합니다. 먼저 job list에서 작업을 확인하세요. 프로젝트 ID로는 조회할 수 없습니다.";
   }
   return null;
 }
@@ -57,6 +62,7 @@ export function CliParityPanel() {
   const [services, setServices] = useState("");
   const [controlServices, setControlServices] = useState("");
   const [target, setTarget] = useState("");
+  const [jobs, setJobs] = useState<JobListItem[] | null>(null);
   const [configKey, setConfigKey] = useState("port");
   const [configValue, setConfigValue] = useState("18797");
 
@@ -84,6 +90,7 @@ export function CliParityPanel() {
     try {
       const reply = await runOwnedCliParity(request);
       setResult(reply);
+      if (reply.operation === "job-list") setJobs(parseJobList(reply.json));
       if (reply.operation === "profile-list") setProfiles(parseProfiles(reply));
       if (reply.operation.startsWith("profile-add-") || reply.operation.startsWith("profile-remove-")) {
         const updated = await runOwnedCliParity({ operation: "profile-list" });
@@ -241,11 +248,21 @@ export function CliParityPanel() {
             <button type="button" disabled={!native || busy} className="legacy-action available"
               onClick={() => run("control-auto-status")}><Activity size={15}/>control auto status</button>
           </div>
+          {jobs !== null && (jobs.length ? <div className="cli-parity-section">
+            <p className="legacy-footnote">조회할 작업을 선택하면 실제 Job ID가 입력됩니다. 프로젝트 ID와는 다릅니다.</p>
+            <ul className="cli-profile-list">{jobs.map(job => <li key={job.id}>
+              <button type="button" className="text-action" disabled={busy}
+                onClick={() => setTarget(job.id)}>{job.id}</button>
+              <small>{job.status}{job.projectId ? " · " + job.projectId : ""}</small>
+            </li>)}</ul>
+          </div> : <p className="legacy-footnote" role="status">
+            현재 프리뷰 인스턴스에 저장된 Job이 없습니다. 작업을 생성한 뒤 다시 조회하세요.
+          </p>)}
           <div className="legacy-form-row"><label className="legacy-form-label" htmlFor="cli-parity-target">
-            <strong>조회 대상 ID</strong><span>프로젝트 ID 또는 작업 ID · 영문·숫자·._:-만 사용</span></label>
+            <strong>조회 대상 ID</strong><span>repository show는 프로젝트 ID, job 명령은 실제 loop- 작업 ID</span></label>
             <div className="legacy-form-control"><input id="cli-parity-target" className="legacy-field"
               value={target} onChange={e => setTarget(e.target.value)} maxLength={128}
-              placeholder="예: my-project 또는 job-abc123"/></div>
+              placeholder="예: my-project 또는 loop-abc123"/></div>
           </div>
           <div className="legacy-actions">
             <button type="button" disabled={!native || busy} className="legacy-action available"
