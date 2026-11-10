@@ -5,6 +5,8 @@ on:
     paths:
       - "desktop/**"
       - "src/cli.ts"
+      - "src/workspace/registry.ts"
+      - "src/workspace/registry.test.ts"
       - "src/runtime/instances.ts"
       - "src/runtime/instances.test.ts"
       - "scripts/package-tauri-cli-preview.ps1"
