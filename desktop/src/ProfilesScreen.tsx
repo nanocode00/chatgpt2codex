@@ -5,7 +5,7 @@ import {
   Terminal, Trash2, X
 } from "lucide-react";
 import { isNativeApp, runOwnedCliParity, type CatalogInspection, type CatalogProfile, type OwnedCliParityOperation } from "./runtime";
-import { filterProfiles, parseProfileDetails, parseProfileTest, validateDraft,
+import { filterProfiles, parseProfileDetails, parseProfileTest, validateProfileSelection,
   type ProfileDetails, type ProfileTestResult } from "./profile-model";
 import "./profiles.css";
 
@@ -45,6 +45,8 @@ export function ProfilesScreen({ catalog, catalogBusy, catalogError, onRefresh, 
   const [result, setResult] = useState<ProfileTestResult | null>(null);
   const [testBusy, setTestBusy] = useState(false);
   const [editorKind, setEditorKind] = useState<Kind | null>(null);
+  const [includePython, setIncludePython] = useState(true);
+  const [includeDocker, setIncludeDocker] = useState(false);
   const [form, setForm] = useState<Form>(BLANK);
   const [saving, setSaving] = useState(false);
   const [operationError, setOperationError] = useState("");
@@ -93,6 +95,8 @@ export function ProfilesScreen({ catalog, catalogBusy, catalogError, onRefresh, 
     setRemoveAll(false); setRemoveTyped("");
     setOperationError("");
     setEditorKind(kind);
+    setIncludePython(kind === "python");
+    setIncludeDocker(kind === "docker");
     if (existing && selected) {
       setForm({
         alias: selected.alias,
@@ -117,24 +121,32 @@ export function ProfilesScreen({ catalog, catalogBusy, catalogError, onRefresh, 
     const alias = form.alias.trim();
     const values = { ...form, pythonPath: form.pythonPath.trim(), composeFile: form.composeFile.trim(),
       projectName: form.projectName.trim(), services: form.services.trim(), controlServices: form.controlServices.trim() };
-    const issue = validateDraft(editorKind, alias, values);
+    const issue = validateProfileSelection(alias, values, { python: includePython, docker: includeDocker });
     if (issue) { setOperationError(issue); return; }
     const exists = items.find(p => p.alias === alias);
-    const replaces = editorKind === "python" ? exists?.python === true : exists?.docker === true;
-    if (replaces && !window.confirm("프로필 '" + alias + "'의 " + (editorKind === "python" ? "Python" : "Docker") +
-      " 설정을 교체할까요? 기존 설정은 덮어씁니다.")) return;
+    const replacing = [
+      includePython && exists?.python ? "Python" : "",
+      includeDocker && exists?.docker ? "Docker" : ""
+    ].filter(Boolean);
+    if (replacing.length && !window.confirm("프로필 '" + alias + "'의 " + replacing.join("·") +
+      " 설정을 교체할까요? 선택하지 않은 실행 환경은 유지됩니다.")) return;
     setSaving(true); setOperationError("");
     try {
-      const operation: OwnedCliParityOperation = editorKind === "python" ? "profile-add-python" : "profile-add-docker";
+      const operation: OwnedCliParityOperation = includePython && includeDocker ? "profile-add-both" :
+        includePython ? "profile-add-python" : "profile-add-docker";
+      // A combined selection is one CLI invocation, not two partial writes.
       await runOwnedCliParity({
         operation, alias,
-        ...(editorKind === "python"
-          ? { value: values.pythonPath }
-          : { composeFile: values.composeFile, projectName: values.projectName,
-              services: values.services, controlServices: values.controlServices })
+        ...(includePython ? { value: values.pythonPath } : {}),
+        ...(includeDocker ? {
+          composeFile: values.composeFile, projectName: values.projectName,
+          services: values.services, controlServices: values.controlServices
+        } : {})
       });
-      setQuery(""); setSelectedAlias(alias); setActiveKind(editorKind); setEditorKind(null); setRevision(v => v + 1);
-      onNotify((editorKind === "python" ? "Python" : "Docker") + " 프로필 설정을 저장했습니다.");
+      setQuery(""); setSelectedAlias(alias); setActiveKind(includePython ? "python" : "docker");
+      setEditorKind(null); setRevision(v => v + 1);
+      onNotify((includePython && includeDocker ? "Python·Docker" : includePython ? "Python" : "Docker") +
+        " 프로필 설정을 저장했습니다.");
       await onRefresh();
     } catch (error) {
       const message = failure(error);
@@ -219,46 +231,55 @@ export function ProfilesScreen({ catalog, catalogBusy, catalogError, onRefresh, 
         <button type="button" className="profiles-icon-button" onClick={() => setEditorKind(null)}
           disabled={saving} aria-label="편집 닫기"><X size={17}/></button>
       </div>
-      <div className="profiles-tabs" role="group" aria-label="설정할 실행 환경 종류">
-        <button type="button" aria-pressed={editorKind === "python"} className={editorKind === "python" ? "active" : ""}
-          disabled={saving} onClick={() => setEditorKind("python")}><Code2 size={15}/> Python</button>
-        <button type="button" aria-pressed={editorKind === "docker"} className={editorKind === "docker" ? "active" : ""}
-          disabled={saving} onClick={() => setEditorKind("docker")}><Box size={15}/> Docker</button>
-      </div>
       <form className="profiles-form" onSubmit={event => { event.preventDefault(); void save(); }}>
         <label>프로필 별칭
           <input value={form.alias} disabled={saving} maxLength={64} spellCheck={false}
             onChange={event => setValue("alias", event.target.value)} placeholder="예: local-dev"/>
         </label>
-        <p className="profiles-hint">같은 별칭에 Python과 Docker를 각각 등록할 수 있으며, 한쪽을 교체해도 다른 쪽은 유지됩니다.</p>
-        {editorKind === "python" ? <>
-          <label>Python 실행 파일의 절대 경로
-            <input value={form.pythonPath} disabled={saving} maxLength={512} spellCheck={false}
-              onChange={event => setValue("pythonPath", event.target.value)}
-              placeholder={"C:\\Users\\me\\miniconda3\\envs\\dev\\python.exe"}/>
-          </label>
-          <p className="profiles-hint">현재 존재하는 python.exe를 지정합니다. 등록 시 CLI가 실제 실행 가능 여부를 확인합니다.</p>
-        </> : <>
-          <label>Docker Compose 파일 (상대 경로)
-            <input value={form.composeFile} disabled={saving} maxLength={512} spellCheck={false}
-              onChange={event => setValue("composeFile", event.target.value)} placeholder="compose.yaml"/>
-          </label>
-          <div className="profiles-form-grid">
-            <label>Compose 프로젝트 이름
-              <input value={form.projectName} disabled={saving} maxLength={80} spellCheck={false}
-                onChange={event => setValue("projectName", event.target.value)} placeholder="my-app"/>
+        <p className="profiles-hint">사용할 실행 환경을 하나 이상 선택하세요. Python과 Docker를 둘 다 선택하면 같은 별칭으로 한 번에 등록합니다. 선택하지 않은 기존 설정은 유지됩니다.</p>
+        <div className="profiles-form-kind-grid">
+          <section className={"profiles-form-kind " + (includePython ? "active" : "")}>
+            <label className="profiles-kind-toggle">
+              <input type="checkbox" checked={includePython} disabled={saving}
+                onChange={event => { setIncludePython(event.target.checked); setOperationError(""); }}/>
+              <span><strong><Code2 size={16}/> Python</strong><small>로컬 python.exe 실행 환경</small></span>
             </label>
-            <label>서비스 (쉼표 구분)
-              <input value={form.services} disabled={saving} maxLength={512} spellCheck={false}
-                onChange={event => setValue("services", event.target.value)} placeholder="api,db"/>
+            {includePython && <div className="profiles-kind-fields">
+              <label>Python 실행 파일의 절대 경로
+                <input value={form.pythonPath} disabled={saving} maxLength={512} spellCheck={false}
+                  onChange={event => setValue("pythonPath", event.target.value)}
+                  placeholder={"C:\\Users\\me\\miniconda3\\envs\\dev\\python.exe"}/>
+              </label>
+              <p className="profiles-hint">등록 시 CLI가 Python 실행 가능 여부를 확인합니다.</p>
+            </div>}
+          </section>
+          <section className={"profiles-form-kind " + (includeDocker ? "active" : "")}>
+            <label className="profiles-kind-toggle">
+              <input type="checkbox" checked={includeDocker} disabled={saving}
+                onChange={event => { setIncludeDocker(event.target.checked); setOperationError(""); }}/>
+              <span><strong><Box size={16}/> Docker</strong><small>Compose 서비스 구성</small></span>
             </label>
-          </div>
-          <label>제어 서비스 (선택)
-            <input value={form.controlServices} disabled={saving} maxLength={512} spellCheck={false}
-              onChange={event => setValue("controlServices", event.target.value)} placeholder="api"/>
-          </label>
-          <p className="profiles-hint">Docker 설정은 구성을 등록합니다. 실제 Docker 데몬 접속·컨테이너 실행 여부는 별도로 확인해야 합니다.</p>
-        </>}
+            {includeDocker && <div className="profiles-kind-fields">
+              <label>Docker Compose 파일 (상대 경로)
+                <input value={form.composeFile} disabled={saving} maxLength={512} spellCheck={false}
+                  onChange={event => setValue("composeFile", event.target.value)} placeholder="compose.yaml"/>
+              </label>
+              <label>Compose 프로젝트 이름
+                <input value={form.projectName} disabled={saving} maxLength={80} spellCheck={false}
+                  onChange={event => setValue("projectName", event.target.value)} placeholder="my-app"/>
+              </label>
+              <label>서비스 (쉼표 구분)
+                <input value={form.services} disabled={saving} maxLength={512} spellCheck={false}
+                  onChange={event => setValue("services", event.target.value)} placeholder="api,db"/>
+              </label>
+              <label>제어 서비스 (선택)
+                <input value={form.controlServices} disabled={saving} maxLength={512} spellCheck={false}
+                  onChange={event => setValue("controlServices", event.target.value)} placeholder="api"/>
+              </label>
+              <p className="profiles-hint">Docker는 설정을 저장하며, 실제 Docker 데몬·컨테이너는 실행하거나 검사하지 않습니다.</p>
+            </div>}
+          </section>
+        </div>
         {operationError && <div className="profiles-error" role="alert"><AlertCircle size={15}/>{operationError}</div>}
         <div className="profiles-form-actions">
           <button type="button" className="profiles-button secondary" disabled={saving}
