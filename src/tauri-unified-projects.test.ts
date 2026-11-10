@@ -6,8 +6,8 @@ describe("Tauri unified projects screen", () => {
   it("keeps exactly three project rows visible and scrolls additional items", () => {
     const css = readFileSync("desktop/src/projects.css", "utf8");
     const screen = readFileSync("desktop/src/ProjectsScreen.tsx", "utf8");
-    expect(css).toMatch(/\\.projects-entries\\{[^}]*height:202px;min-height:202px;max-height:202px/);
-    expect(css).toMatch(/\\.projects-entry\\{[^}]*min-height:64px;max-height:64px;flex:0 0 64px/);
+    expect(css).toContain(".projects-entries{display:flex;flex-direction:column;gap:5px;height:202px;min-height:202px;max-height:202px");
+    expect(css).toContain(".projects-entry{width:100%;min-width:0;min-height:64px;max-height:64px;flex:0 0 64px");
     expect(css).toContain("overflow-y:auto");
     expect(css).toContain("scrollbar-gutter:stable");
     expect(css).toContain(".projects-layout{display:grid;");
