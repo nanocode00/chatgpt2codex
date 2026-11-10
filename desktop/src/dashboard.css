@@ -1,5 +1,5 @@
 /* Screen 1: neutral, task-oriented dashboard. A shared semantic palette will follow. */
-.dashboard-root{display:flex;flex-direction:column;gap:20px;padding-bottom:22px;color:#e8e8e8}
+.dashboard-root{display:flex;flex-direction:column;gap:20px;padding-bottom:22px;color:#e8e8e8;min-width:0;width:100%;container-name:dashboard;container-type:inline-size}
 .dash-top{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}
 .dash-eyebrow{font-size:10px!important;letter-spacing:.14em;font-weight:700;color:#a1a1a1!important;margin:0 0 10px!important}
 .dash-top h1{margin:0;font-size:28px;font-weight:700;letter-spacing:-.045em;color:#f2f2f2}
@@ -39,7 +39,7 @@
 .dash-summary-value{display:block;font-size:23px;letter-spacing:-.04em;line-height:1.25;margin:18px 0 6px;color:#eee;font-weight:700}
 .dash-summary-value.dash-public-online{color:#f0f0f0}
 .dash-summary-value.dash-public-offline{color:#e8a39c}
-.dash-summary>p,.dash-panel>p{font-size:11px;line-height:1.6;color:#aaa;margin:4px 0 12px;overflow-wrap:anywhere}
+.dash-summary>p,.dash-panel>p{font-size:11px;line-height:1.6;color:#aaa;margin:4px 0 12px;word-break:keep-all;overflow-wrap:anywhere}
 .dash-summary .dash-card-button{margin-top:auto}
 .dash-card-button{border:1px solid #4a4a4a;padding:9px 12px;background:#303030;color:#dedede;border-radius:9px;width:100%;min-height:38px}
 .dash-card-button:hover{background:#3b3b3b}
@@ -48,7 +48,7 @@
 .dash-public-switch-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px}
 .dash-public-visual{min-width:0}
 .dash-public-switch-row .dash-summary-value{font-size:19px;line-height:1.35;margin:10px 0 5px}
-.dash-public-caption{font-size:10px;color:#aaa}
+.dash-public-caption{font-size:10px;color:#aaa;word-break:keep-all;overflow-wrap:anywhere}
 .dash-switch{width:45px;height:26px;background:#4b4b4b;border:1px solid #676767;position:relative;border-radius:30px;flex:none;padding:0;transition:background .15s ease}
 .dash-switch>span{display:block;width:19px;height:19px;position:absolute;left:3px;top:2px;border-radius:50%;background:#d0d0d0;transition:transform .15s ease}
 .dash-switch.is-on{background:#888;border-color:#999}
@@ -67,5 +67,9 @@
 .dash-shortcuts button{background:transparent;border:0;border-radius:8px;color:#ddd;display:flex;align-items:center;gap:9px;width:100%;padding:10px 9px;text-align:left;font-size:12px}
 .dash-shortcuts button:hover{background:#353535}
 .dash-shortcuts button svg:last-child{margin-left:auto;opacity:.65}
-@media(max-width:1050px){.dash-status-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.dash-status-grid .dash-summary:last-child{grid-column:1/-1;min-height:145px}.dash-bottom-grid{grid-template-columns:1fr}}
-@media(max-width:780px){.dash-top{flex-direction:column}.dash-runtime{padding:20px}.dash-runtime-head{flex-wrap:wrap}.dash-state{margin-left:60px}.dash-status-grid{grid-template-columns:1fr}.dash-status-grid .dash-summary:last-child{grid-column:auto}.dash-summary{min-height:150px}}
+/* Adapt to available dashboard content width (after sidebar and page padding), not outer window width. */
+@container dashboard (max-width:900px){.dash-status-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.dash-status-grid .dash-summary:last-child{grid-column:1/-1;min-height:145px}}
+@container dashboard (max-width:620px){.dash-status-grid{grid-template-columns:1fr}.dash-status-grid .dash-summary:last-child{grid-column:auto}.dash-summary{min-height:150px}.dash-bottom-grid{grid-template-columns:1fr}}
+@media(max-width:1050px){.dash-bottom-grid{grid-template-columns:1fr}}
+@container dashboard (max-width:650px){.dash-top{flex-direction:column}.dash-runtime{padding:20px}.dash-runtime-head{flex-wrap:wrap}.dash-state{margin-left:60px}}
+@media(max-width:780px){.dash-runtime{padding:20px}}
