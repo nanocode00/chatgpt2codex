@@ -1,6 +1,6 @@
 import {
   Activity, Check, ChevronRight, CircleHelp, Clipboard, Code2, Copy,
-  ExternalLink, FolderCode, HardDrive, LayoutDashboard, LockKeyhole, PlugZap,
+  ExternalLink, FolderCode, HardDrive, Layers, LayoutDashboard, LockKeyhole, PlugZap,
   RefreshCcw, Settings2, ShieldCheck, TerminalSquare
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -9,13 +9,14 @@ import { ManagementControls, LegacyConnectionControls, LegacyDiagnosticsControls
 import { CliParityPanel } from "./CliParityPanel";
 import { Dashboard } from "./Dashboard";
 import { ProjectsScreen } from "./ProjectsScreen";
+import { ProfilesScreen } from "./ProfilesScreen";
 import { Toast, type AppToast } from "./Toast";
 import { storedPublicPreference } from "./dashboard-state";
 import { parseUiPort, storedHealthPort, storedAutoRefresh } from "./ui-preferences";
 import { MigrationPreflight } from "./MigrationPreflight";
 import { inspectLegacyMigration, saveLegacySettingsSnapshot, inspectCredentialBackup, createCredentialBackup, rehearseCredentialRestore, type LegacyMigrationReport, type CredentialBackupReport, type RestoreRehearsalReport } from "./runtime";
 
-type Screen = "overview" | "projects" | "manage" | "cli" | "connections" | "diagnostics" | "settings";
+type Screen = "overview" | "projects" | "profiles" | "manage" | "cli" | "connections" | "diagnostics" | "settings";
 type ActivityEntry = { time: string; message: string; online: boolean };
 
 /** Rust/Tauri invoke rejects with a plain string, not necessarily an Error. */
@@ -46,6 +47,7 @@ function timeLabel(): string {
 const NAV: { name: Screen; label: string; icon: typeof LayoutDashboard }[] = [
   { name: "overview", label: "대시보드", icon: LayoutDashboard },
   { name: "projects", label: "프로젝트", icon: FolderCode },
+  { name: "profiles", label: "실행 환경", icon: Layers },
   { name: "manage", label: "관리", icon: TerminalSquare },
   { name: "cli", label: "CLI", icon: TerminalSquare },
   { name: "connections", label: "연결", icon: PlugZap },
@@ -233,7 +235,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (screen === "manage" || screen === "overview" || screen === "projects") {
+    if (screen === "manage" || screen === "overview" || screen === "projects" || screen === "profiles") {
       void runOwnedAction("status");
       void refreshCatalog();
     }
@@ -727,6 +729,11 @@ function App() {
           onManageRuntime={() => setScreen("manage")}
         />}
 
+        {screen === "profiles" && <ProfilesScreen
+          catalog={catalog} catalogBusy={catalogBusy} catalogError={catalogError}
+          onRefresh={refreshCatalog} onNotify={notify}
+        />}
+
         {screen === "manage" && <>
           <div className="page-heading"><div><div className="eyebrow">MANAGEMENT</div><h1>런타임 관리</h1>
             <p>기존 Windows 런처의 관리 항목을 먼저 배치했어. 실제 서버 제어는 안전성 검증 후 연결해.</p></div></div>
@@ -750,7 +757,7 @@ function App() {
         </>}
 
         {screen === "cli" && <>
-          <div className="page-heading"><div><div className="eyebrow">CLI PARITY</div><h1>CLI 기능</h1><p>독립 Tauri 인스턴스의 프로필·설정·진단을 공식 CLI 명령과 대응시켜 관리합니다.</p></div></div>
+          <div className="page-heading"><div><div className="eyebrow">CLI PARITY</div><h1>고급 CLI</h1><p>실행 환경은 전용 화면에서 관리합니다. 이곳에서는 설정·진단·고급 조회만 제공합니다.</p></div></div>
           <CliParityPanel />
         </>}
 
