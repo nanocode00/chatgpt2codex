@@ -133,6 +133,14 @@
 - 기존 `CLI` 화면의 중복 프로필 등록 폼은 제거하고 나머지 고급 CLI 기능은 유지한다.
 - 사용자 Windows 검수 후 완료 처리한다. WinForms 완전 이관 및 일반 CLI 기능 삭제는 이번 범위에 포함되지 않는다.
 
+### 실행 환경 화면 피드백 반영 — 종류별 상세 (2026-11-10)
+- Python 전용 프로필에 미등록 Docker를 동등한 크기의 카드로 노출하지 않는다. Python 실행 파일을 주 정보로, Docker는 **간결한 추가 동작**으로만 표시한다.
+- Docker 전용 프로필은 Compose 파일·프로젝트명·서비스·제어 서비스를 중심으로 한 **Docker 전용 상세 레이아웃**을 사용한다. Python 추가는 보조 동작이다.
+- 같은 별칭에 Python과 Docker가 모두 있으면 두 종류를 **전환해서 조회**한다. 종류별 등록/교체/제거의 기존 범위는 보존한다.
+- Docker 등록·조회·설정 검사·등록 해제를 위한 간단한 UI Smoke 입력: 별칭 `docker-smoke`, Compose `compose.yaml`, 프로젝트 `c2c-smoke`, 서비스 `app`, 선택적 제어 서비스 `app`.
+- **현재 Docker `profile test`는 등록 내용만 확인한다. 실제 Compose 파일 존재, Docker 엔진/컨테이너, 프로젝트 연동 실행 성공을 검증하지 않는다.** 향후 진짜 Docker 런타임 검사는 별도 작업으로 구분한다.
+- Windows 실제 화면에서 Python-only, Docker-only, Python+Docker 세 경우를 검수 후 해당 화면을 고정한다.
+
 ## 6. 진행 상태
 - [x] 제품 방향 및 CLI GUI 범위 확정
 - [x] 화면 순서/이행 원칙 확정
