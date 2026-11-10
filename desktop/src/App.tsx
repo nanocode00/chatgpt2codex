@@ -1,13 +1,13 @@
 import {
-  Activity, ArrowUpRight, Check, ChevronRight, CircleAlert, CircleHelp,
-  Clipboard, Clock3, Code2, Copy, ExternalLink, FolderCode, Gauge,
-  HardDrive, LayoutDashboard, LockKeyhole, PlugZap, RefreshCcw,
-  Settings2, ShieldCheck, TerminalSquare, Wifi, WifiOff
+  Activity, Check, ChevronRight, CircleHelp, Clipboard, Code2, Copy,
+  ExternalLink, HardDrive, LayoutDashboard, LockKeyhole, PlugZap,
+  RefreshCcw, Settings2, ShieldCheck, TerminalSquare
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { checkRuntime, inspectInstalledCli, inspectInstalledCliLogs, inspectPublicTunnel, manageOwnedCli, inspectOwnedPublicTunnelHealth, inspectOwnedCatalog, unregisterOwnedRepository, pickOwnedRepositoryFolder, registerOwnedPickedRepository, cancelOwnedPickedRepository, closePreviewWindow, closePreviewWithOwnedMcp, hidePreviewWindow, openTrustedLink, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type CliInspection, type CliLogPreview, type CliLogComponent, type ManagedAction, type ManagedResult, type CatalogInspection, type PickedRepositoryFolder, type PublicTunnelHealth, type RuntimeHealth, type TrustedLink } from "./runtime";
 import { ManagementControls, LegacyConnectionControls, LegacyDiagnosticsControls, LegacySettingsControls } from "./LegacyControls";
 import { CliParityPanel } from "./CliParityPanel";
+import { Dashboard } from "./Dashboard";
 import { parseUiPort, storedHealthPort, storedAutoRefresh } from "./ui-preferences";
 import { MigrationPreflight } from "./MigrationPreflight";
 import { inspectLegacyMigration, saveLegacySettingsSnapshot, inspectCredentialBackup, createCredentialBackup, rehearseCredentialRestore, type LegacyMigrationReport, type CredentialBackupReport, type RestoreRehearsalReport } from "./runtime";
@@ -37,7 +37,7 @@ function timeLabel(): string {
 }
 
 const NAV: { name: Screen; label: string; icon: typeof LayoutDashboard }[] = [
-  { name: "overview", label: "개요", icon: LayoutDashboard },
+  { name: "overview", label: "대시보드", icon: LayoutDashboard },
   { name: "manage", label: "관리", icon: TerminalSquare },
   { name: "cli", label: "CLI", icon: TerminalSquare },
   { name: "connections", label: "연결", icon: PlugZap },
@@ -203,7 +203,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (screen === "manage") {
+    if (screen === "manage" || screen === "overview") {
       void runOwnedAction("status");
       void refreshCatalog();
     }
@@ -464,7 +464,6 @@ function App() {
 
   const tunnelOnline = tunnelHealth?.state === "online";
   const tunnelOffline = tunnelHealth?.state === "offline";
-  const tunnelLabel = tunnelOnline ? "Online" : tunnelOffline ? "Offline" : "미확인";
 
   const publicConnector = cliInspection?.available ? cliInspection.publicConnector : null;
   const publicState = tunnelHealth?.details ??
@@ -588,7 +587,6 @@ function App() {
     </span>;
   }
 
-  const statusLine = status?.details || "로컬 C2C 서비스의 상태를 확인하고 있어요.";
 
   return (
     <div className="shell">
@@ -605,11 +603,11 @@ function App() {
         <div className="nav-section-title">RUNTIME</div>
         <button type="button" className="mini-runtime" onClick={() => setScreen("connections")}>
           <HardDrive size={17} />
-          <span><strong>로컬 MCP</strong><small>127.0.0.1:{port}</small></span>
-          <span className={"tiny-led " + (serverOnline ? "glow" : "")} />
+          <span><strong>Tauri 전용 MCP</strong><small>127.0.0.1:18797</small></span>
+          <span className={"tiny-led " + (owned?.running ? "glow" : "")} />
         </button>
         <div className="sidebar-bottom">
-          <div className="mini-security"><ShieldCheck size={16} /><span>읽기 전용 모니터링</span></div>
+          <div className="mini-security"><ShieldCheck size={16} /><span>독립 Tauri · 전환 준비 중</span></div>
           <div className="sidebar-version">Preview 0.1 · Tauri 2</div>
         </div>
       </aside>
@@ -625,42 +623,19 @@ function App() {
 
         <div className="page-scroll">
         <div className="page-content">
-        {screen === "overview" && <>
-          <div className="page-heading"><div><div className="eyebrow">LOCAL DEVELOPMENT</div><h1>개발 환경, 한눈에.</h1><p>로컬 MCP 서버의 연결 상태와 프로젝트 실행 환경을 확인하세요.</p></div><button className="secondary-btn" type="button" onClick={() => setScreen("diagnostics")}><Activity size={16}/> 진단 보기 <ArrowUpRight size={14}/></button></div>
-          <div className="metrics">
-            <div className="metric"><div className="metric-label"><Gauge size={17}/>런타임 상태</div><strong>{serverOnline ? "Online" : "Offline"}</strong><span>{stateLabel}</span></div>
-            <div className="metric"><div className="metric-label"><TerminalSquare size={17}/>로컬 포트</div><strong>{port}</strong><span>127.0.0.1</span></div>
-            <div className="metric"><div className="metric-label"><ShieldCheck size={17}/>공개 터널</div><strong>{tunnelLabel}</strong><span>{tunnelOnline ? "HTTPS Health 확인" : tunnelOffline ? "외부 연결 실패 · 로컬은 별도" : "상태 확인 필요"}</span></div>
-          </div>
-
-          <div className="content-grid">
-            <section className="panel runtime-panel">
-              <div className="panel-heading"><div className="panel-title"><span className="icon-tile"><TerminalSquare size={18}/></span><div><h2>C2C Runtime</h2><p>이 컴퓨터에서 실행 중인 서비스</p></div></div>{statusTag()}</div>
-              <div className="runtime-hero">
-                <div className={"orbit " + (serverOnline ? "orbit-online" : "")}><div className="orbit-inner">{serverOnline ? <Wifi size={28}/> : <WifiOff size={28}/>}</div></div>
-                <strong>{serverOnline ? "서버가 연결되었어요" : native ? "서버가 대기 중이에요" : "네이티브 앱에서 연결하세요"}</strong>
-                <span>{statusLine}</span>
-              </div>
-              <div className="panel-footer"><div className="muted-row"><Clock3 size={15}/> {autoRefresh && native ? "10초 간격 자동 확인" : "수동 확인"}</div><button type="button" className="secondary-btn" onClick={() => { void runCheck(); }} disabled={checking}><RefreshCcw size={15}/> {checking ? "확인 중..." : "다시 확인"}</button></div>
-            </section>
-
-            <div className="right-column">
-              <section className="panel connection-preview">
-                <div className="panel-heading"><div className="panel-title"><span className="icon-tile"><PlugZap size={18}/></span><div><h2>MCP 연결</h2><p>로컬 커넥터 주소</p></div></div></div>
-                <label className="field-label" htmlFor="overview-endpoint">Local endpoint</label>
-                <div className="endpoint"><input id="overview-endpoint" readOnly value={endpoint} aria-label="로컬 MCP URL"/><button type="button" aria-label="로컬 URL 복사" onClick={() => { void copyLocalEndpoint(); }}>{copied ? <Check size={16}/> : <Copy size={16}/>}</button></div>
-                <div className="informative-note"><CircleAlert size={16}/><span>{tunnelOffline ? "로컬 MCP는 정상이어도 공개 Quick Tunnel은 현재 연결되지 않습니다." : "로컬 주소는 ChatGPT 웹에서 직접 접근할 수 없어요. 공개 터널은 별도로 검사합니다."}</span></div>
-                <button type="button" className="text-action" onClick={() => setScreen("connections")}>연결 자세히 보기 <ChevronRight size={16}/></button>
-              </section>
-              <section className="panel project-panel">
-                <div className="panel-heading"><div className="panel-title"><span className="icon-tile"><FolderCode size={18}/></span><div><h2>프로젝트 관리</h2><p>CLI 공통 인스턴스 연동 준비 중</p></div></div></div>
-                <p className="description">기존 WinForms의 프로젝트 선택과 독립 Tauri CLI의 프로젝트·프로필 목록을 조회할 수 있습니다.</p>
-                <span className="coming-soon">목록 조회 지원 · 선택은 추후 연결</span>
-                <button type="button" className="text-action legacy-link" onClick={() => setScreen("manage")}>관리 화면 보기 <ChevronRight size={16}/></button>
-              </section>
-            </div>
-          </div>
-        </>}
+        {screen === "overview" && <Dashboard
+          native={native}
+          owned={owned} ownedBusy={ownedBusy} ownedError={ownedError}
+          ownedUrlNotice={ownedUrlNotice} ownedPublicHealth={ownedPublicHealth}
+          ownedPublicChecking={ownedPublicChecking}
+          catalog={catalog} catalogBusy={catalogBusy} catalogError={catalogError}
+          onRefreshOwned={() => { void runOwnedAction("status"); }}
+          onRefreshCatalog={() => { void refreshCatalog(); }}
+          onOwnedAction={action => { void runOwnedAction(action); }}
+          onCheckPublic={() => { void checkOwnedPublicHealth(); }}
+          onCopyPublic={() => { void copyOwnedConnector(); }}
+          onNavigate={to => setScreen(to)}
+        />}
 
         {screen === "manage" && <>
           <div className="page-heading"><div><div className="eyebrow">MANAGEMENT</div><h1>런타임 관리</h1>
