@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { publicView, runtimeView } from "../desktop/src/dashboard-state";
+import { publicView, runtimeView, startAction, storedPublicPreference } from "../desktop/src/dashboard-state";
 import type { ManagedResult, PublicTunnelHealth } from "../desktop/src/runtime";
 
 const stopped: ManagedResult = {
@@ -19,6 +19,14 @@ const checked: PublicTunnelHealth = {
 };
 
 describe("first unified dashboard: owned runtime only", () => {
+  it("keeps the stopped-state public preference distinct from a live tunnel", () => {
+    expect(storedPublicPreference(null)).toBe(false);
+    expect(storedPublicPreference("false")).toBe(false);
+    expect(storedPublicPreference("true")).toBe(true);
+    expect(storedPublicPreference("unexpected")).toBe(false);
+    expect(startAction(false)).toBe("start");
+    expect(startAction(true)).toBe("start-public");
+  });
   it("does not use the legacy 7979 monitor to decide owned runtime status", () => {
     expect(runtimeView(false, publicRunning)).toBe("unsupported");
     expect(runtimeView(true, null)).toBe("checking");
