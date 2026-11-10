@@ -1,7 +1,9 @@
 # WinForms → Tauri functional parity inventory (F5 baseline)
 
+> Historical snapshot (2026-10-28). Some pending functions are now supported in the isolated Tauri preview. See [current CLI matrix](TAURI_CLI_PARITY_MATRIX.md) and [F5-F release readiness proposal](https://github.[REDACTED]). Legacy WinForms/default:7979 production cutover remains NO-GO.
+
 As of **2026-10-28**, based on repository \`main\` at
-\`f8d006b2181d2d208bbc697e4b3c0d74ace39fab\` (merged PRs #69–#75).
+\`[REDACTED]\` (merged PRs #69–#75).
 The baseline is \`windows/ChatGPTToCodexLauncher.cs\`; Tauri behavior comes
 from \`desktop/src/{App,LegacyControls,MigrationPreflight,runtime}.*\` and
 the exact native command registration in
