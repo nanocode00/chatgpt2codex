@@ -13,6 +13,29 @@ function parseProfiles(result: OwnedCliParityResponse): Profile[] {
     typeof row.docker === "boolean").slice(0, 128);
 }
 
+/** Validate on click instead of disabling controls based on unsaved form fields.
+ * Native Rust validation remains authoritative (paths, IDs, allowed commands).
+ */
+function missingInput(request: OwnedCliParityRequest): string | null {
+  const operation = request.operation;
+  if (operation.startsWith("profile-") && operation !== "profile-list" &&
+      !request.alias?.trim()) {
+    return "프로필 별칭을 먼저 입력하거나 목록에서 선택하세요.";
+  }
+  if (operation === "profile-add-python" && !request.value?.trim()) {
+    return "등록할 Python의 python.exe 절대 경로를 입력하세요.";
+  }
+  if (operation === "profile-add-docker") {
+    if (!request.composeFile?.trim()) return "Docker Compose 파일의 상대 경로를 입력하세요.";
+    if (!request.projectName?.trim()) return "Docker Compose 프로젝트 이름을 입력하세요.";
+    if (!request.services?.trim()) return "Docker 서비스 이름을 하나 이상 입력하세요.";
+  }
+  if (["repository-show", "job-status", "job-logs"].includes(operation) && !request.target?.trim()) {
+    return "조회할 프로젝트 또는 작업 ID를 입력하세요.";
+  }
+  return null;
+}
+
 const GROUPS: { key: Group; title: string; subtitle: string }[] = [
   { key: "profiles", title: "프로필", subtitle: "profile list / show / add / remove / test" },
   { key: "config", title: "설정", subtitle: "config show / set / unset / export" },
@@ -48,9 +71,15 @@ export function CliParityPanel() {
 
   async function execute(request: OwnedCliParityRequest, confirmation?: string) {
     if (busy || !native) return;
+    setError("");
+    const invalid = missingInput(request);
+    if (invalid) {
+      setResult(null);
+      setError(invalid);
+      return;
+    }
     if (confirmation && !window.confirm(confirmation)) return;
     setBusy(true);
-    setError("");
     setResult(null);
     try {
       const reply = await runOwnedCliParity(request);
@@ -91,6 +120,7 @@ export function CliParityPanel() {
             <strong>{item.title}</strong><small>{item.subtitle}</small></button>)}
         </div>
         {!native && <p className="form-error" role="alert">CLI 조작은 Windows Tauri 앱에서만 지원합니다.</p>}
+        {error && <p className="form-error" role="alert">{error}</p>}
         {group === "profiles" && <div className="cli-parity-section">
           <div className="legacy-pref-row"><div><strong>Python / Docker 프로필</strong>
             <p>별칭을 선택해 조회·테스트·제거하거나 새 별칭으로 등록합니다.</p></div>
@@ -107,9 +137,9 @@ export function CliParityPanel() {
             <div className="legacy-form-control"><input id="cli-profile-alias" className="legacy-field" value={alias}
               onChange={e => setAlias(e.target.value)} placeholder="예: local-py" maxLength={64}/></div></div>
           <div className="legacy-actions">
-            <button type="button" disabled={!native || busy || !alias} className="legacy-action available"
+            <button type="button" disabled={!native || busy} className="legacy-action available"
               onClick={() => run("profile-show", profileArgs)}><Layers size={15}/>profile show</button>
-            <button type="button" disabled={!native || busy || !alias} className="legacy-action available"
+            <button type="button" disabled={!native || busy} className="legacy-action available"
               onClick={() => run("profile-test", profileArgs)}><Play size={15}/>profile test</button>
           </div>
           <div className="legacy-form-row"><label className="legacy-form-label" htmlFor="cli-python-path">
@@ -117,10 +147,10 @@ export function CliParityPanel() {
             <div className="legacy-form-control"><input id="cli-python-path" className="legacy-field" value={pythonPath}
               onChange={e => setPythonPath(e.target.value)} placeholder="C:\\Python311\\python.exe" maxLength={512}/></div></div>
           <div className="legacy-actions">
-            <button type="button" disabled={!native || busy || !alias || !pythonPath} className="legacy-action available"
+            <button type="button" disabled={!native || busy} className="legacy-action available"
               onClick={() => run("profile-add-python", { ...profileArgs, value: pythonPath.trim() }, profileConfirm("profile add --python"))}>
               <Play size={15}/>Python 등록 / 교체</button>
-            <button type="button" disabled={!native || busy || !alias} className="legacy-action available"
+            <button type="button" disabled={!native || busy} className="legacy-action available"
               onClick={() => run("profile-remove-python", profileArgs, profileConfirm("profile remove --python"))}>
               <Trash2 size={15}/>Python 제거</button>
           </div>
@@ -137,13 +167,13 @@ export function CliParityPanel() {
               onChange={e => setControlServices(e.target.value)} placeholder="api" maxLength={512}/></label>
           </div>
           <div className="legacy-actions">
-            <button type="button" disabled={!native || busy || !alias || !projectName || !services} className="legacy-action available"
+            <button type="button" disabled={!native || busy} className="legacy-action available"
               onClick={() => run("profile-add-docker", { ...profileArgs, composeFile, projectName, services, controlServices },
                 profileConfirm("profile add --compose-file"))}><Play size={15}/>Docker 등록 / 교체</button>
-            <button type="button" disabled={!native || busy || !alias} className="legacy-action available"
+            <button type="button" disabled={!native || busy} className="legacy-action available"
               onClick={() => run("profile-remove-docker", profileArgs, profileConfirm("profile remove --docker"))}>
               <Trash2 size={15}/>Docker 제거</button>
-            <button type="button" disabled={!native || busy || !alias} className="legacy-action available"
+            <button type="button" disabled={!native || busy} className="legacy-action available"
               onClick={() => run("profile-remove-all", profileArgs, profileConfirm("profile remove 전체"))}>
               <Trash2 size={15}/>별칭 전체 제거</button>
           </div>
@@ -218,18 +248,17 @@ export function CliParityPanel() {
               placeholder="예: my-project 또는 job-abc123"/></div>
           </div>
           <div className="legacy-actions">
-            <button type="button" disabled={!native || busy || !target} className="legacy-action available"
+            <button type="button" disabled={!native || busy} className="legacy-action available"
               onClick={() => run("repository-show", { target: target.trim() })}>repository show</button>
-            <button type="button" disabled={!native || busy || !target} className="legacy-action available"
+            <button type="button" disabled={!native || busy} className="legacy-action available"
               onClick={() => run("job-status", { target: target.trim() })}>job status</button>
-            <button type="button" disabled={!native || busy || !target} className="legacy-action available"
+            <button type="button" disabled={!native || busy} className="legacy-action available"
               onClick={() => run("job-logs", { target: target.trim() })}>job logs (최대 10건)</button>
           </div>
           <p className="legacy-footnote">상세 결과에 포함될 수 있는 토큰·인증 문자열은 숨깁니다.
             강제 잠금 해제, 작업 취소·재개, 제어 승인·중지, secret 설정·삭제는 실행할 수 없습니다.</p>
         </div>}
         {busy && <p className="legacy-footnote" role="status">번들 CLI 명령 실행 중…</p>}
-        {error && <p className="form-error" role="alert">{error}</p>}
         {result && <div className="cli-parity-output" role="region" aria-label="CLI 실행 결과">
           <strong>{result.command}</strong><p className="legacy-footnote">{result.note}</p>
           <pre>{result.text ?? JSON.stringify(result.json, null, 2)}</pre>
