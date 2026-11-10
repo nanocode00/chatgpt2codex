@@ -47,47 +47,8 @@ function Assert-HealthyPayload {
     Assert ((Get-FileHash -LiteralPath $cli -Algorithm SHA256).Hash -ieq $manifest.cliSha256) "CLI hash mismatch"
     if ($manifest.tunnel -eq "quick-ready") {
         $cloudflared = Join-Path $runtime "bin\cloudflared.exe"
-        Assert ((Test-Path -LiteralPath $cloudflared) -and
-            ($manifest.cloudflaredSha256 -match '^[a-fA-F0-9]{64}
-    Write-Host "PASS: isolated Tauri NSIS install and SHA-256 manifest-verified runtime payload"
-}
-
-Assert ($installers.Count -eq 1) "Expected one F4-D4 NSIS installer"
-Assert (-not (Test-Path -LiteralPath $legacyRoot)) "Runner already has WinForms; aborting before any mutation"
-Assert (-not (Test-Path -LiteralPath $installRoot)) "Runner already has Tauri; aborting before any mutation"
-Assert (-not (Read-RunValue $legacyValueName)) "Legacy startup entry already exists; abort"
-Assert (-not (Read-RunValue $tauriValueName)) "Tauri startup entry already exists; abort"
-
-try {
-    # Synthetic legacy entry only in disposable GitHub runner, to prove
-    # the new installer and its uninstaller cannot touch that registry name.
-    New-ItemProperty -Path $runKey -Name $legacyValueName -Value $marker -PropertyType String -Force | Out-Null
-    Invoke-Installer $installers[0].FullName "Tauri current-user NSIS install"
-    Assert-HealthyPayload
-    Assert ((Read-RunValue $legacyValueName) -ceq $marker) "Legacy Run entry changed by Tauri install"
-    Assert (-not (Read-RunValue $tauriValueName)) "Installation must never enable autostart"
-
-    $exePath = Join-Path $installRoot "chatgpt2codex-desktop.exe"
-    # Simulate explicit opt-in without launching GUI or activating the server.
-    New-ItemProperty -Path $runKey -Name $tauriValueName -Value ('"' + $exePath + '"') -PropertyType String -Force | Out-Null
-
-    $uninstallers = @(Get-ChildItem -LiteralPath $installRoot -Filter "*uninstall*.exe" -File)
-    Assert ($uninstallers.Count -eq 1) "Exactly one isolated Tauri uninstaller expected"
-    Invoke-Installer $uninstallers[0].FullName "Tauri NSIS uninstall"
-    Assert (-not (Test-Path -LiteralPath $exePath)) "Tauri binary remained after uninstall"
-    Assert (-not (Read-RunValue $tauriValueName)) "Tauri-owned auto-start Run value not cleaned up"
-    Assert ((Read-RunValue $legacyValueName) -ceq $marker) "Legacy Run sentinel mutated by uninstall"
-    Assert (-not (Test-Path -LiteralPath $legacyRoot)) "Unexpected legacy WinForms install directory"
-
-    Write-Host "PASS: F4-D4 NSIS current-user install, payload hashes, default-off startup, uninstall cleanup and WinForms isolation"
-} finally {
-    # Never remove foreign/unowned values or any directories. GitHub runners
-    # are ephemeral even if the installer deliberately fails closed.
-    if ((Read-RunValue $legacyValueName) -ceq $marker) {
-        Remove-ItemProperty -Path $runKey -Name $legacyValueName -ErrorAction SilentlyContinue
-    }
-}
-)) "Quick Tunnel binary/digest missing"
+        Assert (Test-Path -LiteralPath $cloudflared) "Quick Tunnel binary missing"
+        Assert (($manifest.cloudflaredSha256.Length -eq 64)) "Quick Tunnel digest has invalid length"
         Assert ((Get-FileHash -LiteralPath $cloudflared -Algorithm SHA256).Hash -ieq
             $manifest.cloudflaredSha256) "Quick Tunnel hash mismatch"
     }
