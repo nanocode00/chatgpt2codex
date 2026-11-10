@@ -113,3 +113,23 @@ export function validateDraft(
   }
   return null;
 }
+
+/** The form can register either kind, or both in one CLI operation.
+ * Validate only enabled fields; untouched kinds stay untouched in the CLI store.
+ */
+export function validateProfileSelection(
+  alias: string,
+  input: { pythonPath: string; composeFile: string; projectName: string; services: string; controlServices: string },
+  selection: { python: boolean; docker: boolean }
+): string | null {
+  if (!selection.python && !selection.docker) return "Python과 Docker 중 하나 이상을 선택하세요.";
+  if (selection.python) {
+    const issue = validateDraft("python", alias, input);
+    if (issue) return issue;
+  }
+  if (selection.docker) {
+    const issue = validateDraft("docker", alias, input);
+    if (issue) return issue;
+  }
+  return null;
+}
