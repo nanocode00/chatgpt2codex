@@ -289,3 +289,34 @@ export interface CutoverReadiness {
 export async function inspectCutoverReadiness(): Promise<CutoverReadiness> {
   return invoke<CutoverReadiness>("inspect_cutover_readiness");
 }
+
+
+/** F5-E: typed, finite CLI parity contract; no generic argv/shell bridge. */
+export type OwnedCliParityOperation =
+  | "profile-list" | "profile-show" | "profile-test"
+  | "profile-add-python" | "profile-add-docker"
+  | "profile-remove-python" | "profile-remove-docker" | "profile-remove-all"
+  | "config-show" | "config-export" | "config-set" | "config-unset"
+  | "reload" | "status" | "health" | "doctor" | "logs-server" | "logs-tunnel";
+
+export interface OwnedCliParityRequest {
+  operation: OwnedCliParityOperation;
+  alias?: string;
+  value?: string;
+  key?: string;
+  composeFile?: string;
+  projectName?: string;
+  services?: string;
+  controlServices?: string;
+}
+export interface OwnedCliParityResponse {
+  operation: OwnedCliParityOperation;
+  command: string;
+  json: unknown | null;
+  text: string | null;
+  note: string;
+}
+export async function runOwnedCliParity(request: OwnedCliParityRequest): Promise<OwnedCliParityResponse> {
+  if (!isNativeApp()) throw new Error("CLI 작업은 Windows Tauri 프리뷰에서만 지원합니다.");
+  return invoke<OwnedCliParityResponse>("run_owned_cli_parity", { request });
+}

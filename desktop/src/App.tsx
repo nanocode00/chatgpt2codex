@@ -7,10 +7,11 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { checkRuntime, inspectInstalledCli, inspectInstalledCliLogs, inspectPublicTunnel, manageOwnedCli, inspectOwnedPublicTunnelHealth, inspectOwnedCatalog, unregisterOwnedRepository, pickOwnedRepositoryFolder, registerOwnedPickedRepository, cancelOwnedPickedRepository, closePreviewWindow, closePreviewWithOwnedMcp, hidePreviewWindow, openTrustedLink, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type CliInspection, type CliLogPreview, type CliLogComponent, type ManagedAction, type ManagedResult, type CatalogInspection, type PickedRepositoryFolder, type PublicTunnelHealth, type RuntimeHealth, type TrustedLink } from "./runtime";
 import { ManagementControls, LegacyConnectionControls, LegacyDiagnosticsControls, LegacySettingsControls } from "./LegacyControls";
+import { CliParityPanel } from "./CliParityPanel";
 import { MigrationPreflight } from "./MigrationPreflight";
 import { inspectLegacyMigration, saveLegacySettingsSnapshot, inspectCredentialBackup, createCredentialBackup, rehearseCredentialRestore, type LegacyMigrationReport, type CredentialBackupReport, type RestoreRehearsalReport } from "./runtime";
 
-type Screen = "overview" | "manage" | "connections" | "diagnostics" | "settings";
+type Screen = "overview" | "manage" | "cli" | "connections" | "diagnostics" | "settings";
 type ActivityEntry = { time: string; message: string; online: boolean };
 
 /** Rust/Tauri invoke rejects with a plain string, not necessarily an Error. */
@@ -38,6 +39,7 @@ function timeLabel(): string {
 const NAV: { name: Screen; label: string; icon: typeof LayoutDashboard }[] = [
   { name: "overview", label: "개요", icon: LayoutDashboard },
   { name: "manage", label: "관리", icon: TerminalSquare },
+  { name: "cli", label: "CLI", icon: TerminalSquare },
   { name: "connections", label: "연결", icon: PlugZap },
   { name: "diagnostics", label: "진단", icon: Activity },
   { name: "settings", label: "설정", icon: Settings2 }
@@ -668,6 +670,11 @@ function App() {
             onRequestUnregister={requestUnregister} onCancelUnregister={cancelUnregister}
             onConfirmUnregister={() => { void confirmUnregister(); }}
             onOwnedAction={(action) => { void runOwnedAction(action); }} onCopyToken={() => { void copyOwnedToken(); }}/>
+        </>}
+
+        {screen === "cli" && <>
+          <div className="page-heading"><div><div className="eyebrow">CLI PARITY</div><h1>CLI 기능</h1><p>독립 Tauri 인스턴스의 프로필·설정·진단을 공식 CLI 명령과 대응시켜 관리합니다.</p></div></div>
+          <CliParityPanel />
         </>}
 
         {screen === "connections" && <>

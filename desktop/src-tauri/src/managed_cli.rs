@@ -205,7 +205,7 @@ fn record_if_any(root: &Payload) -> Result<Option<serde_json::Value>, String> {
     }
 }
 
-fn cli_command(root: &Payload, args: &[&str], timeout: Duration) -> Result<serde_json::Value, String> {
+fn cli_output(root: &Payload, args: &[&str], timeout: Duration, allow_nonzero: bool) -> Result<String, String> {
     let config = root.home.join(".config");
     // Read-only list commands must work even before the preview workspace
     // has been initialized. Mutating operations always call ensure_workspace.
@@ -264,13 +264,49 @@ fn cli_command(root: &Payload, args: &[&str], timeout: Duration) -> Result<serde
     if status.is_none() {
         return Err("CLI 작업 시간이 초과됐습니다. 관리 상태를 새로 확인하세요.".into());
     }
-    if !status.is_some_and(|s| s.success()) {
+    if !allow_nonzero && !status.is_some_and(|s| s.success()) {
         return Err("CLI가 요청을 거부했습니다. 기존 인스턴스와 충돌하거나 소유권을 확인하지 못했을 수 있습니다.".into());
     }
     if bytes.len() > MAX_OUTPUT {
         return Err("CLI 응답이 예상 범위를 초과했습니다.".into());
     }
-    serde_json::from_slice(&bytes).map_err(|_| "CLI가 유효한 상태 JSON을 반환하지 않았습니다.".into())
+    String::from_utf8(bytes).map_err(|_| "CLI 응답이 UTF-8이 아닙니다.".into())
+}
+
+fn cli_command(root: &Payload, args: &[&str], timeout: Duration) -> Result<serde_json::Value, String> {
+    let output = cli_output(root, args, timeout, false)?;
+    serde_json::from_str(&output)
+        .map_err(|_| "CLI가 유효한 상태 JSON을 반환하지 않았습니다.".into())
+}
+
+/// Only callers with a fixed native command whitelist may invoke this bridge.
+/// Uses the same verified bundle, isolated HOME and serialized mutation lock.
+/// The caller must never pass untrusted argv without validation.
+pub(crate) fn parity_cli(args: &[String], mutating: bool, needs_owned_runtime: bool,
+                         output_is_text: bool, allow_nonzero: bool) -> Result<String, String> {
+    let root = payload()?;
+    ensure_workspace(&root)?;
+    let lock = MUTATION_LOCK.get_or_init(|| Mutex::new(()));
+    // Lock even reads, so a list/show cannot race with rotation or stopping.
+    let _guard = lock.lock().map_err(|_| "CLI 제어 잠금에 실패했습니다.")?;
+    // All commands, including status/health, must reject foreign/stale
+    // runtime records before a CLI status probe could mutate their state.
+    let owned_record = record_if_any(&root)?;
+    if needs_owned_runtime && owned_record.is_none() {
+        return Err("Tauri 전용 MCP가 실행 중이 아닙니다. 재로드는 실행 중인 전용 서버에만 허용됩니다.".into());
+    }
+    if mutating && port_occupied() && owned_record.is_none() {
+        return Err("전용 포트를 외부 프로세스가 사용 중입니다. CLI 설정 변경을 거부합니다.".into());
+    }
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let text = cli_output(&root, &refs, Duration::from_secs(if output_is_text { 35 } else { 25 }), allow_nonzero)?;
+    if output_is_text {
+        Ok(text)
+    } else {
+        let _: serde_json::Value = serde_json::from_str(&text)
+            .map_err(|_| "CLI가 유효한 JSON 응답을 반환하지 않았습니다.".to_string())?;
+        Ok(text)
+    }
 }
 
 /// Only these two fixed list verbs can be invoked by the catalog UI.
