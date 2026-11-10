@@ -23,8 +23,8 @@ function text(value: unknown, max = MAX_TEXT): value is string {
     !/[\x00-\x1f\x7f]/.test(value);
 }
 function aliasOk(value: unknown): value is string {
-  return text(value, 64) && /^[A-Za-z0-9._-]+$/.test(value) &&
-    !value.startsWith("-") && !value.includes("..");
+  return text(value, 64) && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(value) &&
+    !value.includes("..") && value.toLowerCase() !== "auto";
 }
 function names(value: unknown): string[] | null {
   if (!Array.isArray(value) || value.length > 64 || !value.every(v => text(v, 80))) return null;
@@ -86,7 +86,7 @@ export function validateDraft(
   alias: string,
   input: { pythonPath: string; composeFile: string; projectName: string; services: string; controlServices: string }
 ): string | null {
-  if (!aliasOk(alias)) return "프로필 별칭은 1~64자의 영문·숫자·._-만 사용할 수 있으며, '-'로 시작하거나 '..'을 포함할 수 없습니다.";
+  if (!aliasOk(alias)) return "프로필 별칭은 영문·숫자로 시작하고 1~64자의 영문·숫자·._-만 사용할 수 있습니다. '..' 및 'auto'는 허용하지 않습니다.";
   if (type === "python") {
     if (!text(input.pythonPath)) return "존재하는 python.exe의 Windows 절대 경로를 입력하세요.";
     if (!/^(?:[A-Za-z]:\\|\\\\[^\\]+\\[^\\]+\\)/.test(input.pythonPath) || !/\\python\.exe$/i.test(input.pythonPath)) {
