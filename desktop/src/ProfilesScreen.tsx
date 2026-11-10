@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Activity, AlertCircle, Box, CheckCircle2, ChevronRight, CircleHelp, Code2,
-  FolderCode, Layers, LoaderCircle, Plus, RefreshCcw, Search, Settings2, ShieldCheck,
+  Layers, LoaderCircle, Plus, RefreshCcw, Search, Settings2, ShieldCheck,
   Terminal, Trash2, X
 } from "lucide-react";
 import { isNativeApp, runOwnedCliParity, type CatalogInspection, type CatalogProfile, type OwnedCliParityOperation } from "./runtime";
-import { filterProfiles, parseProfileDetails, parseProfileTest, profileAliasValid, validateDraft,
+import { filterProfiles, parseProfileDetails, parseProfileTest, validateDraft,
   type ProfileDetails, type ProfileTestResult } from "./profile-model";
 import "./profiles.css";
 
