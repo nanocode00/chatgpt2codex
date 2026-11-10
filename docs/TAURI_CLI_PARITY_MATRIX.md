@@ -24,10 +24,15 @@
 | `config set/unset` | CLI 탭 → 설정 변경/해제 | 제한 연결. 고정 인스턴스의 `host/port/tunnel` 안전 범위만; 임의 작업 공간/Named Tunnel 설정 금지 |
 | `config import`, `config import-env` | CLI | 보류. 파일/환경 변수/비밀정보 반입 전 별도 설계 |
 | `repository list/add/remove` | 관리 → 프로젝트 목록/등록/해제 | 연결됨. 등록 해제는 파일 삭제 아님 |
-| `repository show` | CLI | 세부 프로젝트 메타데이터 UI 미연결 |
+| `repository show` | CLI 탭 → 추가 조회 | 연결됨. 프로젝트 ID의 세부 메타데이터 |
+
 | `repository use` | CLI (프리뷰에서는 사용하지 않음) | Tauri는 전역 선택 프로젝트가 아닌 복수 프로젝트 catalog + 도구별 `projectId` 사용 |
-| `secret list/set/remove/import-env` | CLI | 보류. 비밀정보 입력·저장·권한/승인 UI 필요 |
-| `lock`, `job`, `control` | CLI | 보류. 실행 중 작업/권한/잠금 조작은 추후 권한 모델 필요 |
+| `secret list` | CLI 탭 → 추가 조회 | 읽기 전용. 비밀정보 **이름만** 표시, 값 조회 불가 |
+| `lock list` | CLI 탭 → 추가 조회 | 읽기 전용. 격리 HOME의 잠금 목록 |
+| `job list/status/logs` | CLI 탭 → 추가 조회 | 읽기 전용. 작업 상세·최근 로그 10건; 비밀 키·Bearer 문자열 마스킹 |
+| `control list/auto status` | CLI 탭 → 추가 조회 | 읽기 전용. 제어 요청과 자동 승인 상태만 표시 |
+| `secret set/remove/import-env` | CLI | 보류. 비밀정보 입력·저장·권한/승인 UI 필요 |
+| `lock release`, `job resume/cancel`, `control approve/reject/kill/auto on/off` | CLI | 보류. 실행 중 작업/권한/잠금 변경은 추후 검증·확인 모델 필요 |
 | `serve`, `init` | 내부 런타임 관리 | Tauri는 고정 인스턴스 및 `owner-token`으로 별도 준비; 일반 CLI 진입을 열지 않음 |
 | `help` | CLI 대응표 + 문서 | 명령별 정식 도움말은 터미널에서 `c2c help` |
 
