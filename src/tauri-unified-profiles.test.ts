@@ -61,6 +61,18 @@ describe("Tauri unified execution profiles", () => {
     expect(validateDraft("docker", "docker-dev", { ...draft, projectName: "" })).toBeTruthy();
   });
 
+  it("focuses the configured kind and keeps another kind as a compact add action", () => {
+    const code = readFileSync("desktop/src/ProfilesScreen.tsx", "utf8");
+    const css = readFileSync("desktop/src/profiles.css", "utf8");
+    expect(code).toContain('selected.python && selected.docker && <div className="profiles-detail-switch"');
+    expect(code).toContain('selected.python !== selected.docker && <div className="profiles-secondary-kind"');
+    expect(code).toContain('visibleKind === "python" ?');
+    expect(code).toContain("profiles-docker-fields");
+    expect(code).toContain("Docker 데몬 연결이나 컨테이너 실행 여부를 검사하지 않습니다");
+    expect(css).toContain(".profiles-kind-focused");
+    expect(css).toContain(".profiles-secondary-kind");
+  });
+
   it("keeps the execution environment list to 3 rows and marks Docker checks honestly", () => {
     const css = readFileSync("desktop/src/profiles.css", "utf8");
     const screen = readFileSync("desktop/src/ProfilesScreen.tsx", "utf8");
