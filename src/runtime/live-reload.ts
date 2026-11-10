@@ -4,6 +4,7 @@ import {
   listRuntimeInstances,
   runtimeProcessMatchesRecord,
 } from "./instances.js";
+import { requestWindowsReloadControl } from "./windows-reload.js";
 
 export interface RuntimeCatalogReloadFailure {
   instance: string;
@@ -25,6 +26,8 @@ interface RuntimeReloadDeps {
   processAlive?: typeof isProcessAlive;
   processMatches?: typeof runtimeProcessMatchesRecord;
   signal?: (pid: number, signal: NodeJS.Signals) => void;
+  stateDir?: string;
+  windowsRequest?: typeof requestWindowsReloadControl;
 }
 
 function errorMessage(error: unknown): string {
@@ -36,14 +39,19 @@ export async function signalRuntimeCatalogReload(
   deps: RuntimeReloadDeps = {},
 ): Promise<void> {
   const platform = deps.platform ?? process.platform;
-  if (platform !== "linux") {
-    throw new Error("c2c reload currently requires Linux/WSL; use c2c restart on this platform");
+  if (platform !== "linux" && platform !== "win32") {
+    throw new Error("c2c reload requires Linux/WSL or Windows");
   }
   const alive = deps.processAlive ?? isProcessAlive;
   if (!alive(record.pid)) throw new Error("instance is not running: " + record.name);
   const matches = deps.processMatches ?? runtimeProcessMatchesRecord;
   if (!(await matches(record))) {
     throw new Error("refusing reload because the recorded pid could not be verified as this c2c instance");
+  }
+  if (platform === "win32") {
+    if (!deps.stateDir) throw new Error("Windows reload requires the instance state directory");
+    await (deps.windowsRequest ?? requestWindowsReloadControl)(deps.stateDir, record);
+    return;
   }
   (deps.signal ?? process.kill)(record.pid, "SIGHUP");
 }
@@ -53,7 +61,7 @@ export async function reloadRunningRuntimeCatalogs(
   deps: RuntimeReloadDeps = {},
 ): Promise<RuntimeCatalogReloadSummary> {
   const platform = deps.platform ?? process.platform;
-  if (platform !== "linux") {
+  if (platform !== "linux" && platform !== "win32") {
     return {
       supported: false,
       restartRequired: true,
@@ -80,7 +88,7 @@ export async function reloadRunningRuntimeCatalogs(
       continue;
     }
     try {
-      await signalRuntimeCatalogReload(record, { ...deps, platform, processAlive: alive });
+      await signalRuntimeCatalogReload(record, { ...deps, platform, stateDir, processAlive: alive });
       summary.reloaded.push(record.name);
     } catch (error) {
       summary.failed.push({

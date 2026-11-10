@@ -299,7 +299,13 @@ pub(crate) fn parity_cli(args: &[String], mutating: bool, needs_owned_runtime: b
         return Err("전용 포트를 외부 프로세스가 사용 중입니다. CLI 설정 변경을 거부합니다.".into());
     }
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    let text = cli_output(&root, &refs, Duration::from_secs(if output_is_text { 35 } else { 25 }), allow_nonzero)?;
+    // Windows project scans may take longer than a basic status/list
+    // request. Give acknowledged reload (and profile/repository mutations
+    // which auto-reload) enough time without relaxing process ownership.
+    let timeout = if args.first().is_some_and(|verb|
+        verb == "reload" || verb == "profile" || verb == "repository")
+        { 65 } else if output_is_text { 35 } else { 25 };
+    let text = cli_output(&root, &refs, Duration::from_secs(timeout), allow_nonzero)?;
     if output_is_text {
         Ok(text)
     } else {
