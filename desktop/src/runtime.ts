@@ -91,6 +91,13 @@ export async function closePreviewWindow(): Promise<void> {
   await invoke<void>("close_preview_window");
 }
 
+/** Exit after an audited stop of only the isolated Tauri-owned MCP/tunnel.
+ * Rejects and leaves the app open on ambiguous ownership or an occupied port. */
+export async function closePreviewWithOwnedMcp(): Promise<void> {
+  if (!isNativeApp()) throw new Error("Windows Tauri 앱에서만 완전 종료할 수 있습니다.");
+  await invoke<void>("close_preview_with_owned_mcp");
+}
+
 /** F5-B: native Tauri window only. Never touches CLI or the WinForms server. */
 export async function hidePreviewWindow(): Promise<void> {
   if (!isNativeApp()) throw new Error("Windows Tauri 앱에서만 트레이로 숨길 수 있습니다.");
