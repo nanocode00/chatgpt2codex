@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { checkRuntime, inspectInstalledCli, inspectInstalledCliLogs, inspectPublicTunnel, manageOwnedCli, inspectOwnedPublicTunnelHealth, inspectOwnedCatalog, unregisterOwnedRepository, pickOwnedRepositoryFolder, registerOwnedPickedRepository, cancelOwnedPickedRepository, closePreviewWindow, closePreviewWithOwnedMcp, hidePreviewWindow, openTrustedLink, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type CliInspection, type CliLogPreview, type CliLogComponent, type ManagedAction, type ManagedResult, type CatalogInspection, type PickedRepositoryFolder, type PublicTunnelHealth, type RuntimeHealth, type TrustedLink } from "./runtime";
 import { ManagementControls, LegacyConnectionControls, LegacyDiagnosticsControls, LegacySettingsControls } from "./LegacyControls";
 import { CliParityPanel } from "./CliParityPanel";
+import { parseUiPort, storedHealthPort, storedAutoRefresh } from "./ui-preferences";
 import { MigrationPreflight } from "./MigrationPreflight";
 import { inspectLegacyMigration, saveLegacySettingsSnapshot, inspectCredentialBackup, createCredentialBackup, rehearseCredentialRestore, type LegacyMigrationReport, type CredentialBackupReport, type RestoreRehearsalReport } from "./runtime";
 
@@ -22,14 +23,13 @@ function nativeFailureMessage(error: unknown, fallback: string): string {
 
 function loadPort(): number {
   try {
-    const raw = Number.parseInt(localStorage.getItem("c2c.desktop.health-port") || "7979", 10);
-    return Number.isInteger(raw) && raw > 0 && raw <= 65535 ? raw : 7979;
+    return storedHealthPort(localStorage.getItem("c2c.desktop.health-port"));
   } catch {
     return 7979;
   }
 }
 function loadAutoRefresh(): boolean {
-  try { return localStorage.getItem("c2c.desktop.autorefresh") !== "false"; }
+  try { return storedAutoRefresh(localStorage.getItem("c2c.desktop.autorefresh")); }
   catch { return true; }
 }
 function timeLabel(): string {
@@ -553,21 +553,33 @@ function App() {
 
   function saveSettings(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const next = Number(draftPort);
-    if (!Number.isInteger(next) || next < 1 || next > 65535) {
+    const next = parseUiPort(draftPort);
+    if (next === null) {
       setSettingError("포트는 1부터 65535까지의 정수여야 합니다.");
       setSettingsNotice("");
       return;
     }
+    try {
+      localStorage.setItem("c2c.desktop.health-port", String(next));
+    } catch {
+      setSettingError("모니터링 포트를 저장하지 못했습니다. 저장소 권한을 확인하세요.");
+      setSettingsNotice("");
+      return;
+    }
     setSettingError("");
-    setSettingsNotice("로컬 상태 검사 대상 포트만 변경했어. 실제 C2C 서버 설정은 그대로야.");
-    localStorage.setItem("c2c.desktop.health-port", String(next));
+    setSettingsNotice("로컬 상태 검사 대상 포트만 변경했습니다. 실제 C2C 서버 설정은 그대로입니다.");
     setPort(next);
   }
 
   function toggleAutoRefresh(next: boolean) {
+    try {
+      localStorage.setItem("c2c.desktop.autorefresh", String(next));
+    } catch {
+      setSettingError("자동 확인 설정을 저장하지 못했습니다. 변경사항은 적용하지 않았습니다.");
+      return;
+    }
+    setSettingError("");
     setAutoRefresh(next);
-    localStorage.setItem("c2c.desktop.autorefresh", String(next));
   }
 
   function statusTag() {
