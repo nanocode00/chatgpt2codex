@@ -49,7 +49,7 @@ function LockedField({ placeholder = "CLI 설정을 연결한 후 표시됩니�
     aria-label={placeholder} />;
 }
 
-export function ManagementControls({ onConnections, onSettings, onExit, onCompleteExit, exitBusy, exitError, onHide, trayError,
+export function ManagementControls({ onConnections, onSettings, onProjects, onExit, onCompleteExit, exitBusy, exitError, onHide, trayError,
   owned, ownedBusy, ownedError, ownedToken, ownedUrlNotice, onCopyOwnedConnector,
   ownedPublicHealth, ownedPublicChecking, onCheckOwnedPublicHealth, onOwnedAction, onCopyToken,
   catalog, catalogBusy, catalogError, onRefreshCatalog,
@@ -57,7 +57,7 @@ export function ManagementControls({ onConnections, onSettings, onExit, onComple
   onBrowseFolder, onCancelFolder, onRegisterFolder,
   unregisterTarget, unregisterTyped, onUnregisterTyped, unregisterBusy, unregisterError, unregisterNotice,
   onRequestUnregister, onCancelUnregister, onConfirmUnregister }: {
-  onConnections: () => void; onSettings: () => void;
+  onConnections: () => void; onSettings: () => void; onProjects: () => void;
   onExit: () => void; onCompleteExit: () => void; exitBusy: boolean; exitError: string;
   onHide: () => void; trayError: string;
   owned: ManagedResult | null; ownedBusy: boolean; ownedError: string;
@@ -169,113 +169,13 @@ export function ManagementControls({ onConnections, onSettings, onExit, onComple
       </div>
     </section>
     <section className="panel page-panel legacy-spaced">
-      <SectionHeading title="프로젝트·CLI 프로필" icon={<FolderOpen size={18}/>} status="디렉터리 목록"
-        description="Tauri 전용 프로젝트 폴더를 추가·등록 해제합니다. 작업 대상은 ChatGPT 호출에서 projectId로 지정합니다." />
+      <SectionHeading title="프로젝트" icon={<FolderOpen size={18}/>} status="전용 화면"
+        description="프로젝트 등록·상세·제거 기능은 작업 중심 프로젝트 화면으로 이동했습니다." />
       <div className="legacy-body">
-        <div className="legacy-actions">
-          <button className="legacy-action available" type="button" disabled={catalogBusy}
-            onClick={onRefreshCatalog}>
-            <RefreshCcw size={16}/>{catalogBusy ? "조회 중..." : "목록 새로고침"}
-          </button>
-        </div>
-        {catalogError && <p className="form-error" role="alert">{catalogError}</p>}
-        <FormRow label="기존 WinForms 선택 프로젝트" help="기존 설정을 읽기만 합니다. 아래 독립 CLI 목록과 연결되지 않습니다.">
-          <input className="legacy-field" type="text" readOnly
-            value={catalog?.legacyProject ?? ""}
-            placeholder={catalog ? "선택된 프로젝트 없음" : "조회 전"}
-            aria-label="기존 WinForms 프로젝트 경로 (조회 전용)" />
-        </FormRow>
-        {catalog?.legacyProject && <p className="legacy-footnote" role="status">
-          {catalog.legacyProjectExists ? "기존 프로젝트 디렉터리 확인됨" : "기존 프로젝트 디렉터리를 찾지 못했습니다."}
-        </p>}
-        <div className="legacy-pref-row">
-          <div><strong>Tauri 전용 프로젝트 목록</strong>
-            <p>격리된 프리뷰 HOME에 등록된 프로젝트입니다. 기존 WinForms 프로젝트를 자동으로 가져오지 않습니다.</p>
-          </div>
-          <span className="legacy-value">{catalog?.available ? catalog.projects.length + "개" : "확인 필요"}</span>
-        </div>
-        {catalog?.available && (catalog.projects.length
-          ? <ul className="legacy-owned-projects" aria-label="Tauri 전용 프로젝트 목록">
-              {catalog.projects.map(item => <li key={item.id}>
-                <span><strong>{item.name}</strong> ({item.id}) · {item.available ? "디렉터리 확인됨" : "디렉터리 없음"}
-</span>
-                <button type="button" className="legacy-action" onClick={() => onRequestUnregister(item.id)}
-                  aria-label={`${item.name} (${item.id})의 Tauri 등록 해제`}
-                  disabled={!!owned?.running || ownedBusy || folderBusy ||
-                    catalogBusy || unregisterBusy || unregisterTarget !== null}>
-                  등록 해제
-                </button>
-              </li>)}
-            </ul>
-          : <p className="legacy-footnote">등록된 전용 프로젝트가 없습니다.</p>)}
-        {unregisterTarget && <div className="legacy-register-preview" role="group"
-          aria-label="Tauri 프로젝트 등록 해제 확인">
-          <strong>프로젝트 등록 해제: {catalog?.projects.find(item => item.id === unregisterTarget)?.name ?? unregisterTarget} ({unregisterTarget})</strong>
-          <p className="legacy-footnote">Tauri 전용 등록 목록에서만 제거하며 실제 폴더, Git 저장소와 파일은 삭제하지 않습니다. 이전 버전에서 저장했던 시작 프로젝트 설정은 안전하게 해제됩니다.</p>
-          <FormRow label="확인할 프로젝트 ID" help={`진행하려면 ${unregisterTarget} 을(를) 정확히 입력하세요.`}>
-            <input className="legacy-field" value={unregisterTyped} onChange={event => onUnregisterTyped(event.target.value)}
-              aria-label="등록 해제 확인 프로젝트 ID" autoComplete="off" spellCheck={false}
-              disabled={unregisterBusy} />
-          </FormRow>
-          <div className="legacy-actions">
-            <button className="legacy-action available" type="button" onClick={onConfirmUnregister}
-              disabled={unregisterBusy || unregisterTyped !== unregisterTarget || ownedBusy ||
-                folderBusy || catalogBusy || !!owned?.running}>
-              {unregisterBusy ? "처리 중..." : "등록 해제 확인"}
-            </button>
-            <button className="legacy-action available" type="button" onClick={onCancelUnregister}
-              disabled={unregisterBusy}>취소</button>
-          </div>
-        </div>}
-        {unregisterError && <p className="form-error" role="alert">{unregisterError}</p>}
-        {unregisterNotice && <p className="form-ok" role="status">{unregisterNotice}</p>}
-        <div className="legacy-pref-row">
-          <div><strong>프로젝트 폴더 등록</strong>
-            <p>Windows 폴더 선택기를 사용합니다. 등록은 Tauri 전용 목록에만 저장되고 기존 서버는 변경하지 않습니다.</p>
-          </div>
-          <button type="button" className="legacy-action available" onClick={onBrowseFolder}
-            disabled={!catalog?.available || !!owned?.running || ownedBusy || folderBusy || unregisterBusy || unregisterTarget !== null || catalogBusy}>
-            <FolderOpen size={16}/>{folderBusy ? "작업 중..." : "폴더 찾아보기"}
-          </button>
-        </div>
-        {pickedFolder && <div className="legacy-register-preview">
-          <p className="legacy-footnote">선택한 폴더를 확인하고 이름과 ID를 지정하세요. 등록 전에는 아무 설정도 저장하지 않습니다.</p>
-          <FormRow label="선택된 폴더">
-            <input className="legacy-field" value={pickedFolder.path} readOnly aria-label="선택한 프로젝트 경로" />
-          </FormRow>
-          <FormRow label="프로젝트 이름">
-            <input className="legacy-field" value={folderName} maxLength={160}
-              onChange={e => onFolderName(e.target.value)} aria-label="등록할 프로젝트 이름" disabled={folderBusy}/>
-          </FormRow>
-          <FormRow label="프로젝트 ID" help="영문 소문자와 숫자로 시작하며 영문 소문자·숫자·점·밑줄·하이픈만 사용할 수 있습니다.">
-            <input className="legacy-field" value={folderId} maxLength={64}
-              onChange={e => onFolderId(e.target.value)} aria-label="등록할 프로젝트 ID" disabled={folderBusy}/>
-          </FormRow>
-          <div className="legacy-actions">
-            <button className="legacy-action available" type="button" onClick={onRegisterFolder}
-              disabled={folderBusy || ownedBusy || unregisterBusy || unregisterTarget !== null || !!owned?.running}>등록 확인</button>
-            <button className="legacy-action available" type="button" onClick={onCancelFolder}
-              disabled={folderBusy}>취소</button>
-          </div>
-        </div>}
-        {folderError && <p className="form-error" role="alert">{folderError}</p>}
-        {folderNotice && <p className="form-ok" role="status">{folderNotice}</p>}
-        <p className="legacy-footnote">프로젝트는 여러 개 등록할 수 있고 별도 활성화를 요구하지 않습니다. Tauri MCP는 전용 격리 작업 공간에서 시작하고, 실제 작업 디렉터리는 각 도구의 projectId로 지정합니다. 서버 실행·중지와 프로젝트 등록 해제는 독립된 작업이며, 실제 디렉터리를 삭제하지 않습니다.</p>
-        <div className="legacy-pref-row">
-          <div><strong>Tauri 전용 CLI 프로필</strong>
-            <p>Python/Docker 프로필은 조회 전용입니다. CLI에는 활성 프로필을 고르는 별도의 use 명령이 없어 적용 기능은 아직 제공하지 않습니다.</p>
-          </div>
-          <span className="legacy-value">{catalog?.available ? catalog.profiles.length + "개" : "확인 필요"}</span>
-        </div>
-        {catalog?.available && (catalog.profiles.length
-          ? <ul aria-label="Tauri 전용 CLI 프로필 목록">
-              {catalog.profiles.map(item => <li key={item.alias}>
-                <strong>{item.alias}</strong> · {[item.python && "Python", item.docker && "Docker"].filter(Boolean).join(" / ")}
-              </li>)}
-            </ul>
-          : <p className="legacy-footnote">등록된 전용 프로필이 없습니다.</p>)}
-        <p className="legacy-footnote" role="status">{catalog?.details ?? "읽기 전용 목록 조회를 시작하지 않았습니다."}</p>
-        <p className="legacy-footnote">등록된 프로젝트는 ChatGPT가 projectId로 개별 지정해 사용합니다. 기존 WinForms 설정과 서버 7979 및 CLI 프로필 설정은 변경하지 않습니다.</p>
+        <p className="legacy-footnote">등록한 프로젝트는 도구별 projectId로 지정합니다. Python·Docker 프로필은 CLI 화면에서 계속 확인할 수 있습니다.</p>
+        <button type="button" className="legacy-action available" onClick={onProjects}>
+          <FolderOpen size={16}/> 프로젝트 화면 열기 <ArrowRight size={16}/>
+        </button>
       </div>
     </section>
     <section className="panel page-panel legacy-spaced">

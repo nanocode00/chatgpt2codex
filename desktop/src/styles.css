@@ -273,3 +273,15 @@ button:focus-visible,input:focus-visible{outline:2px solid #999;outline-offset:2
   background:#c9c9c9;
   box-shadow:0 0 0 3px #c9c9c920;
 }
+
+/* App-wide scrollbar styling: neutral, visible against the dark Tauri theme.
+   Applies to the page, project catalog, CLI logs, and future scroll panes. */
+:root{color-scheme:dark;scrollbar-color:#626262 #222;scrollbar-width:thin}
+*{scrollbar-color:#626262 #222;scrollbar-width:thin}
+*::-webkit-scrollbar{width:10px;height:10px}
+*::-webkit-scrollbar-track{background:#222;border-radius:999px}
+*::-webkit-scrollbar-thumb{background:#636363;border:2px solid #222;border-radius:999px;min-height:28px}
+*::-webkit-scrollbar-thumb:hover{background:#858585}
+*::-webkit-scrollbar-thumb:active{background:#9a9a9a}
+*::-webkit-scrollbar-corner{background:#222}
+@media(forced-colors:active){:root,*{scrollbar-color:auto}}

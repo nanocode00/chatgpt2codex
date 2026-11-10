@@ -1,6 +1,6 @@
 import {
   Activity, Check, ChevronRight, CircleHelp, Clipboard, Code2, Copy,
-  ExternalLink, HardDrive, LayoutDashboard, LockKeyhole, PlugZap,
+  ExternalLink, FolderCode, HardDrive, LayoutDashboard, LockKeyhole, PlugZap,
   RefreshCcw, Settings2, ShieldCheck, TerminalSquare
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -8,13 +8,14 @@ import { checkRuntime, inspectInstalledCli, inspectInstalledCliLogs, inspectPubl
 import { ManagementControls, LegacyConnectionControls, LegacyDiagnosticsControls, LegacySettingsControls } from "./LegacyControls";
 import { CliParityPanel } from "./CliParityPanel";
 import { Dashboard } from "./Dashboard";
+import { ProjectsScreen } from "./ProjectsScreen";
 import { Toast, type AppToast } from "./Toast";
 import { storedPublicPreference } from "./dashboard-state";
 import { parseUiPort, storedHealthPort, storedAutoRefresh } from "./ui-preferences";
 import { MigrationPreflight } from "./MigrationPreflight";
 import { inspectLegacyMigration, saveLegacySettingsSnapshot, inspectCredentialBackup, createCredentialBackup, rehearseCredentialRestore, type LegacyMigrationReport, type CredentialBackupReport, type RestoreRehearsalReport } from "./runtime";
 
-type Screen = "overview" | "manage" | "cli" | "connections" | "diagnostics" | "settings";
+type Screen = "overview" | "projects" | "manage" | "cli" | "connections" | "diagnostics" | "settings";
 type ActivityEntry = { time: string; message: string; online: boolean };
 
 /** Rust/Tauri invoke rejects with a plain string, not necessarily an Error. */
@@ -44,6 +45,7 @@ function timeLabel(): string {
 
 const NAV: { name: Screen; label: string; icon: typeof LayoutDashboard }[] = [
   { name: "overview", label: "대시보드", icon: LayoutDashboard },
+  { name: "projects", label: "프로젝트", icon: FolderCode },
   { name: "manage", label: "관리", icon: TerminalSquare },
   { name: "cli", label: "CLI", icon: TerminalSquare },
   { name: "connections", label: "연결", icon: PlugZap },
@@ -231,7 +233,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (screen === "manage" || screen === "overview") {
+    if (screen === "manage" || screen === "overview" || screen === "projects") {
       void runOwnedAction("status");
       void refreshCatalog();
     }
@@ -292,6 +294,7 @@ function App() {
       setPickedFolder(null);
       await refreshCatalog();
       setFolderNotice(`"${name}"(${id}) 프로젝트를 Tauri 전용 목록에 등록했습니다. 이제 ChatGPT에서 projectId로 사용할 수 있습니다.`);
+      notify(`프로젝트 "${name}" 등록 완료`);
     } catch (error) {
       setFolderError(nativeFailureMessage(error, "프로젝트 등록에 실패했습니다."));
       await refreshCatalog();
@@ -330,6 +333,7 @@ function App() {
       setUnregisterTyped("");
       await refreshCatalog();
       setUnregisterNotice(`"${id}"의 Tauri 전용 등록을 해제했습니다. 실제 프로젝트 폴더와 파일은 삭제하지 않았습니다.`);
+      notify(`프로젝트 "${id}" 등록 해제 완료 · 실제 폴더는 유지됩니다.`);
     } catch (error) {
       setUnregisterError(nativeFailureMessage(error, "프로젝트 등록 해제에 실패했습니다."));
       await refreshCatalog();
@@ -679,7 +683,11 @@ function App() {
           <div className="breadcrumb"><span>ChatGPT To Codex</span><ChevronRight size={15}/><strong>{NAV.find(n => n.name === screen)?.label}</strong></div>
           <div className="header-actions">
             <span className="host-indicator"><span className={"host-dot " + (native ? "connected" : "")} />{native ? "이 컴퓨터" : "웹 미리보기"}</span>
-            <button className={"icon-btn " + (checking ? "spin-icon" : "")} type="button" onClick={() => { void runCheck(); }} aria-label="상태 새로고침" title="상태 새로고침" disabled={checking}><RefreshCcw size={17}/></button>
+            <button className={"icon-btn " + (checking ? "spin-icon" : "")} type="button" onClick={() => {
+                if (screen === "overview" || screen === "projects" || screen === "manage") {
+                  void runOwnedAction("status"); void refreshCatalog();
+                } else { void runCheck(); }
+              }} aria-label="현재 화면 새로고침" title="현재 화면 새로고침" disabled={checking || ownedBusy || catalogBusy}><RefreshCcw size={17}/></button>
           </div>
         </header>
 
@@ -700,10 +708,29 @@ function App() {
           onNavigate={to => setScreen(to)}
         />}
 
+        {screen === "projects" && <ProjectsScreen
+          catalog={catalog} catalogBusy={catalogBusy} catalogError={catalogError}
+          ownedRunning={owned?.running === true} ownedBusy={ownedBusy}
+          pickedFolder={pickedFolder} folderBusy={folderBusy}
+          folderName={folderName} folderId={folderId} folderError={folderError}
+          unregisterTarget={unregisterTarget} unregisterTyped={unregisterTyped}
+          unregisterBusy={unregisterBusy} unregisterError={unregisterError}
+          onRefresh={() => { void refreshCatalog(); }}
+          onBrowse={() => { void browseOwnedFolder(); }}
+          onCancelBrowse={() => { void discardOwnedFolder(); }}
+          onFolderName={setFolderName} onFolderId={setFolderId}
+          onRegister={() => { void registerOwnedFolder(); }}
+          onRequestUnregister={requestUnregister} onCancelUnregister={cancelUnregister}
+          onUnregisterTyped={setUnregisterTyped}
+          onConfirmUnregister={() => { void confirmUnregister(); }}
+          onNotify={notify}
+          onManageRuntime={() => setScreen("manage")}
+        />}
+
         {screen === "manage" && <>
           <div className="page-heading"><div><div className="eyebrow">MANAGEMENT</div><h1>런타임 관리</h1>
             <p>기존 Windows 런처의 관리 항목을 먼저 배치했어. 실제 서버 제어는 안전성 검증 후 연결해.</p></div></div>
-          <ManagementControls onConnections={() => setScreen("connections")} onSettings={() => setScreen("settings")} onExit={() => { void exitPreview(); }} onCompleteExit={() => { void exitPreview(true); }} exitBusy={exitBusy} exitError={exitError}
+          <ManagementControls onConnections={() => setScreen("connections")} onSettings={() => setScreen("settings")} onProjects={() => setScreen("projects")} onExit={() => { void exitPreview(); }} onCompleteExit={() => { void exitPreview(true); }} exitBusy={exitBusy} exitError={exitError}
             onHide={() => { void hideToTray(); }} trayError={trayError}
             owned={owned} ownedBusy={ownedBusy} ownedError={ownedError} ownedToken={ownedToken}
             ownedUrlNotice={ownedUrlNotice} onCopyOwnedConnector={() => { void copyOwnedConnector(); }}
