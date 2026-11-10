@@ -27,3 +27,13 @@ export function publicView(owned: ManagedResult | null, checked: PublicTunnelHea
   }
   return checked.state;
 }
+
+/** UI-only preference. It never means a tunnel was actually exposed. */
+export function storedPublicPreference(value: string | null): boolean {
+  return value === "true";
+}
+
+/** Preserve local-only startup unless the user explicitly opts in. */
+export function startAction(preferPublic: boolean): "start" | "start-public" {
+  return preferPublic ? "start-public" : "start";
+}
