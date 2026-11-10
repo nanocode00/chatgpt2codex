@@ -22,9 +22,9 @@
 .projects-notice span{flex:1}
 .projects-notice button{border:0;color:#ededed;background:transparent;display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:650;white-space:nowrap;padding:1px}
 .projects-error{color:#f2c5c5;background:#3a2b2b;border:1px solid #805353;max-width:100%}
-.projects-layout{display:grid;grid-template-columns:minmax(280px,0.92fr) minmax(340px,1.08fr);gap:14px;align-items:stretch;min-width:0}
+.projects-layout{display:grid;grid-template-columns:minmax(280px,0.92fr) minmax(340px,1.08fr);gap:14px;align-items:start;min-width:0}
 .projects-list-panel,.projects-detail-panel,.projects-register{background:#222;border:1px solid #3e3e3e;border-radius:14px;min-width:0}
-.projects-list-panel,.projects-detail-panel{display:flex;flex-direction:column;min-height:430px}
+.projects-list-panel,.projects-detail-panel{display:flex;flex-direction:column;min-height:0}
 .projects-panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:21px 22px 14px}
 .projects-panel-head p{font-size:9px;letter-spacing:.15em;color:#888;font-weight:700;margin:0 0 7px}
 .projects-panel-head h2{font-size:15px;font-weight:680;letter-spacing:-.025em;color:#eee;margin:0}
@@ -34,8 +34,8 @@
 .projects-search input{background:transparent;color:#eee;border:0;outline:none;font-size:12px;min-width:0;flex:1;width:100%}
 .projects-search input::placeholder{color:#888}
 .projects-search button{background:transparent;border:0;color:#aaa;padding:5px;display:grid;place-items:center}
-.projects-entries{display:flex;flex-direction:column;gap:5px;min-height:215px;padding:0 11px 15px;max-height:575px;overflow-y:auto}
-.projects-entry{width:100%;min-width:0;display:flex;align-items:center;gap:10px;padding:13px 11px;border-radius:10px;border:1px solid transparent;background:transparent;color:#eee;text-align:left}
+.projects-entries{display:flex;flex-direction:column;gap:5px;height:202px;min-height:202px;max-height:202px;padding:0 11px;overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable;overscroll-behavior:contain}
+.projects-entry{width:100%;min-width:0;min-height:64px;max-height:64px;flex:0 0 64px;display:flex;align-items:center;gap:10px;padding:12px 11px;border-radius:10px;border:1px solid transparent;background:transparent;color:#eee;text-align:left}
 .projects-entry:hover{background:#2f2f2f}
 .projects-entry.selected{background:#333;border-color:#626262}
 .projects-entry-icon{width:34px;height:34px;display:grid;place-items:center;background:#373737;border:1px solid #4e4e4e;border-radius:9px;flex:none;color:#ddd}
@@ -46,6 +46,7 @@
 .projects-status.missing{color:#efb7ae;background:#3d3030;border-color:#755250}
 .projects-entry-arrow{flex:none;color:#888}
 .projects-empty{display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;gap:10px;min-height:205px;padding:24px;color:#919191;line-height:1.6;font-size:11px}
+.projects-entries>.projects-empty{min-height:0;height:100%;flex:0 0 100%;padding:12px}
 .projects-empty strong{font-weight:650;color:#d8d8d8;font-size:12px}
 .projects-empty span{max-width:250px}
 .projects-detail-panel{padding-bottom:18px}
@@ -91,6 +92,6 @@
 .projects-boundary svg{flex:none}
 .projects-spinning{animation:projects-spin 1s linear infinite}
 @keyframes projects-spin{to{transform:rotate(360deg)}}
-@container projects (max-width:870px){.projects-layout{grid-template-columns:1fr}.projects-list-panel,.projects-detail-panel{min-height:auto}.projects-entries{max-height:375px}}
+@container projects (max-width:870px){.projects-layout{grid-template-columns:1fr}.projects-list-panel,.projects-detail-panel{min-height:auto}}
 @container projects (max-width:700px){.projects-heading{flex-direction:column}.projects-header-actions{align-self:stretch;flex-wrap:wrap}.projects-header-actions .projects-button{flex:1}.projects-register-grid{grid-template-columns:1fr}.projects-register-grid label{grid-column:1/-1}}
 @container projects (max-width:480px){.projects-stats>div{padding:13px 11px}.projects-stats strong{font-size:19px}.projects-stats span{font-size:10px}.projects-entry{gap:7px}.projects-entry .projects-status{font-size:9px}.projects-detail-metadata{grid-template-columns:1fr}.projects-notice{flex-wrap:wrap}}
