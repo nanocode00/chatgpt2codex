@@ -1,0 +1,8 @@
+/* Global app feedback for non-blocking confirmations. */
+.c2c-toast-region{position:fixed;right:26px;bottom:24px;z-index:9999;display:flex;flex-direction:column;gap:9px;align-items:flex-end;pointer-events:none;width:min(420px,calc(100vw - 32px))}
+.c2c-toast{max-width:100%;display:flex;align-items:flex-start;gap:10px;line-height:1.55;color:#edf0ef;background:#343638;border:1px solid #636669;box-shadow:0 15px 35px #0009;border-radius:11px;padding:13px 15px;font-size:12px;animation:c2c-toast-enter .18s ease-out;overflow-wrap:anywhere;pointer-events:auto}
+.c2c-toast svg{flex:none;margin-top:1px;color:#bac0c2}
+.c2c-toast-error{border-color:#996a6a;background:#3b3030;color:#f0dada}
+.c2c-toast-error svg{color:#e0acac}
+@keyframes c2c-toast-enter{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:680px){.c2c-toast-region{right:16px;bottom:16px}}
