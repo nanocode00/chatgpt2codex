@@ -1,7 +1,31 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import { displayProjectPath, filterProjects, parseProjectDetails } from "../desktop/src/project-details";
 
 describe("Tauri unified projects screen", () => {
+  it("keeps exactly three project rows visible and scrolls additional items", () => {
+    const css = readFileSync("desktop/src/projects.css", "utf8");
+    const screen = readFileSync("desktop/src/ProjectsScreen.tsx", "utf8");
+    expect(css).toMatch(/\\.projects-entries\\{[^}]*height:202px;min-height:202px;max-height:202px/);
+    expect(css).toMatch(/\\.projects-entry\\{[^}]*min-height:64px;max-height:64px;flex:0 0 64px/);
+    expect(css).toContain("overflow-y:auto");
+    expect(css).toContain("scrollbar-gutter:stable");
+    expect(css).toContain(".projects-layout{display:grid;");
+    expect(css).toContain("align-items:start;");
+    expect(css).not.toContain(".projects-entries{max-height:375px}");
+    expect(screen).toContain('role="region" aria-label="프로젝트 목록 스크롤 영역" tabIndex={0}');
+  });
+
+  it("uses the neutral global scrollbar across page and nested scroll panes", () => {
+    const css = readFileSync("desktop/src/styles.css", "utf8");
+    expect(css).toContain("*::-webkit-scrollbar-thumb");
+    expect(css).toContain("*::-webkit-scrollbar-track");
+    expect(css).toContain("*::-webkit-scrollbar-thumb:hover");
+    expect(css).toContain("scrollbar-width:thin");
+    expect(css).toContain("scrollbar-color:#626262 #222");
+    expect(css).toContain("@media(forced-colors:active)");
+  });
+
   it("removes only the Windows extended-length drive prefix for display and copy", () => {
     const path = "\\\\?\\C:\\Users\\nanocode\\fastdesk";
     expect(displayProjectPath(path)).toBe("C:\\Users\\nanocode\\fastdesk");
