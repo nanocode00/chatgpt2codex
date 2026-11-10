@@ -970,10 +970,26 @@ async function cmdRepository(positional: string[], flags: Record<string, string 
 
   if (action === "remove") {
     const id = normalizeRepositoryId(positional[1] ?? "");
-    const before = data.repositories.length;
+    const existing = data.repositories.find((repo) => repo.id === id);
     data.repositories = data.repositories.filter((repo) => repo.id !== id);
-    const removed = data.repositories.length !== before;
-    if (removed) await writeManagedRepositories(configDir, data);
+    const removed = Boolean(existing);
+    if (removed && existing) {
+      await writeManagedRepositories(configDir, data);
+      // Running MCP contexts also keep a remembered project registry. If a
+      // managed repository is removed, drop precisely that managed ID/root
+      // from their scoped caches *before* the live-reload handler merges the
+      // remembered entries back in. Do not erase other remembered/scanned
+      // projects or any files in the repository itself.
+      const stateDir = defaultStateDir();
+      for (const instance of await listRuntimeInstances(stateDir)) {
+        const store = new Store(stateDir, instance.name);
+        const entries = await store.loadProjects();
+        const remaining = entries.filter((entry) =>
+          !(entry.projectId === id && path.resolve(entry.root) === path.resolve(existing.root)),
+        );
+        if (remaining.length !== entries.length) await store.saveProjects(remaining);
+      }
+    }
     const liveReload = removed ? await autoReloadManagedCatalogs() : null;
     console.log(JSON.stringify({ removed, id, liveReload }));
     return;
