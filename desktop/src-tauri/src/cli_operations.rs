@@ -225,10 +225,22 @@ pub async fn inspect_cli_logs(instance: String, component: String) -> Result<Cli
         .map_err(|_| "CLI 로그 조회 작업에 실패했습니다.".to_owned())
 }
 
+/// Complete/update-safe exit is explicit and transactional:
+/// a successful verified stop of the *isolated Tauri* MCP comes first.
+/// Failure leaves this window open and never touches the installed default.
+#[tauri::command]
+pub async fn close_preview_with_owned_mcp(app: tauri::AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(crate::managed_cli::stop_owned_for_complete_exit)
+        .await
+        .map_err(|_| "전용 MCP 완전 종료 작업에 실패했습니다.".to_string())??;
+    app.exit(0);
+    Ok(())
+}
+
 #[tauri::command]
 pub fn close_preview_window(app: tauri::AppHandle) -> Result<(), String> {
-    // This in-app button explicitly exits the preview. X/minimize now hide
-    // to tray; exiting never stops WinForms, default C2C or Cloudflare.
+    // App-only exit intentionally leaves the separate MCP server running.
+    // The UI and tray must label this distinction explicitly.
     app.exit(0);
     Ok(())
 }

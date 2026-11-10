@@ -197,6 +197,28 @@ registration or connector authorization state.
 
 The Management page can now operate an independently bundled, audited Node C2C instance on port 18797. This requires the complete Windows preview ZIP (including c2c-runtime/) and explicit one-time token preparation. The installed WinForms instance, port 7979 and token remain untouched. See [isolated CLI lifecycle notes](../docs/TAURI_OWNED_CLI_PREVIEW.md).
 
+## Safely closing a portable Tauri preview before replacement
+
+**Manage → 앱·트레이** has two distinct exit actions:
+
+- **앱만 종료 (MCP 유지)** closes the Tauri window/tray, but keeps the
+  detached `tauri-preview-v1` Node MCP server and its Cloudflare Quick
+  Tunnel running. The bundle's `node.exe` and `cloudflared.exe` may still
+  be locked, so this action is not appropriate before deleting/replacing the
+  portable preview folder. The tray menu explicitly labels this behavior.
+- **앱·전용 MCP 완전 종료 (업데이트)** requests a normal, audited CLI stop
+  of the *exact Tauri-owned* instance; waits for its runtime record and port
+  `18797` to be released; **only then** exits Tauri. Use this before
+  replacing the preview ZIP. The operation is opt-in and warns that active
+  ChatGPT calls will disconnect. If the runtime record cannot be verified
+  as owned, or another process occupies the port, the command fails closed
+  and **leaves the app visible** for diagnosis. It never force-kills by name.
+- The installed WinForms/default:7979 server, token and tunnel are untouched.
+
+A manually killed or orphaned process can still block Windows file removal.
+The app must not pretend to stop it without strong process ownership proof.
+Do not delete active bundle files or forcibly kill unrelated Node processes.
+
 ## Windows console flash and isolated Owner Token recovery
 
 The Tauri preview spawns its bundled Node MCP server and Cloudflare Quick

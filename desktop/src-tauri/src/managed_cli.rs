@@ -692,6 +692,48 @@ fn operate(root: Payload, action: &str) -> Result<ManagedResult, String> {
     }
 }
 
+/// Read-only preflight: without an owned record we must not conclude that a
+/// process listening on the preview port belongs to this application.
+fn exit_without_record_preflight(port_busy: bool) -> Result<(), &'static str> {
+    if port_busy {
+        Err("Tauri 전용 포트 18797에 다른 프로세스가 남아 있습니다. 소유권 기록이 없어 자동 종료하지 않습니다.")
+    } else {
+        Ok(())
+    }
+}
+
+/// Opt-in update/complete-exit action. Does not exit the UI on failure.
+/// Always uses the existing audited CLI stop/PID ownership checks, and only
+/// the isolated preview instance. No taskkill or process-by-name termination.
+pub(crate) fn stop_owned_for_complete_exit() -> Result<(), String> {
+    let root = payload()?;
+    ensure_workspace(&root)?;
+    let lock = MUTATION_LOCK.get_or_init(|| Mutex::new(()));
+    let _guard = lock.lock().map_err(|_| "CLI 제어 잠금에 실패했습니다.")?;
+    if record_if_any(&root)?.is_none() {
+        return exit_without_record_preflight(port_occupied()).map_err(str::to_owned);
+    }
+    let result = cli_command(
+        &root, &["stop", "--instance", INSTANCE], Duration::from_secs(30)
+    )?;
+    if result["stopped"] != true || result["instance"] != INSTANCE {
+        return Err("전용 MCP 중지가 확인되지 않았습니다. 앱은 종료하지 않습니다.".into());
+    }
+    // Wait for the owned record to disappear and the port to be released.
+    // If the CLI could not safely release the runtime, keep the UI available
+    // for diagnosis and do not claim the installation can be removed.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let record_exists = record_if_any(&root)?.is_some();
+        let busy = port_occupied();
+        if !record_exists && !busy { return Ok(()); }
+        if Instant::now() >= deadline {
+            return Err("전용 MCP 종료 후에도 18797 포트나 인스턴스 기록이 남았습니다. 앱을 유지하고 상태를 확인하세요.".into());
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
 #[tauri::command]
 pub async fn manage_owned_cli(action: String) -> Result<ManagedResult, String> {
     if !matches!(action.as_str(), "status" | "prepare" | "rotate-token" | "start" | "start-public" | "stop" | "restart") {
@@ -708,6 +750,12 @@ pub async fn manage_owned_cli(action: String) -> Result<ManagedResult, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn complete_exit_never_claims_unknown_process_on_preview_port() {
+        assert!(exit_without_record_preflight(false).is_ok());
+        assert!(exit_without_record_preflight(true).is_err());
+    }
 
     #[test]
     fn token_rotation_requires_a_fully_stopped_owned_instance() {

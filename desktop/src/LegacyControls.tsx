@@ -49,7 +49,7 @@ function LockedField({ placeholder = "CLI 설정을 연결한 후 표시됩니�
     aria-label={placeholder} />;
 }
 
-export function ManagementControls({ onConnections, onSettings, onExit, exitError, onHide, trayError,
+export function ManagementControls({ onConnections, onSettings, onExit, onCompleteExit, exitBusy, exitError, onHide, trayError,
   owned, ownedBusy, ownedError, ownedToken, ownedUrlNotice, onCopyOwnedConnector,
   ownedPublicHealth, ownedPublicChecking, onCheckOwnedPublicHealth, onOwnedAction, onCopyToken,
   catalog, catalogBusy, catalogError, onRefreshCatalog,
@@ -58,7 +58,7 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
   unregisterTarget, unregisterTyped, onUnregisterTyped, unregisterBusy, unregisterError, unregisterNotice,
   onRequestUnregister, onCancelUnregister, onConfirmUnregister }: {
   onConnections: () => void; onSettings: () => void;
-  onExit: () => void; exitError: string;
+  onExit: () => void; onCompleteExit: () => void; exitBusy: boolean; exitError: string;
   onHide: () => void; trayError: string;
   owned: ManagedResult | null; ownedBusy: boolean; ownedError: string;
   ownedToken: string | null;
@@ -283,10 +283,13 @@ export function ManagementControls({ onConnections, onSettings, onExit, exitErro
         description="작업 표시줄 및 트레이에서의 앱 동작을 관리합니다." />
       <div className="legacy-body">
         <div className="legacy-actions">
-          <button type="button" className="legacy-action available" onClick={onHide}><Monitor size={16}/>트레이로 숨기기</button>
-          <button type="button" className="legacy-action available" onClick={onExit}><Power size={16}/>앱 종료</button>
+          <button type="button" className="legacy-action available" onClick={onHide} disabled={exitBusy}><Monitor size={16}/>트레이로 숨기기</button>
+          <button type="button" className="legacy-action available" onClick={onExit} disabled={exitBusy || ownedBusy}><Power size={16}/>앱만 종료 (MCP 유지)</button>
+          <button type="button" className="legacy-action available" onClick={onCompleteExit} disabled={exitBusy || ownedBusy}>
+            <Power size={16}/>{exitBusy ? "전용 MCP 종료 확인 중..." : "앱·전용 MCP 완전 종료 (업데이트)"}
+          </button>
         </div>
-        <p className="legacy-footnote">트레이로 숨기면 Tauri 창만 사라지며 트레이 메뉴나 아이콘 더블클릭으로 복원할 수 있습니다. 앱 종료는 Tauri 프리뷰만 끝내며 기존 MCP 서버를 중지하지 않습니다.</p>
+        <p className="legacy-footnote">트레이로 숨기면 창만 숨겨지고, 앱만 종료하면 Tauri가 시작한 MCP/Quick Tunnel은 계속 실행됩니다. 업데이트하거나 기존 실행 파일을 삭제하려면 '앱·전용 MCP 완전 종료'를 사용하세요. 전용 서버 중지가 실패하면 앱을 닫지 않으며, 기존 WinForms/7979는 종료하지 않습니다.</p>
         {trayError && <p role="alert" className="form-error">{trayError}</p>}
         {exitError && <p role="alert" className="form-error">{exitError}</p>}
         <button type="button" className="text-action legacy-link" onClick={onSettings}>
