@@ -111,6 +111,46 @@ try {
     if (-not $health.healthy) { throw "CLI health is not healthy" }
     Write-Host "PASS: isolated Windows CLI start/status/health"
 
+    # Windows hot reload must not restart the MCP listener (and therefore must
+    # not invalidate any existing tunnel URL or OAuth session). Every fixture
+    # remains inside this ephemeral CI runner's HOME/workspace.
+    $pidBefore = [int]$status.pid
+    $urlBefore = [string]$status.publicUrl
+    $reload = Invoke-C2C -CliArgs @("reload", "--instance", $instance)
+    if (-not $reload.reloaded -or $reload.instance -ne $instance -or $reload.pid -ne $pidBefore) {
+        throw "Windows reload did not acknowledge the owned running instance"
+    }
+    $extra = Join-Path $root "extra-project"
+    New-Item -ItemType Directory -Force $extra | Out-Null
+    Set-Content -LiteralPath (Join-Path $extra "package.json") -Value '{"name":"ci-extra-project","private":true}' -NoNewline
+    $added = Invoke-C2C -CliArgs @("repository", "add", $extra, "--id", "ci-extra")
+    if ($added.added -ne $true -or $added.liveReload.supported -ne $true -or
+        @($added.liveReload.reloaded) -notcontains $instance) {
+        throw "Windows repository add did not hot reload its running instance"
+    }
+    $registryPath = Join-Path $stateDir "projects.$instance.json"
+    if (-not (Test-Path -LiteralPath $registryPath)) { throw "Missing live registry state after reload" }
+    $registry = Get-Content -LiteralPath $registryPath -Raw | ConvertFrom-Json -ErrorAction Stop
+    if (@($registry.projects.projectId) -notcontains "ci-extra") {
+        throw "Windows live server registry did not reflect added repository"
+    }
+    $removed = Invoke-C2C -CliArgs @("repository", "remove", "ci-extra")
+    if ($removed.removed -ne $true -or $removed.liveReload.supported -ne $true -or
+        @($removed.liveReload.reloaded) -notcontains $instance) {
+        throw "Windows repository removal did not auto reload"
+    }
+    $registry = Get-Content -LiteralPath $registryPath -Raw | ConvertFrom-Json -ErrorAction Stop
+    if (@($registry.projects.projectId) -contains "ci-extra") {
+        throw "Windows live server registry retained removed repository"
+    }
+    $afterReload = Invoke-C2C -CliArgs @("status", "--instance", $instance)
+    if (-not $afterReload.healthy -or $afterReload.pid -ne $pidBefore -or
+        $afterReload.port -ne $port -or $afterReload.publicUrl -ne $urlBefore) {
+        throw "Windows reload changed MCP process, port, URL or health"
+    }
+    Check-Health
+    Write-Host "PASS: Windows reload and repository auto-reload preserve PID/port/URL"
+
     # Simulate a stale/spoofed PID pointing at an unrelated disposable process
     # while the actual C2C health endpoint remains healthy. Stop MUST refuse it.
     $foreignScript = Join-Path $root "foreign-fixture.js"
@@ -129,6 +169,7 @@ try {
         if ($fake.HasExited) { throw "Foreign fixture exited before ownership check" }
         $forgedStatus = Invoke-C2C -CliArgs @("status", "--instance", $instance)
         if ($forgedStatus.alive -ne $true) { throw "Foreign fixture not alive according to CLI" }
+        Invoke-C2C -CliArgs @("reload", "--instance", $instance) -ExpectFailure
         Invoke-C2C -CliArgs @("stop", "--instance", $instance, "--force") -ExpectFailure
         $fake.Refresh()
         if ($fake.HasExited) { throw "Unsafe: stop signaled unrelated process" }
