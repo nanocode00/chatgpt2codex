@@ -1,6 +1,6 @@
 # ChatGPT To Codex Desktop — Tauri 2 + React (preview)
 
-> **Current preview status (2026-11-10).** The F5-D owned-instance lifecycle, verified Quick Tunnel and actual ChatGPT OAuth/MCP integration, plus the F5-E typed CLI profile/config/diagnostic/read-only panels and Windows live reload, are implemented. Windows Reload was manually accepted by the owner. See [CLI feature matrix](../docs/TAURI_CLI_PARITY_MATRIX.md) and [F5-F release acceptance proposal](https://github.[REDACTED]). The earlier "Not implemented" sections below describe the historical prototype baseline, not current capabilities. This remains a separately owned preview, **not** a signed production replacement or an automatic WinForms cutover.
+> **Current preview status (2026-11-10).** F5-D includes the isolated CLI lifecycle, separate Quick Tunnel, and real ChatGPT OAuth/MCP roundtrip. F5-E connects typed profile/config/diagnostic/read-only commands and Windows live reload, whose manual acceptance was confirmed. See [CLI feature matrix](../docs/TAURI_CLI_PARITY_MATRIX.md) and [F5-F acceptance proposal](https://github.com/nanocode00/chatgpt2codex/pull/93). The historical "Not implemented" paragraphs below describe the earlier prototype, not the current preview. This remains unsigned review-only software, not a WinForms replacement.
 
 This **new** app lives alongside the working v0.3.1 WinForms launcher.
 It is a separate prototype, not yet a packaged replacement. It does **not**
@@ -296,7 +296,7 @@ take over `default:7979`. Catalog mutations are blocked while an owned
 runtime record is present or port 18797 is occupied.
 
 The higher-level project/lease redesign is deferred to
-[issue #82](https://github.[REDACTED]).
+[issue #82](https://github.com/nanocode00/chatgpt2codex/issues/82).
 
 ## WinForms migration preflight
 
