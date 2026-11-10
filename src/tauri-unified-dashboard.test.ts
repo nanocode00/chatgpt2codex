@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import { publicView, runtimeView, startAction, storedPublicPreference } from "../desktop/src/dashboard-state";
 import type { ManagedResult, PublicTunnelHealth } from "../desktop/src/runtime";
 
@@ -19,6 +20,16 @@ const checked: PublicTunnelHealth = {
 };
 
 describe("first unified dashboard: owned runtime only", () => {
+  it("switches card columns by usable dashboard width instead of the window viewport", () => {
+    const css = readFileSync("desktop/src/dashboard.css", "utf8");
+    expect(css).toContain("container-name:dashboard");
+    expect(css).toContain("container-type:inline-size");
+    expect(css).toContain("@container dashboard (max-width:900px)");
+    expect(css).toContain("@container dashboard (max-width:620px)");
+    expect(css).toContain("word-break:keep-all");
+    expect(css).not.toMatch(/@media\(max-width:1050px\)\{\.dash-status-grid/);
+  });
+
   it("keeps the stopped-state public preference distinct from a live tunnel", () => {
     expect(storedPublicPreference(null)).toBe(false);
     expect(storedPublicPreference("false")).toBe(false);
