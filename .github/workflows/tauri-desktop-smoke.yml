@@ -5,6 +5,10 @@ on:
     paths:
       - "desktop/**"
       - "src/cli.ts"
+      - "src/runtime/live-reload.ts"
+      - "src/runtime/live-reload.test.ts"
+      - "src/runtime/windows-reload.ts"
+      - "src/runtime/windows-reload.test.ts"
       - "src/workspace/registry.ts"
       - "src/workspace/registry.test.ts"
       - "src/runtime/instances.ts"
@@ -15,6 +19,7 @@ on:
       - "scripts/test-windows-cli-lifecycle-isolated.ps1"
       - "scripts/windows-cli-commands.ps1"
       - "scripts/test-windows-cli-commands-isolated.ps1"
+      - "scripts/test-windows-cli-lifecycle-isolated.ps1"
       - "scripts/inspect-windows-f4-acceptance.ps1"
       - "scripts/test-windows-f4-native-rollback.ps1"
       - ".github/workflows/tauri-desktop-smoke.yml"
@@ -51,6 +56,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "CLI TypeScript build failed" }
           npm run typecheck
           if ($LASTEXITCODE -ne 0) { throw "CLI Typecheck failed" }
+      - name: Test Windows named-pipe reload protocol and owner checks
+        run: npm exec -- vitest run src/runtime/windows-reload.test.ts src/runtime/live-reload.test.ts
       - name: Test native Windows no-tunnel CLI start stop restart and PID ownership
         shell: pwsh
         run: ./scripts/test-windows-cli-lifecycle-isolated.ps1
