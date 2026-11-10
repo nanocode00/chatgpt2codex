@@ -2,24 +2,18 @@ import { describe, expect, it } from "vitest";
 import { displayProjectPath, filterProjects, parseProjectDetails } from "../desktop/src/project-details";
 
 describe("Tauri unified projects screen", () => {
-
   it("removes only the Windows extended-length drive prefix for display and copy", () => {
-    const path = String.raw\`\\\\?\C:\Users\nanocode\fastdesk\`;
-    expect(displayProjectPath(path)).toBe(String.raw\`C:\Users\nanocode\fastdesk\`);
-    expect(path).toBe(String.raw\`\\\\?\C:\Users\nanocode\fastdesk\`);
-    expect(displayProjectPath(String.raw\`D:\code\repo\`)).toBe(String.raw\`D:\code\repo\`);
+    const path = "\\\\?\\C:\\Users\\nanocode\\fastdesk";
+    expect(displayProjectPath(path)).toBe("C:\\Users\\nanocode\\fastdesk");
+    expect(path).toBe("\\\\?\\C:\\Users\\nanocode\\fastdesk");
+    expect(displayProjectPath("D:\\code\\repo")).toBe("D:\\code\\repo");
   });
-
   it("converts extended UNC presentation while retaining unsupported device namespaces", () => {
-    expect(displayProjectPath(String.raw\`\\\\?\UNC\server\share\repo\`))
-      .toBe(String.raw\`\\server\share\repo\`);
-    expect(displayProjectPath(String.raw\`\\\\?\Volume{1234-ABCD}\repo\`))
-      .toBe(String.raw\`\\\\?\Volume{1234-ABCD}\repo\`);
-    expect(displayProjectPath(String.raw\`\\.\PhysicalDrive0\`))
-      .toBe(String.raw\`\\.\PhysicalDrive0\`);
+    expect(displayProjectPath("\\\\?\\UNC\\server\\share\\repo")).toBe("\\\\server\\share\\repo");
+    expect(displayProjectPath("\\\\?\\Volume{1234-ABCD}\\repo")).toBe("\\\\?\\Volume{1234-ABCD}\\repo");
+    expect(displayProjectPath("\\\\.\\PhysicalDrive0")).toBe("\\\\.\\PhysicalDrive0");
     expect(displayProjectPath("/home/user/repo")).toBe("/home/user/repo");
   });
-
   it("searches case-insensitively and preserves alphabetical ordering without mutating input", () => {
     const projects = [
       { id: "zeta", name: "Zeta", available: false },
