@@ -63,7 +63,7 @@ export function Dashboard({
   const hasProjects = catalog?.available === true;
   const canToggle = native && !ownedBusy && owned?.available === true && owned.tunnelCapable;
   const publicText = !running
-    ? publicPreferred ? "다음 MCP 시작 시 Quick Tunnel을 실행합니다." : "다음 시작 시 로컬 MCP만 실행합니다."
+    ? publicPreferred ? "다음 시작 때 Quick Tunnel을 켭니다." : "다음 시작은 로컬 전용입니다."
     : tunnelState === "online" ? "공개 HTTPS Health가 확인됐습니다. OAuth 인증은 별도입니다."
     : tunnelState === "inactive" ? "MCP는 실행 중이며 외부에 공개하지 않았습니다."
     : ownedPublicChecking ? "현재 공개 HTTPS 연결을 자동 확인 중입니다."
