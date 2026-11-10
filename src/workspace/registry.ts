@@ -52,7 +52,10 @@ async function getBranch(dir: string): Promise<string | undefined> {
     const { stdout } = await execFileAsync(
       "git",
       ["rev-parse", "--abbrev-ref", "HEAD"],
-      { cwd: dir, timeout: 5000 },
+      // During HTTP server startup, every registered Git repo is inspected.
+      // Git for Windows is a console executable: without windowsHide each
+      // metadata query flashes a terminal in the Tauri desktop session.
+      { cwd: dir, timeout: 5000, windowsHide: true },
     );
     const branch = stdout.trim();
     return branch.length > 0 ? branch : undefined;
@@ -67,7 +70,7 @@ async function getDirty(dir: string): Promise<boolean | undefined> {
     const { stdout } = await execFileAsync(
       "git",
       ["status", "--porcelain"],
-      { cwd: dir, timeout: 10000 },
+      { cwd: dir, timeout: 10000, windowsHide: true },
     );
     return stdout.trim().length > 0;
   } catch {
