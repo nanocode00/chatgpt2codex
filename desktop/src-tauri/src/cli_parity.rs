@@ -397,7 +397,9 @@ mod tests {
         req.value = Some(python.to_string_lossy().into_owned());
         let plan_value = plan(&req).expect("one audited combined CLI plan");
         assert!(plan_value.mutating);
-        assert_eq!(plan_value.args[..3], ["profile", "add", "combined-dev"]);
+        assert_eq!(plan_value.args[0], "profile");
+        assert_eq!(plan_value.args[1], "add");
+        assert_eq!(plan_value.args[2], "combined-dev");
         for flag in ["--python", "--compose-file", "--project-name", "--services", "--control-services"] {
             assert!(plan_value.args.contains(&flag.to_string()));
         }
