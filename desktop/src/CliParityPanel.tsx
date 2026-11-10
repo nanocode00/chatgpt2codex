@@ -3,7 +3,7 @@ import { RefreshCcw, TerminalSquare, Settings2, Activity, Layers, Play, Trash2, 
 import { isNativeApp, runOwnedCliParity, type OwnedCliParityRequest, type OwnedCliParityOperation, type OwnedCliParityResponse } from "./runtime";
 
 type Profile = { alias: string; python: boolean; docker: boolean };
-type Group = "profiles" | "config" | "operations";
+type Group = "profiles" | "config" | "operations" | "advanced";
 
 function parseProfiles(result: OwnedCliParityResponse): Profile[] {
   const value = result.json as { profiles?: unknown } | null;
@@ -16,7 +16,8 @@ function parseProfiles(result: OwnedCliParityResponse): Profile[] {
 const GROUPS: { key: Group; title: string; subtitle: string }[] = [
   { key: "profiles", title: "프로필", subtitle: "profile list / show / add / remove / test" },
   { key: "config", title: "설정", subtitle: "config show / set / unset / export" },
-  { key: "operations", title: "진단·재로드", subtitle: "status / health / doctor / logs / reload" }
+  { key: "operations", title: "진단·재로드", subtitle: "status / health / doctor / logs / reload" },
+  { key: "advanced", title: "추가 조회", subtitle: "repository / secret / job / lock / control" }
 ];
 
 export function CliParityPanel() {
@@ -32,6 +33,7 @@ export function CliParityPanel() {
   const [projectName, setProjectName] = useState("");
   const [services, setServices] = useState("");
   const [controlServices, setControlServices] = useState("");
+  const [target, setTarget] = useState("");
   const [configKey, setConfigKey] = useState("port");
   const [configValue, setConfigValue] = useState("18797");
 
@@ -193,6 +195,39 @@ export function CliParityPanel() {
               onClick={() => run("logs-tunnel")}><TerminalSquare size={15}/>터널 로그</button>
           </div>
         </div>}
+        {group === "advanced" && <div className="cli-parity-section">
+          <div className="legacy-pref-row"><div><strong>추가 읽기 전용 CLI 명령</strong>
+            <p>프리뷰 격리 HOME의 프로젝트 상세, 비밀정보 이름, 작업·잠금 및 제어 요청 상태만 조회합니다.</p>
+          </div></div>
+          <div className="legacy-actions">
+            <button type="button" disabled={!native || busy} className="legacy-action available"
+              onClick={() => run("secret-list")}><Layers size={15}/>secret list (이름만)</button>
+            <button type="button" disabled={!native || busy} className="legacy-action available"
+              onClick={() => run("lock-list")}><Layers size={15}/>lock list</button>
+            <button type="button" disabled={!native || busy} className="legacy-action available"
+              onClick={() => run("job-list")}><Layers size={15}/>job list</button>
+            <button type="button" disabled={!native || busy} className="legacy-action available"
+              onClick={() => run("control-list")}><Layers size={15}/>control list</button>
+            <button type="button" disabled={!native || busy} className="legacy-action available"
+              onClick={() => run("control-auto-status")}><Activity size={15}/>control auto status</button>
+          </div>
+          <div className="legacy-form-row"><label className="legacy-form-label" htmlFor="cli-parity-target">
+            <strong>조회 대상 ID</strong><span>프로젝트 ID 또는 작업 ID · 영문·숫자·._:-만 사용</span></label>
+            <div className="legacy-form-control"><input id="cli-parity-target" className="legacy-field"
+              value={target} onChange={e => setTarget(e.target.value)} maxLength={128}
+              placeholder="예: my-project 또는 job-abc123"/></div>
+          </div>
+          <div className="legacy-actions">
+            <button type="button" disabled={!native || busy || !target} className="legacy-action available"
+              onClick={() => run("repository-show", { target: target.trim() })}>repository show</button>
+            <button type="button" disabled={!native || busy || !target} className="legacy-action available"
+              onClick={() => run("job-status", { target: target.trim() })}>job status</button>
+            <button type="button" disabled={!native || busy || !target} className="legacy-action available"
+              onClick={() => run("job-logs", { target: target.trim() })}>job logs (최대 10건)</button>
+          </div>
+          <p className="legacy-footnote">상세 결과에 포함될 수 있는 토큰·인증 문자열은 숨깁니다.
+            강제 잠금 해제, 작업 취소·재개, 제어 승인·중지, secret 설정·삭제는 실행할 수 없습니다.</p>
+        </div>}
         {busy && <p className="legacy-footnote" role="status">번들 CLI 명령 실행 중…</p>}
         {error && <p className="form-error" role="alert">{error}</p>}
         {result && <div className="cli-parity-output" role="region" aria-label="CLI 실행 결과">
@@ -212,7 +247,8 @@ export function CliParityPanel() {
         <span><strong>config show / set / unset / export</strong><small>이 화면 · 고정 인스턴스 안전 값만 수정</small></span>
         <span><strong>status / health / doctor / logs / reload</strong><small>이 화면 · 진단·재로드</small></span>
         <span><strong>config import / import-env, profile import-env</strong><small>CLI 전용 · 파일/환경 변수 반입</small></span>
-        <span><strong>secret / job / lock / control</strong><small>CLI 전용 · 인증정보 및 고급 작업</small></span>
+        <span><strong>secret list / lock list / job list·status·logs / control list·auto status</strong><small>추가 조회 탭 · 읽기 전용</small></span>
+        <span><strong>secret set/remove, job cancel/resume, lock release, control approve/reject/kill/auto</strong><small>CLI 전용 · 인증정보 및 권한이 필요한 변경</small></span>
         <span><strong>serve / init / repository use</strong><small>내부 런타임 전용 · Tauri 고정 작업 공간과 분리</small></span>
       </div><p className="legacy-footnote">CLI 전용 항목은 이 UI에서 실행되지 않습니다.
         권한·인증 경계를 유지한 채 후속 단계에서 개별 제공 여부를 결정합니다.</p></div>
