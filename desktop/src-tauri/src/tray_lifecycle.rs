@@ -27,7 +27,7 @@ pub(crate) fn hide_main(app: &AppHandle) -> Result<(), String> {
 
 pub(crate) fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     let open = MenuItem::with_id(app, MENU_SHOW, "창 열기", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, MENU_QUIT, "프리뷰 종료", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, MENU_QUIT, "앱만 종료 (MCP 유지)", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &quit])?;
     let icon = app.default_window_icon().cloned()
         .ok_or_else(|| std::io::Error::other("missing Tauri preview tray icon"))?;
@@ -57,7 +57,7 @@ pub(crate) fn on_window_event(window: &tauri::Window, event: &WindowEvent) {
         return;
     }
     match event {
-        // X hides the preview; tray "프리뷰 종료" and in-app exit are
+        // X hides the preview; tray "앱만 종료" and in-app exit are
         // explicit. Do not block closure if Windows refuses to hide.
         WindowEvent::CloseRequested { api, .. } => {
             if window.hide().is_ok() {
