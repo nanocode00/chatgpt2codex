@@ -11,6 +11,25 @@ export interface ProjectDetails {
   packageHints: string[];
 }
 
+/**
+ * Windows fs.realpath/canonicalize may produce Win32 device namespace paths
+ * such as \\?\C:\repo or \\?\UNC\server\share\repo.
+ * Only normalize the *presentation* (and user-facing clipboard copy).
+ * Never use the display value for CLI arguments, ownership checks, or identity.
+ */
+export function displayProjectPath(raw: string): string {
+  const extendedPrefix = "\\\\?\\";
+  if (!raw.startsWith(extendedPrefix)) return raw;
+
+  const remainder = raw.slice(extendedPrefix.length);
+  if (/^[A-Za-z]:\\/.test(remainder)) return remainder;
+  if (/^UNC\\[^\\]+\\[^\\]+(?:\\|$)/i.test(remainder)) {
+    return "\\\\" + remainder.slice(4);
+  }
+  // Preserve non-drive device paths (Volume GUIDs, etc.) verbatim.
+  return raw;
+}
+
 export function filterProjects(items: CatalogRepository[], query: string): CatalogRepository[] {
   const needle = query.trim().toLocaleLowerCase();
   return [...items].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
