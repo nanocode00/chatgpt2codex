@@ -35,6 +35,7 @@
 .projects-search input::placeholder{color:#888}
 .projects-search button{background:transparent;border:0;color:#aaa;padding:5px;display:grid;place-items:center}
 .projects-entries{display:flex;flex-direction:column;gap:5px;height:202px;min-height:202px;max-height:202px;padding:0 11px;overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable;overscroll-behavior:contain}
+.projects-entries:focus-visible{outline:1px solid #979797;outline-offset:-2px;border-radius:8px}
 .projects-entry{width:100%;min-width:0;min-height:64px;max-height:64px;flex:0 0 64px;display:flex;align-items:center;gap:10px;padding:12px 11px;border-radius:10px;border:1px solid transparent;background:transparent;color:#eee;text-align:left}
 .projects-entry:hover{background:#2f2f2f}
 .projects-entry.selected{background:#333;border-color:#626262}
