@@ -5,7 +5,7 @@ import {
   Settings2, ShieldCheck, TerminalSquare, Wifi, WifiOff
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { checkRuntime, inspectInstalledCli, inspectInstalledCliLogs, inspectPublicTunnel, manageOwnedCli, inspectOwnedPublicTunnelHealth, inspectOwnedCatalog, unregisterOwnedRepository, pickOwnedRepositoryFolder, registerOwnedPickedRepository, cancelOwnedPickedRepository, closePreviewWindow, hidePreviewWindow, openTrustedLink, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type CliInspection, type CliLogPreview, type CliLogComponent, type ManagedAction, type ManagedResult, type CatalogInspection, type PickedRepositoryFolder, type PublicTunnelHealth, type RuntimeHealth, type TrustedLink } from "./runtime";
+import { checkRuntime, inspectInstalledCli, inspectInstalledCliLogs, inspectPublicTunnel, manageOwnedCli, inspectOwnedPublicTunnelHealth, inspectOwnedCatalog, unregisterOwnedRepository, pickOwnedRepositoryFolder, registerOwnedPickedRepository, cancelOwnedPickedRepository, closePreviewWindow, closePreviewWithOwnedMcp, hidePreviewWindow, openTrustedLink, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type CliInspection, type CliLogPreview, type CliLogComponent, type ManagedAction, type ManagedResult, type CatalogInspection, type PickedRepositoryFolder, type PublicTunnelHealth, type RuntimeHealth, type TrustedLink } from "./runtime";
 import { ManagementControls, LegacyConnectionControls, LegacyDiagnosticsControls, LegacySettingsControls } from "./LegacyControls";
 import { MigrationPreflight } from "./MigrationPreflight";
 import { inspectLegacyMigration, saveLegacySettingsSnapshot, inspectCredentialBackup, createCredentialBackup, rehearseCredentialRestore, type LegacyMigrationReport, type CredentialBackupReport, type RestoreRehearsalReport } from "./runtime";
@@ -60,6 +60,7 @@ function App() {
   const [logsChecking, setLogsChecking] = useState(false);
   const [publicCopied, setPublicCopied] = useState(false);
   const [exitError, setExitError] = useState("");
+  const [exitBusy, setExitBusy] = useState(false);
   const [trayError, setTrayError] = useState("");
   const [linkError, setLinkError] = useState("");
   const [owned, setOwned] = useState<ManagedResult | null>(null);
@@ -496,11 +497,23 @@ function App() {
     }
   }
 
-  async function exitPreview() {
+  async function exitPreview(includeOwnedMcp = false) {
+    if (exitBusy || ownedBusy) return;
+    if (includeOwnedMcp && !window.confirm(
+      "Tauri 전용 MCP 서버와 Quick Tunnel을 안전하게 중지하고 앱을 종료할까요?\\n\\n현재 ChatGPT의 작업 연결은 끊어집니다. 기존 WinForms/7979 서버는 유지됩니다. 서버 중지에 실패하면 앱을 종료하지 않습니다."
+    )) return;
+    setExitBusy(true);
+    setExitError("");
     try {
-      await closePreviewWindow();
-    } catch {
-      setExitError("Tauri 프리뷰를 종료하지 못했습니다. 트레이 아이콘의 '프리뷰 종료'를 사용해 주세요.");
+      if (includeOwnedMcp) await closePreviewWithOwnedMcp();
+      else await closePreviewWindow();
+    } catch (error) {
+      setExitError(nativeFailureMessage(error,
+        includeOwnedMcp
+          ? "전용 MCP 종료에 실패했습니다. 앱을 유지하고 상태를 확인하세요."
+          : "Tauri 앱 종료에 실패했습니다."));
+    } finally {
+      setExitBusy(false);
     }
   }
 
@@ -638,7 +651,7 @@ function App() {
         {screen === "manage" && <>
           <div className="page-heading"><div><div className="eyebrow">MANAGEMENT</div><h1>런타임 관리</h1>
             <p>기존 Windows 런처의 관리 항목을 먼저 배치했어. 실제 서버 제어는 안전성 검증 후 연결해.</p></div></div>
-          <ManagementControls onConnections={() => setScreen("connections")} onSettings={() => setScreen("settings")} onExit={() => { void exitPreview(); }} exitError={exitError}
+          <ManagementControls onConnections={() => setScreen("connections")} onSettings={() => setScreen("settings")} onExit={() => { void exitPreview(); }} onCompleteExit={() => { void exitPreview(true); }} exitBusy={exitBusy} exitError={exitError}
             onHide={() => { void hideToTray(); }} trayError={trayError}
             owned={owned} ownedBusy={ownedBusy} ownedError={ownedError} ownedToken={ownedToken}
             ownedUrlNotice={ownedUrlNotice} onCopyOwnedConnector={() => { void copyOwnedConnector(); }}
