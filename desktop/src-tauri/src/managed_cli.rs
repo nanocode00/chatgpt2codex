@@ -289,10 +289,13 @@ pub(crate) fn parity_cli(args: &[String], mutating: bool, needs_owned_runtime: b
     let lock = MUTATION_LOCK.get_or_init(|| Mutex::new(()));
     // Lock even reads, so a list/show cannot race with rotation or stopping.
     let _guard = lock.lock().map_err(|_| "CLI 제어 잠금에 실패했습니다.")?;
-    if needs_owned_runtime && record_if_any(&root)?.is_none() {
+    // All commands, including status/health, must reject foreign/stale
+    // runtime records before a CLI status probe could mutate their state.
+    let owned_record = record_if_any(&root)?;
+    if needs_owned_runtime && owned_record.is_none() {
         return Err("Tauri 전용 MCP가 실행 중이 아닙니다. 재로드는 실행 중인 전용 서버에만 허용됩니다.".into());
     }
-    if mutating && port_occupied() && record_if_any(&root)?.is_none() {
+    if mutating && port_occupied() && owned_record.is_none() {
         return Err("전용 포트를 외부 프로세스가 사용 중입니다. CLI 설정 변경을 거부합니다.".into());
     }
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
