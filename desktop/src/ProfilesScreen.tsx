@@ -118,7 +118,7 @@ export function ProfilesScreen({ catalog, catalogBusy, catalogError, onRefresh, 
 
   async function save() {
     if (!available || busy || !editorKind) return;
-    const alias = form.alias.trim();
+    const alias = form.alias.trim().toLowerCase();
     const values = { ...form, pythonPath: form.pythonPath.trim(), composeFile: form.composeFile.trim(),
       projectName: form.projectName.trim(), services: form.services.trim(), controlServices: form.controlServices.trim() };
     const issue = validateProfileSelection(alias, values, { python: includePython, docker: includeDocker });
