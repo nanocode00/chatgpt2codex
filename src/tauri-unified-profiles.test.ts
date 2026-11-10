@@ -52,6 +52,8 @@ describe("Tauri unified execution profiles", () => {
     expect(profileAliasValid("a.good_alias-2")).toBe(true);
     expect(profileAliasValid("-bad")).toBe(false);
     expect(profileAliasValid("a..b")).toBe(false);
+    expect(profileAliasValid("auto")).toBe(false);
+    expect(profileAliasValid("Dev")).toBe(true);
     expect(validateDraft("python", "python-dev", draft)).toBeNull();
     expect(validateDraft("python", "python-dev", { ...draft, pythonPath: "python" })).toBeTruthy();
     expect(validateDraft("python", "python-dev", { ...draft, pythonPath: "C:\\evil.exe" })).toBeTruthy();
