@@ -8,7 +8,7 @@ import {
   isNativeApp, runOwnedCliParity,
   type CatalogInspection, type PickedRepositoryFolder
 } from "./runtime";
-import { filterProjects, parseProjectDetails, type ProjectDetails } from "./project-details";
+import { displayProjectPath, filterProjects, parseProjectDetails, type ProjectDetails } from "./project-details";
 import "./projects.css";
 
 interface ProjectsScreenProps {
@@ -142,7 +142,7 @@ export function ProjectsScreen({
       <p className="projects-help">선택된 폴더는 등록할 때까지 변경하지 않습니다. 실제 파일 이동이나 복사도 수행하지 않습니다.</p>
       <form className="projects-register-grid" onSubmit={event => { event.preventDefault(); onRegister(); }}>
         <label className="wide">선택한 폴더
-          <input readOnly value={pickedFolder.path} aria-label="선택된 프로젝트 폴더"/>
+          <input readOnly value={displayProjectPath(pickedFolder.path)} aria-label="선택된 프로젝트 폴더"/>
         </label>
         <label>표시 이름
           <input value={folderName} maxLength={160} onChange={e => onFolderName(e.target.value)}
@@ -226,9 +226,9 @@ export function ProjectsScreen({
           <div className="projects-property">
             <span>등록 경로</span>
             {details ? <div className="projects-property-value">
-                <code className="projects-path">{details.root}</code>
+                <code className="projects-path">{displayProjectPath(details.root)}</code>
                 <button type="button" aria-label="프로젝트 경로 복사" title="경로 복사"
-                  onClick={() => { void copy(details.root, "프로젝트 경로"); }}><ClipboardCopy size={15}/></button>
+                  onClick={() => { void copy(displayProjectPath(details.root), "프로젝트 경로"); }}><ClipboardCopy size={15}/></button>
               </div> :
               <p>{selected.available ? detailsBusy ? "경로 확인 중..." : "상세 정보를 확인하지 못했습니다." : "디렉터리를 찾을 수 없어 조회하지 않았습니다."}</p>}
           </div>
