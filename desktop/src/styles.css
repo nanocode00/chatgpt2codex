@@ -266,3 +266,10 @@ button:focus-visible,input:focus-visible{outline:2px solid #999;outline-offset:2
 .cli-parity-matrix span{display:flex;flex-direction:column;gap:7px;padding:11px 13px;background:#242524;border:1px solid #393b39;border-radius:8px;min-width:0}
 .cli-parity-matrix strong{font-size:11px;line-height:1.5;overflow-wrap:anywhere}
 .cli-parity-matrix small{font-size:10px;color:#999;line-height:1.5}
+
+/* Unified dashboard only: neutralize the legacy mint online indicators. Other screens are rebuilt later. */
+.shell:has(.dashboard-root) .tiny-led.glow,
+.shell:has(.dashboard-root) .host-dot.connected {
+  background:#c9c9c9;
+  box-shadow:0 0 0 3px #c9c9c920;
+}
