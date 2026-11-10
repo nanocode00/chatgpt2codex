@@ -16,7 +16,7 @@ import path from "node:path";
 import type { RuntimeInstanceRecord } from "./instances.js";
 
 const MAX_PACKET = 4096;
-const TIMEOUT_MS = 7_000;
+const TIMEOUT_MS = 18_000;
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
 
