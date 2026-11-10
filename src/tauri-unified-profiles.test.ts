@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { filterProfiles, parseProfileDetails, parseProfileTest, profileAliasValid, validateDraft } from "../desktop/src/profile-model";
+import { filterProfiles, parseProfileDetails, parseProfileTest, profileAliasValid, validateDraft, validateProfileSelection } from "../desktop/src/profile-model";
 
 const draft = { pythonPath: String.raw`C:\Users\me\miniconda3\envs\dev\python.exe`, composeFile: "compose.yaml",
   projectName: "local-app", services: "api, db", controlServices: "api" };
@@ -59,6 +59,32 @@ describe("Tauri unified execution profiles", () => {
     expect(validateDraft("docker", "docker-dev", { ...draft, composeFile: "../other.yaml" })).toBeTruthy();
     expect(validateDraft("docker", "docker-dev", { ...draft, services: "api;rm" })).toBeTruthy();
     expect(validateDraft("docker", "docker-dev", { ...draft, projectName: "" })).toBeTruthy();
+  });
+
+
+  it("allows either one or both profile kinds, but never neither", () => {
+    expect(validateProfileSelection("dev", draft, { python: false, docker: false })).toContain("하나 이상");
+    expect(validateProfileSelection("dev", draft, { python: true, docker: false })).toBeNull();
+    expect(validateProfileSelection("dev", draft, { python: false, docker: true })).toBeNull();
+    expect(validateProfileSelection("dev", draft, { python: true, docker: true })).toBeNull();
+    expect(validateProfileSelection("dev", { ...draft, pythonPath: "" }, { python: false, docker: true })).toBeNull();
+    expect(validateProfileSelection("dev", { ...draft, projectName: "" }, { python: true, docker: false })).toBeNull();
+    expect(validateProfileSelection("dev", { ...draft, pythonPath: "" }, { python: true, docker: true })).toBeTruthy();
+    expect(validateProfileSelection("dev", { ...draft, services: "" }, { python: true, docker: true })).toBeTruthy();
+    expect(validateProfileSelection("-invalid", draft, { python: false, docker: true })).toBeTruthy();
+  });
+
+  it("shows optional Python/Docker sections and calls one combined operation", () => {
+    const screen = readFileSync("desktop/src/ProfilesScreen.tsx", "utf8");
+    const css = readFileSync("desktop/src/profiles.css", "utf8");
+    const runtime = readFileSync("desktop/src/runtime.ts", "utf8");
+    expect(screen).toContain('checked={includePython}');
+    expect(screen).toContain('checked={includeDocker}');
+    expect(screen).toContain('"profile-add-both"');
+    expect(screen).toContain('includePython && includeDocker ? "profile-add-both"');
+    expect(screen).toContain("validateProfileSelection");
+    expect(css).toContain(".profiles-form-kind-grid");
+    expect(runtime).toContain('"profile-add-both"');
   });
 
   it("focuses the configured kind and keeps another kind as a compact add action", () => {
