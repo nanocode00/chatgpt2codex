@@ -297,11 +297,14 @@ export type OwnedCliParityOperation =
   | "profile-add-python" | "profile-add-docker"
   | "profile-remove-python" | "profile-remove-docker" | "profile-remove-all"
   | "config-show" | "config-export" | "config-set" | "config-unset"
-  | "reload" | "status" | "health" | "doctor" | "logs-server" | "logs-tunnel";
+  | "reload" | "status" | "health" | "doctor" | "logs-server" | "logs-tunnel"
+  | "repository-show" | "secret-list" | "lock-list" | "job-list"
+  | "job-status" | "job-logs" | "control-list" | "control-auto-status";
 
 export interface OwnedCliParityRequest {
   operation: OwnedCliParityOperation;
   alias?: string;
+  target?: string;
   value?: string;
   key?: string;
   composeFile?: string;
