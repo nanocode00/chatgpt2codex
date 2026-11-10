@@ -1,0 +1,35 @@
+name: Windows Dashboard Compile
+
+on:
+  pull_request:
+    paths:
+      - "windows/ChatGPTToCodexLauncher.cs"
+      - ".github/workflows/windows-dashboard-compile.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile native dashboard (no install or process termination)
+        shell: pwsh
+        run: |
+          $csc = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+          if (-not (Test-Path -LiteralPath $csc)) {
+            $csc = Join-Path $env:WINDIR "Microsoft.NET\Framework\v4.0.30319\csc.exe"
+          }
+          if (-not (Test-Path -LiteralPath $csc)) {
+            throw "Windows .NET Framework compiler csc.exe not found"
+          }
+          $output = Join-Path $env:RUNNER_TEMP "chatgpt2codex-dashboard.exe"
+          $source = Join-Path $PWD.Path "windows\ChatGPTToCodexLauncher.cs"
+          & $csc /nologo /target:winexe /reference:System.dll /reference:System.Core.dll /reference:System.Windows.Forms.dll /reference:System.Drawing.dll "/out:$output" $source
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $output)) {
+            throw "Windows dashboard compilation failed"
+          }
+          Write-Host "Windows dashboard compiled successfully."

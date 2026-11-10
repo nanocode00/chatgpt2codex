@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
@@ -28,6 +30,33 @@ internal sealed class LauncherForm : Form
     private const long MaxLauncherLogTotalBytes = 25L * 1024L * 1024L;
     private const int MaxLauncherLogLinesAfterTrim = 2500;
     private const int MaxVisibleLogCharacters = 200000;
+    // Shared visual tokens for the Windows dashboard; no runtime state is stored here.
+    // Neutral desktop palette: subtle surfaces and hierarchy, not saturated navy.
+    private static readonly Color CanvasColor = Color.FromArgb(23, 23, 23);
+    private static readonly Color SidebarColor = Color.FromArgb(29, 30, 30);
+    private static readonly Color HeaderColor = Color.FromArgb(23, 23, 23);
+    private static readonly Color SurfaceColor = Color.FromArgb(37, 37, 37);
+    private static readonly Color FieldColor = Color.FromArgb(47, 47, 47);
+    private static readonly Color BorderColor = Color.FromArgb(61, 61, 61);
+    private static readonly Color AccentColor = Color.FromArgb(65, 65, 65);
+    private static readonly Color ConsoleColor = Color.FromArgb(26, 26, 26);
+    private static readonly Color MainTextColor = Color.FromArgb(239, 239, 239);
+    private static readonly Color MutedTextColor = Color.FromArgb(163, 163, 163);
+
+    [DllImport("dwmapi.dll", PreserveSig = true)]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+
+    private static void TryUseDarkTitleBar(Form form)
+    {
+        // Windows 10/11 only. Older Windows versions keep their normal title bar.
+        try
+        {
+            var enabled = 1;
+            DwmSetWindowAttribute(form.Handle, 20, ref enabled, sizeof(int));
+        }
+        catch (DllNotFoundException) { }
+        catch (EntryPointNotFoundException) { }
+    }
     private static readonly string[] LanguageCodes = new[]
     {
         "en", "ko", "ja", "zh-Hans", "zh-Hant", "es", "fr", "de", "pt-BR", "it",
@@ -78,6 +107,9 @@ internal sealed class LauncherForm : Form
         {"about", new[] {"About ezBuilder", "ezBuilder 정보", "ezBuilder について", "关于 ezBuilder", "關於 ezBuilder"}},
         {"save", new[] {"Save", "저장", "保存", "保存", "儲存", "Guardar", "Enregistrer", "Speichern", "Salvar", "Salva", "Opslaan", "Zapisz", "Сохранить", "Kaydet", "Lưu", "Simpan", "บันทึก", "حفظ", "सहेजें", "Зберегти"}},
         {"cancel", new[] {"Cancel", "취소", "キャンセル", "取消", "取消", "Cancelar", "Annuler", "Abbrechen", "Cancelar", "Annulla", "Annuleren", "Anuluj", "Отмена", "İptal", "Hủy", "Batal", "ยกเลิก", "إلغاء", "रद्द करें", "Скасувати"}},
+        {"activityLog", new[] {"Activity log", "활동 로그"}},
+        {"dashboardOverview", new[] {"Overview", "개요"}},
+        {"dashboardTools", new[] {"Tools", "도구"}},
         {"connectorUrlLabel", new[] {"connector URL", "커넥터 URL"}},
         {"ownerTokenLabel", new[] {"owner token", "소유자 토큰"}},
         {"copiedItem", new[] {"Copied {0}.", "{0} 복사 완료."}},
@@ -113,6 +145,7 @@ internal sealed class LauncherForm : Form
     private readonly TextBox urlBox;
     private readonly TextBox ownerTokenBox;
     private readonly Label statusLabel;
+    private readonly Label projectSummaryLabel;
     private readonly Button copyButton;
     private readonly Button copyOwnerTokenButton;
     private readonly Button autoGenerateOwnerTokenButton;
@@ -156,16 +189,55 @@ internal sealed class LauncherForm : Form
         logFile = Path.Combine(logDir, "launcher-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".log");
 
         Text = "ChatGPT To Codex";
-        Width = 920;
-        Height = 620;
+        Width = 1050;
+        Height = 700;
+        MinimumSize = new Size(890, 570);
         StartPosition = FormStartPosition.CenterScreen;
+        BackColor = CanvasColor;
+        ForeColor = MainTextColor;
+        Font = new Font("Segoe UI", 9F);
         SetWindowIcon(this);
+        HandleCreated += delegate { TryUseDarkTitleBar(this); };
+
+        var header = new TableLayoutPanel();
+        header.Dock = DockStyle.Top;
+        header.Height = 98;
+        header.BackColor = HeaderColor;
+        header.Padding = new Padding(22, 10, 22, 4);
+        header.ColumnCount = 2;
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 184F));
+        header.RowCount = 2;
+        header.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));
+        header.RowStyles.Add(new RowStyle(SizeType.Absolute, 36F));
+
+        var heading = new Label();
+        heading.Text = L("dashboardOverview");
+        heading.Dock = DockStyle.Fill;
+        heading.Font = new Font("Segoe UI Semibold", 17F, FontStyle.Bold);
+        heading.ForeColor = Color.White;
+        heading.BackColor = HeaderColor;
+        heading.TextAlign = ContentAlignment.MiddleLeft;
+
+        projectSummaryLabel = new Label();
+        projectSummaryLabel.Dock = DockStyle.Fill;
+        projectSummaryLabel.ForeColor = MutedTextColor;
+        projectSummaryLabel.BackColor = HeaderColor;
+        projectSummaryLabel.AutoEllipsis = true;
+        projectSummaryLabel.TextAlign = ContentAlignment.MiddleLeft;
 
         statusLabel = new Label();
         statusLabel.Text = "ChatGPT To Codex: " + L("statusChecking");
-        statusLabel.Dock = DockStyle.Top;
-        statusLabel.Height = 34;
-        statusLabel.Padding = new Padding(10, 8, 10, 0);
+        statusLabel.Dock = DockStyle.Fill;
+        statusLabel.Margin = new Padding(8, 15, 0, 15);
+        statusLabel.ForeColor = MainTextColor;
+        statusLabel.BackColor = SurfaceColor;
+        statusLabel.AutoEllipsis = true;
+        statusLabel.TextAlign = ContentAlignment.MiddleCenter;
+        header.Controls.Add(heading, 0, 0);
+        header.Controls.Add(projectSummaryLabel, 0, 1);
+        header.Controls.Add(statusLabel, 1, 0);
+        header.SetRowSpan(statusLabel, 2);
 
         logBox = new TextBox();
         logBox.Dock = DockStyle.Fill;
@@ -173,80 +245,126 @@ internal sealed class LauncherForm : Form
         logBox.ReadOnly = true;
         logBox.ScrollBars = ScrollBars.Both;
         logBox.WordWrap = false;
-        logBox.Font = new System.Drawing.Font("Consolas", 10);
+        logBox.Font = new Font("Consolas", 10);
+        logBox.BorderStyle = BorderStyle.None;
+        logBox.BackColor = ConsoleColor;
+        logBox.ForeColor = MainTextColor;
 
-        var bottomPanel = new TableLayoutPanel();
-        bottomPanel.Dock = DockStyle.Bottom;
-        bottomPanel.Height = 86;
-        bottomPanel.ColumnCount = 1;
-        bottomPanel.RowCount = 2;
-        bottomPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
-        bottomPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
+        var activityCard = new Panel();
+        activityCard.Dock = DockStyle.Fill;
+        activityCard.Padding = new Padding(16, 8, 16, 12);
+        activityCard.BackColor = ConsoleColor;
 
-        var urlPanel = new FlowLayoutPanel();
-        urlPanel.Dock = DockStyle.Fill;
-        urlPanel.Padding = new Padding(8, 7, 8, 0);
-        urlPanel.FlowDirection = FlowDirection.LeftToRight;
-        urlPanel.WrapContents = false;
+        var activityHeading = new Label();
+        activityHeading.Dock = DockStyle.Top;
+        activityHeading.Height = 30;
+        activityHeading.Text = L("activityLog");
+        activityHeading.Font = new Font("Segoe UI Semibold", 10F, FontStyle.Bold);
+        activityHeading.ForeColor = MutedTextColor;
+        activityHeading.BackColor = ConsoleColor;
+        activityCard.Controls.Add(logBox);
+        activityCard.Controls.Add(activityHeading);
+
+        var activityArea = new Panel();
+        activityArea.Dock = DockStyle.Fill;
+        activityArea.Padding = new Padding(24, 8, 24, 22);
+        activityArea.BackColor = CanvasColor;
+        activityArea.Controls.Add(activityCard);
+
+        var connectionArea = new Panel();
+        connectionArea.Dock = DockStyle.Top;
+        connectionArea.Height = 188;
+        connectionArea.Padding = new Padding(24, 2, 24, 12);
+        connectionArea.BackColor = CanvasColor;
+
+        var connectionGrid = new TableLayoutPanel();
+        connectionGrid.Dock = DockStyle.Fill;
+        connectionGrid.Padding = new Padding(18, 12, 18, 10);
+        connectionGrid.BackColor = SurfaceColor;
+        connectionGrid.ColumnCount = 3;
+        connectionGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        connectionGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 142F));
+        connectionGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 162F));
+        connectionGrid.RowCount = 4;
+        connectionGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 27F));
+        connectionGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 40F));
+        connectionGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 27F));
+        connectionGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 40F));
+        var connectorLabel = new Label();
+        connectorLabel.Text = L("connectorUrlLabel");
+        connectorLabel.Dock = DockStyle.Fill;
+        connectorLabel.ForeColor = MutedTextColor;
+        connectorLabel.BackColor = SurfaceColor;
+        var ownerLabel = new Label();
+        ownerLabel.Text = L("ownerTokenLabel");
+        ownerLabel.Dock = DockStyle.Fill;
+        ownerLabel.ForeColor = MutedTextColor;
+        ownerLabel.BackColor = SurfaceColor;
 
         urlBox = new TextBox();
-        urlBox.Width = 520;
+        urlBox.Dock = DockStyle.Fill;
         urlBox.ReadOnly = true;
         urlBox.Text = "Connector URL will appear here";
+        StyleReadOnlyField(urlBox);
 
         copyButton = new Button();
         copyButton.Text = L("copyConnector");
-        copyButton.Width = 150;
+        copyButton.Dock = DockStyle.Fill;
         copyButton.Enabled = false;
         copyButton.Click += delegate { CopyMcpUrl(); };
-
-        var tokenPanel = new FlowLayoutPanel();
-        tokenPanel.Dock = DockStyle.Fill;
-        tokenPanel.Padding = new Padding(8, 1, 8, 7);
-        tokenPanel.FlowDirection = FlowDirection.LeftToRight;
-        tokenPanel.WrapContents = false;
+        StyleActionButton(copyButton, false);
 
         ownerTokenBox = new TextBox();
-        ownerTokenBox.Width = 520;
+        ownerTokenBox.Dock = DockStyle.Fill;
         ownerTokenBox.ReadOnly = true;
         ownerTokenBox.Text = "Owner token will be auto-generated and copied on first setup";
+        StyleReadOnlyField(ownerTokenBox);
 
         copyOwnerTokenButton = new Button();
         copyOwnerTokenButton.Text = L("copyOwnerToken");
-        copyOwnerTokenButton.Width = 130;
+        copyOwnerTokenButton.Dock = DockStyle.Fill;
         copyOwnerTokenButton.Enabled = false;
         copyOwnerTokenButton.Click += delegate { CopyOwnerToken(); };
+        StyleActionButton(copyOwnerTokenButton, false);
 
         autoGenerateOwnerTokenButton = new Button();
         autoGenerateOwnerTokenButton.Text = L("autoGenerateToken");
-        autoGenerateOwnerTokenButton.Width = 150;
+        autoGenerateOwnerTokenButton.Dock = DockStyle.Fill;
         autoGenerateOwnerTokenButton.Click += delegate { AutoGenerateOwnerToken(); };
+        StyleActionButton(autoGenerateOwnerTokenButton, false);
 
         openLogButton = new Button();
         openLogButton.Text = L("showLogs");
-        openLogButton.Width = 100;
+        openLogButton.Dock = DockStyle.Fill;
         openLogButton.Click += delegate { ShowLogs(); };
+        StyleActionButton(openLogButton, false);
 
         stopButton = new Button();
         stopButton.Text = L("stopMCP");
-        stopButton.Width = 100;
+        stopButton.Dock = DockStyle.Fill;
         stopButton.Click += delegate { ToggleServer(); };
+        StyleActionButton(stopButton, true);
 
-        urlPanel.Controls.Add(urlBox);
-        urlPanel.Controls.Add(copyButton);
-        urlPanel.Controls.Add(openLogButton);
-        urlPanel.Controls.Add(stopButton);
+        connectionGrid.Controls.Add(connectorLabel, 0, 0);
+        connectionGrid.Controls.Add(urlBox, 0, 1);
+        connectionGrid.Controls.Add(copyButton, 1, 1);
+        connectionGrid.Controls.Add(stopButton, 2, 1);
+        connectionGrid.Controls.Add(ownerLabel, 0, 2);
+        connectionGrid.Controls.Add(ownerTokenBox, 0, 3);
+        connectionGrid.Controls.Add(copyOwnerTokenButton, 1, 3);
+        connectionGrid.Controls.Add(autoGenerateOwnerTokenButton, 2, 3);
+        connectionArea.Controls.Add(connectionGrid);
 
-        tokenPanel.Controls.Add(ownerTokenBox);
-        tokenPanel.Controls.Add(copyOwnerTokenButton);
-        tokenPanel.Controls.Add(autoGenerateOwnerTokenButton);
+        var mainArea = new Panel();
+        mainArea.Dock = DockStyle.Fill;
+        mainArea.BackColor = CanvasColor;
+        mainArea.Controls.Add(activityArea);
+        mainArea.Controls.Add(connectionArea);
+        mainArea.Controls.Add(header);
 
-        bottomPanel.Controls.Add(urlPanel, 0, 0);
-        bottomPanel.Controls.Add(tokenPanel, 0, 1);
-
-        Controls.Add(logBox);
-        Controls.Add(bottomPanel);
-        Controls.Add(statusLabel);
+        var sidebar = BuildSidebar();
+        Controls.Add(mainArea);
+        Controls.Add(sidebar);
 
         trayMenu = new ContextMenuStrip();
         statusTrayItem = new ToolStripMenuItem("ChatGPT To Codex: " + L("statusChecking"));
@@ -707,6 +825,110 @@ internal sealed class LauncherForm : Form
         return markers.Any(marker => Directory.Exists(Path.Combine(path, marker)) || File.Exists(Path.Combine(path, marker)));
     }
 
+    private Panel BuildSidebar()
+    {
+        var sidebar = new Panel();
+        sidebar.Dock = DockStyle.Left;
+        sidebar.Width = 220;
+        sidebar.BackColor = SidebarColor;
+
+        var brandPanel = new Panel();
+        brandPanel.Dock = DockStyle.Top;
+        brandPanel.Height = 100;
+        brandPanel.BackColor = SidebarColor;
+        var brand = new Label();
+        brand.Text = "ChatGPT To Codex";
+        brand.Font = new Font("Segoe UI Semibold", 12F, FontStyle.Bold);
+        brand.ForeColor = MainTextColor;
+        brand.SetBounds(18, 18, 188, 28);
+        brand.AutoEllipsis = true;
+        var descriptor = new Label();
+        descriptor.Text = "LOCAL MCP";
+        descriptor.Font = new Font("Segoe UI", 8F);
+        descriptor.ForeColor = MutedTextColor;
+        descriptor.SetBounds(19, 50, 188, 20);
+        var rule = new Panel();
+        rule.BackColor = BorderColor;
+        rule.Dock = DockStyle.Bottom;
+        rule.Height = 1;
+        brandPanel.Controls.Add(brand);
+        brandPanel.Controls.Add(descriptor);
+        brandPanel.Controls.Add(rule);
+
+        var navigation = new FlowLayoutPanel();
+        navigation.Dock = DockStyle.Fill;
+        navigation.AutoScroll = true;
+        navigation.WrapContents = false;
+        navigation.FlowDirection = FlowDirection.TopDown;
+        navigation.Padding = new Padding(14, 14, 6, 12);
+        navigation.BackColor = SidebarColor;
+
+        var selected = new Label();
+        selected.Text = L("dashboardOverview");
+        selected.Width = 184;
+        selected.Height = 39;
+        selected.Margin = new Padding(0, 0, 0, 18);
+        selected.Padding = new Padding(12, 0, 0, 0);
+        selected.TextAlign = ContentAlignment.MiddleLeft;
+        selected.ForeColor = MainTextColor;
+        selected.BackColor = FieldColor;
+        selected.Font = new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold);
+        navigation.Controls.Add(selected);
+        navigation.Controls.Add(SidebarSectionLabel(L("projectFolder")));
+        navigation.Controls.Add(SidebarButton(L("browse"), delegate { SelectProjectFolder(); }));
+        navigation.Controls.Add(SidebarSectionLabel(L("dashboardTools")));
+
+        StyleSidebarButton(openLogButton);
+        navigation.Controls.Add(openLogButton);
+        navigation.Controls.Add(SidebarButton(L("settingsMenu"), delegate { ShowSettings(); }));
+        navigation.Controls.Add(SidebarButton(L("openLocalHealth"), delegate { OpenLocalHealth(); }));
+        navigation.Controls.Add(SidebarButton(L("openGithub"), delegate { OpenGithub(); }));
+
+        sidebar.Controls.Add(navigation);
+        sidebar.Controls.Add(brandPanel);
+        return sidebar;
+    }
+
+    private static Label SidebarSectionLabel(string text)
+    {
+        return new Label
+        {
+            Text = text,
+            Width = 184,
+            Height = 32,
+            Margin = new Padding(0, 0, 0, 2),
+            Padding = new Padding(12, 6, 0, 0),
+            ForeColor = MutedTextColor,
+            BackColor = SidebarColor,
+        };
+    }
+
+    private static Button SidebarButton(string text, Action action)
+    {
+        var button = new Button();
+        button.Text = text;
+        StyleSidebarButton(button);
+        button.Click += delegate { action(); };
+        return button;
+    }
+
+    private static void StyleSidebarButton(Button button)
+    {
+        button.Width = 184;
+        button.Height = 39;
+        button.Dock = DockStyle.None;
+        button.Margin = new Padding(0, 0, 0, 4);
+        button.Padding = new Padding(12, 0, 0, 0);
+        button.TextAlign = ContentAlignment.MiddleLeft;
+        button.FlatStyle = FlatStyle.Flat;
+        button.FlatAppearance.BorderSize = 0;
+        button.FlatAppearance.MouseOverBackColor = FieldColor;
+        button.BackColor = SidebarColor;
+        button.ForeColor = MainTextColor;
+        button.Font = new Font("Segoe UI", 9.5F);
+        button.Cursor = Cursors.Hand;
+    }
+
     private void SelectProjectFolder()
     {
         using (var dialog = new FolderBrowserDialog())
@@ -740,6 +962,8 @@ internal sealed class LauncherForm : Form
         var label = new Label();
         label.Text = text;
         label.SetBounds(x, y, width, 22);
+        label.ForeColor = MainTextColor;
+        label.BackColor = Color.Transparent;
         return label;
     }
 
@@ -748,7 +972,44 @@ internal sealed class LauncherForm : Form
         var button = new Button();
         button.Text = text;
         button.SetBounds(x, y, width, 30);
+        StyleActionButton(button, false);
         return button;
+    }
+
+    private static void StyleReadOnlyField(TextBox field)
+    {
+        field.BorderStyle = BorderStyle.FixedSingle;
+        field.BackColor = FieldColor;
+        field.ForeColor = MainTextColor;
+        field.Font = new Font("Segoe UI", 9F);
+        field.Margin = new Padding(0, 3, 8, 0);
+        field.Height = 31;
+    }
+
+    private static void StyleSettingsInput(Control input)
+    {
+        input.BackColor = FieldColor;
+        input.ForeColor = MainTextColor;
+        input.Font = new Font("Segoe UI", 9F);
+    }
+
+    private static void StyleSettingsCheckBox(CheckBox checkBox)
+    {
+        checkBox.BackColor = CanvasColor;
+        checkBox.ForeColor = MainTextColor;
+    }
+
+    private static void StyleActionButton(Button button, bool primary)
+    {
+        button.FlatStyle = FlatStyle.Flat;
+        button.FlatAppearance.BorderSize = primary ? 0 : 1;
+        button.FlatAppearance.BorderColor = BorderColor;
+        button.BackColor = primary ? AccentColor : FieldColor;
+        button.ForeColor = MainTextColor;
+        button.Font = new Font("Segoe UI", 9F, FontStyle.Regular);
+        button.Cursor = Cursors.Hand;
+        button.Height = 32;
+        button.Margin = new Padding(4, 1, 4, 0);
     }
 
     private void ShowSettings()
@@ -762,6 +1023,10 @@ internal sealed class LauncherForm : Form
             form.FormBorderStyle = FormBorderStyle.FixedDialog;
             form.MaximizeBox = false;
             form.MinimizeBox = false;
+            form.BackColor = CanvasColor;
+            form.ForeColor = MainTextColor;
+            form.Font = new Font("Segoe UI", 9F);
+            form.HandleCreated += delegate { TryUseDarkTitleBar(form); };
 
             var title = NewLabel(L("settingsTitle"), 24, 18, 500);
             title.Font = new System.Drawing.Font(title.Font.FontFamily, 14, System.Drawing.FontStyle.Bold);
@@ -774,6 +1039,7 @@ internal sealed class LauncherForm : Form
             languageBox.Items.AddRange(LanguageOptionNames.Cast<object>().ToArray());
             languageBox.SetBounds(180, 58, 230, 28);
             languageBox.SelectedIndex = LanguageOptionIndex();
+            StyleSettingsInput(languageBox);
             form.Controls.Add(languageBox);
 
             form.Controls.Add(NewLabel(L("projectFolder"), 24, 102, 150));
@@ -781,6 +1047,7 @@ internal sealed class LauncherForm : Form
             projectBox.Text = selectedProjectPath ?? string.Empty;
             projectBox.ReadOnly = true;
             projectBox.SetBounds(180, 98, 250, 24);
+            StyleReadOnlyField(projectBox);
             form.Controls.Add(projectBox);
             var browseButton = NewButton(L("browse"), 440, 96, 82);
             browseButton.Click += delegate
@@ -805,35 +1072,40 @@ internal sealed class LauncherForm : Form
             launchCheck.Text = L("launchWindowsSetting");
             launchCheck.Checked = launchAtStartup;
             launchCheck.SetBounds(180, 138, 320, 24);
+            StyleSettingsCheckBox(launchCheck);
             form.Controls.Add(launchCheck);
 
             var startCheck = new CheckBox();
             startCheck.Text = L("startOnOpenSetting");
             startCheck.Checked = startMcpOnOpen;
             startCheck.SetBounds(180, 166, 320, 24);
+            StyleSettingsCheckBox(startCheck);
             form.Controls.Add(startCheck);
 
             var updatesCheck = new CheckBox();
             updatesCheck.Text = L("autoUpdatesSetting");
             updatesCheck.Checked = autoCheckUpdates;
             updatesCheck.SetBounds(180, 194, 320, 24);
+            StyleSettingsCheckBox(updatesCheck);
             form.Controls.Add(updatesCheck);
 
             var tunnelCheck = new CheckBox();
             tunnelCheck.Text = L("publicTunnelSetting");
             tunnelCheck.Checked = publicTunnelEnabled;
             tunnelCheck.SetBounds(180, 222, 390, 24);
+            StyleSettingsCheckBox(tunnelCheck);
             form.Controls.Add(tunnelCheck);
 
             form.Controls.Add(NewLabel(L("publicHostname"), 24, 262, 150));
             var hostBox = new TextBox();
             hostBox.Text = configuredPublicHost ?? string.Empty;
             hostBox.SetBounds(180, 258, 342, 24);
+            StyleSettingsInput(hostBox);
             form.Controls.Add(hostBox);
 
             var hostHint = NewLabel(L("publicHostnameHint"), 180, 288, 342);
             hostHint.SetBounds(180, 286, 342, 42);
-            hostHint.ForeColor = System.Drawing.SystemColors.GrayText;
+            hostHint.ForeColor = MutedTextColor;
             form.Controls.Add(hostHint);
 
             form.Controls.Add(NewLabel(L("localPort"), 24, 342, 150));
@@ -842,12 +1114,14 @@ internal sealed class LauncherForm : Form
             portBox.Maximum = 65535;
             portBox.Value = Math.Min(65535, Math.Max(1, port));
             portBox.SetBounds(180, 338, 120, 24);
+            StyleSettingsInput(portBox);
             form.Controls.Add(portBox);
 
             form.Controls.Add(NewLabel(L("githubRepositoryURL"), 24, 382, 150));
             var repoBox = new TextBox();
             repoBox.Text = githubRepoUrl ?? string.Empty;
             repoBox.SetBounds(180, 378, 342, 24);
+            StyleSettingsInput(repoBox);
             form.Controls.Add(repoBox);
 
             var copyConnector = NewButton(L("copyConnector"), 24, 426, 156);
@@ -898,6 +1172,7 @@ internal sealed class LauncherForm : Form
             form.Controls.Add(cancel);
 
             var save = NewButton(L("save"), 444, 554, 78);
+            StyleActionButton(save, true);
             save.DialogResult = DialogResult.OK;
             form.AcceptButton = save;
             form.CancelButton = cancel;
@@ -925,6 +1200,8 @@ internal sealed class LauncherForm : Form
     private void RefreshTrayState()
     {
         var running = IsManagedProcessRunning();
+        projectSummaryLabel.Text = L("projectFolder") + ": " + ProjectDisplayName() +
+            "   ·   " + L("localPort") + ": " + port;
         statusTrayItem.Text = "ChatGPT To Codex: " + (running ? L("statusOn") : L("statusOff"));
         toggleTrayItem.Text = running ? L("stopMCP") : L("startMCP");
         stopButton.Text = running ? L("stopMCP") : L("startMCP");
