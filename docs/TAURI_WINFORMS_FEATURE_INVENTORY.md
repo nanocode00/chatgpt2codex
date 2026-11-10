@@ -1,5 +1,7 @@
 # WinForms → Tauri functional parity inventory (F5 baseline)
 
+> Historical inventory dated 2026-10-28. For newer F5-D/F5-E features see [CLI matrix](TAURI_CLI_PARITY_MATRIX.md) and the [F5-F acceptance proposal](https://github.com/nanocode00/chatgpt2codex/pull/93). WinForms/default:7979 production cutover stays NO-GO.
+
 As of **2026-10-28**, based on repository \`main\` at
 \`f8d006b2181d2d208bbc697e4b3c0d74ace39fab\` (merged PRs #69–#75).
 The baseline is \`windows/ChatGPTToCodexLauncher.cs\`; Tauri behavior comes

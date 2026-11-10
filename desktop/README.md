@@ -1,5 +1,7 @@
 # ChatGPT To Codex Desktop — Tauri 2 + React (preview)
 
+> **Current preview status (2026-11-10).** F5-D includes the isolated CLI lifecycle, separate Quick Tunnel, and real ChatGPT OAuth/MCP roundtrip. F5-E connects typed profile/config/diagnostic/read-only commands and Windows live reload, whose manual acceptance was confirmed. See [Windows first-run guide](../docs/TAURI_F5F_WINDOWS_FIRST_RUN.md), [CLI feature matrix](../docs/TAURI_CLI_PARITY_MATRIX.md) and [F5-F acceptance proposal](https://github.com/nanocode00/chatgpt2codex/pull/93). The historical "Not implemented" paragraphs below describe the earlier prototype, not the current preview. This remains unsigned review-only software, not a WinForms replacement.
+
 This **new** app lives alongside the working v0.3.1 WinForms launcher.
 It is a separate prototype, not yet a packaged replacement. It does **not**
 install, start, stop, kill, or migrate an existing C2C MCP runtime.

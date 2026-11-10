@@ -26,6 +26,14 @@ function Read-RunValue([string]$name) {
     if (-not $item -or -not $item.PSObject.Properties[$name]) { return $null }
     return [string]$item.PSObject.Properties[$name].Value
 }
+function Wait-FileGone([string]$File, [int]$Seconds = 20) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        if (-not (Test-Path -LiteralPath $File -PathType Leaf)) { return $true }
+        Start-Sleep -Milliseconds 250
+    }
+    return (-not (Test-Path -LiteralPath $File -PathType Leaf))
+}
 function Invoke-Installer([string]$file, [string]$label) {
     $proc = Start-Process -FilePath $file -ArgumentList @("/S") -PassThru -Wait
     Assert ($proc.ExitCode -eq 0) "$label exit=$($proc.ExitCode)"
@@ -39,12 +47,19 @@ function Assert-HealthyPayload {
     $runtime = Join-Path $bundles[0] "c2c-runtime"
     $manifest = Get-Content -LiteralPath (Join-Path $runtime "manifest.json") -Raw | ConvertFrom-Json
     Assert ($manifest.kind -eq "c2c-tauri-isolated-owned-cli-v1") "Invalid isolated bundle kind"
-    Assert ($manifest.instance -eq "tauri-preview-v1" -and $manifest.tunnel -eq "none") "Unexpected runtime scope"
+    Assert ($manifest.instance -eq "tauri-preview-v1" -and $manifest.tunnel -in @("none", "quick-ready")) "Unexpected runtime scope"
     $node = Join-Path $runtime "bin\node.exe"
     $cli = Join-Path $runtime "dist\cli.js"
     Assert ((Test-Path $node) -and (Test-Path $cli)) "Bundled CLI or node missing"
     Assert ((Get-FileHash -LiteralPath $node -Algorithm SHA256).Hash -ieq $manifest.nodeSha256) "Node hash mismatch"
     Assert ((Get-FileHash -LiteralPath $cli -Algorithm SHA256).Hash -ieq $manifest.cliSha256) "CLI hash mismatch"
+    if ($manifest.tunnel -eq "quick-ready") {
+        $cloudflared = Join-Path $runtime "bin\cloudflared.exe"
+        Assert (Test-Path -LiteralPath $cloudflared) "Quick Tunnel binary missing"
+        Assert (($manifest.cloudflaredSha256.Length -eq 64)) "Quick Tunnel digest has invalid length"
+        Assert ((Get-FileHash -LiteralPath $cloudflared -Algorithm SHA256).Hash -ieq
+            $manifest.cloudflaredSha256) "Quick Tunnel hash mismatch"
+    }
     Write-Host "PASS: isolated Tauri NSIS install and SHA-256 manifest-verified runtime payload"
 }
 
@@ -70,7 +85,7 @@ try {
     $uninstallers = @(Get-ChildItem -LiteralPath $installRoot -Filter "*uninstall*.exe" -File)
     Assert ($uninstallers.Count -eq 1) "Exactly one isolated Tauri uninstaller expected"
     Invoke-Installer $uninstallers[0].FullName "Tauri NSIS uninstall"
-    Assert (-not (Test-Path -LiteralPath $exePath)) "Tauri binary remained after uninstall"
+    Assert (Wait-FileGone -File $exePath -Seconds 20) "Tauri binary remained after uninstall (bounded cleanup wait expired)"
     Assert (-not (Read-RunValue $tauriValueName)) "Tauri-owned auto-start Run value not cleaned up"
     Assert ((Read-RunValue $legacyValueName) -ceq $marker) "Legacy Run sentinel mutated by uninstall"
     Assert (-not (Test-Path -LiteralPath $legacyRoot)) "Unexpected legacy WinForms install directory"

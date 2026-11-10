@@ -95,6 +95,16 @@ try {
     if (-not $tokenResult.configured) { throw "Isolated owner token not configured" }
     Remove-Variable tokenResult
 
+    # F5-F2 persistence: disposable instance config survives separate CLI calls and restart.
+    $savedConfig = Invoke-C2C -CliArgs @("config", "set", "host", "127.0.0.1", "--instance", $instance)
+    if ($savedConfig.updated -ne $true -or $savedConfig.instance -ne $instance) {
+        throw "Isolated instance configuration write failed"
+    }
+    $configBeforeStart = Invoke-C2C -CliArgs @("config", "show", "--instance", $instance)
+    if ($configBeforeStart.persisted.host -ne "127.0.0.1") {
+        throw "Isolated instance configuration was not persisted across CLI invocations"
+    }
+
     $startArgs = @("start", "--instance", $instance, "--workspace", $workspace,
         "--host", "127.0.0.1", "--port", "$port", "--tunnel", "none")
     $start = Invoke-C2C -CliArgs $startArgs
@@ -198,6 +208,11 @@ try {
         throw "Restart did not report a healthy instance"
     }
     Check-Health
+    $configAfterRestart = Invoke-C2C -CliArgs @("config", "show", "--instance", $instance)
+    if ($configAfterRestart.persisted.host -ne "127.0.0.1") {
+        throw "MCP restart lost isolated preview instance configuration"
+    }
+    Write-Host "PASS: isolated Windows configuration survived CLI invocations and restart"
     Write-Host "PASS: isolated Windows CLI restart"
 
     $final = Invoke-C2C -CliArgs @("stop", "--instance", $instance)
