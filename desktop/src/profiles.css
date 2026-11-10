@@ -94,6 +94,30 @@
 .profiles-boundary svg{flex:none}
 .profiles-spinning{animation:profiles-spin 1s linear infinite}
 @keyframes profiles-spin{to{transform:rotate(360deg)}}
+
+/* Profile inspector presents only the selected kind; do not make an unconfigured
+   Python/Docker type consume an equal-sized detail card. */
+.profiles-detail-switch{display:flex;gap:8px;margin:17px 20px 0;padding:4px;background:#292929;border:1px solid #444;border-radius:10px}
+.profiles-detail-switch button{display:flex;align-items:center;justify-content:center;gap:8px;flex:1;min-height:38px;background:transparent;border:1px solid transparent;border-radius:8px;font-size:12px;color:#b9b9b9}
+.profiles-detail-switch button.active{background:#464646;color:#f0f0f0;border-color:#626262;font-weight:650}
+.profiles-detail-switch button:hover:not(.active){background:#333}
+.profiles-main-runtime{margin:18px 20px 0;min-width:0}
+.profiles-kind-focused{gap:14px;padding:19px;min-width:0}
+.profiles-kind-focused .profiles-kind-title strong{font-size:14px}
+.profiles-detail-field{display:flex;flex-direction:column;gap:9px;min-width:0}
+.profiles-kind-focused .profiles-path{display:block;width:100%;min-width:0}
+.profiles-kind-description{font-size:11px;line-height:1.7;color:#aaa;word-break:keep-all}
+.profiles-kind-focused .profiles-card-actions{margin-top:4px}
+.profiles-docker-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.profiles-docker-fields>div{display:flex;flex-direction:column;gap:6px;padding:11px 12px;background:#242424;border:1px solid #464646;border-radius:8px;min-width:0}
+.profiles-docker-fields span{font-size:10px;color:#aaa}
+.profiles-docker-fields strong{font-size:11px;color:#ddd;font-weight:600;line-height:1.6;overflow-wrap:anywhere}
+.profiles-secondary-kind{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:15px 17px;margin:12px 20px 0;border:1px dashed #525252;border-radius:10px;color:#ddd;background:#262626}
+.profiles-secondary-kind strong{font-size:11px;font-weight:650}
+.profiles-secondary-kind p{font-size:10px;margin-top:6px;line-height:1.6;color:#aaa}
+.profiles-secondary-kind .profiles-button{flex:none}
+@container profiles (max-width:620px){.profiles-secondary-kind{flex-direction:column;align-items:stretch}.profiles-docker-fields{grid-template-columns:1fr}.profiles-card-actions{flex-wrap:wrap}}
+
 @container profiles (max-width:1000px){.profiles-layout{grid-template-columns:1fr}.profiles-settings-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @container profiles (max-width:680px){.profiles-heading{flex-direction:column}.profiles-header-actions{width:100%}.profiles-header-actions .profiles-button{flex:1}.profiles-form-grid,.profiles-settings-grid{grid-template-columns:1fr}}
 @container profiles (max-width:430px){.profiles-stats>div{padding:12px 9px;column-gap:5px}.profiles-stats strong{font-size:18px}.profiles-stats span{font-size:10px}.profiles-card-actions{flex-wrap:wrap}}
