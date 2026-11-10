@@ -56,6 +56,14 @@ function Assert-Installed {
     Assert (-not (Test-Path -LiteralPath $legacyRoot)) "Legacy WinForms directory was unexpectedly created"
     Assert ((Get-RunValue $legacyName) -ceq $legacyMarker) "Legacy auto-start entry altered"
 }
+function Wait-FileGone([string]$File, [int]$Seconds = 20) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        if (-not (Test-Path -LiteralPath $File -PathType Leaf)) { return $true }
+        Start-Sleep -Milliseconds 250
+    }
+    return (-not (Test-Path -LiteralPath $File -PathType Leaf))
+}
 function Invoke-Setup([string]$Executable, [string]$Label) {
     $proc = Start-Process -FilePath $Executable -ArgumentList @("/S") -PassThru -Wait
     Assert ($proc.ExitCode -eq 0) "$Label exit=$($proc.ExitCode)"
@@ -139,7 +147,7 @@ try {
     $uninstallers = @(Get-ChildItem -LiteralPath $installRoot -Filter "*uninstall*.exe" -File)
     Assert ($uninstallers.Count -eq 1) "Expected exactly one Tauri uninstaller after upgrade"
     Invoke-Setup $uninstallers[0].FullName "Upgraded Tauri uninstall"
-    Assert (-not (Test-Path -LiteralPath $installedExe)) "Tauri EXE remained after uninstall"
+    Assert (Wait-FileGone -File $installedExe -Seconds 20) "Tauri EXE remained after uninstall (bounded cleanup wait expired)"
     Assert (-not (Get-RunValue $tauriName)) "Tauri-specific login entry not cleaned after uninstall"
     Assert ((Get-RunValue $legacyName) -ceq $legacyMarker) "Uninstall touched legacy WinForms login value"
     Assert (([IO.File]::ReadAllText($markerPath)) -ceq $marker) "Uninstall should not erase isolated preview user data"
@@ -153,7 +161,7 @@ try {
     $uninstallers = @(Get-ChildItem -LiteralPath $installRoot -Filter "*uninstall*.exe" -File)
     Assert ($uninstallers.Count -eq 1) "Final uninstaller missing"
     Invoke-Setup $uninstallers[0].FullName "Final NSIS uninstall"
-    Assert (-not (Test-Path -LiteralPath $installedExe)) "Final uninstall left executable"
+    Assert (Wait-FileGone -File $installedExe -Seconds 20) "Final uninstall left executable (bounded cleanup wait expired)"
     Assert ((Get-RunValue $legacyName) -ceq $legacyMarker) "Final uninstall altered legacy entry"
 
     Write-Host "PASS F4-D4-B: baseline/reinstall/upgrade/hash-rejected staging/uninstall/reinstall, isolated user data, startup and legacy keys preserved"
