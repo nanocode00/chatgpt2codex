@@ -3,7 +3,7 @@
 [CmdletBinding()]
 param([string]$NodeExecutable = "", [string]$CliEntrypoint = "")
 $ErrorActionPreference = "Stop"
-$[REDACTED] = $false
+$PSNativeCommandUseErrorActionPreference = $false
 if ($env:GITHUB_ACTIONS -ne "true" -or $env:CI -ne "true" -or
     [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
     throw "Windows CLI lifecycle E2E may run only on an isolated GitHub Actions runner"
@@ -14,7 +14,7 @@ $cli = Join-Path $repo "dist\cli.js"
 $node = (Get-Command node.exe -ErrorAction Stop).Source
 if ($NodeExecutable -or $CliEntrypoint) {
     if (-not $NodeExecutable -or -not $CliEntrypoint) { throw "Both packaged inputs required" }
-    $packRoot = Join-Path $repo "[REDACTED]"
+    $packRoot = Join-Path $repo "desktop/src-tauri/target/debug/c2c-runtime"
     $fixedNode = Join-Path $packRoot "bin/node.exe"
     $fixedCli = Join-Path $packRoot "dist/cli.js"
     if (-not [string]::Equals([IO.Path]::GetFullPath($NodeExecutable), [IO.Path]::GetFullPath($fixedNode), [StringComparison]::OrdinalIgnoreCase) -or
@@ -95,8 +95,7 @@ try {
     if (-not $tokenResult.configured) { throw "Isolated owner token not configured" }
     Remove-Variable tokenResult
 
-    # F5-F2 persistence: changes remain confined to the disposable instance.
-    # These checks survive a separate CLI process and an MCP stop/restart.
+    # F5-F2 persistence: disposable instance config survives separate CLI calls and restart.
     $savedConfig = Invoke-C2C -CliArgs @("config", "set", "host", "127.0.0.1", "--instance", $instance)
     if ($savedConfig.updated -ne $true -or $savedConfig.instance -ne $instance) {
         throw "Isolated instance configuration write failed"
