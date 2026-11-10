@@ -5,7 +5,7 @@ import {
   RotateCw, Settings2, ShieldCheck, Square, TerminalSquare
 } from "lucide-react";
 import type { CatalogInspection, ManagedAction, ManagedResult, PublicTunnelHealth } from "./runtime";
-import { publicView, runtimeView } from "./dashboard-state";
+import { publicView, runtimeView, startAction } from "./dashboard-state";
 import "./dashboard.css";
 
 type Destination = "manage" | "cli" | "connections" | "diagnostics" | "settings";
@@ -113,7 +113,7 @@ export function Dashboard({
             <button type="button" className="dash-primary" disabled={ownedBusy}
               onClick={() => onOwnedAction("stop")}><Square size={16}/> MCP 중지</button> :
             <button type="button" className="dash-primary" disabled={!readyToStart || (publicPreferred && !owned?.tunnelCapable)}
-              onClick={() => onOwnedAction("start")}><Play size={16}/> MCP 시작</button>
+              onClick={() => onOwnedAction(startAction(publicPreferred))}><Play size={16}/> MCP 시작</button>
           }
           {running && <button type="button" className="dash-secondary" disabled={ownedBusy}
             onClick={() => onOwnedAction("restart")}><RotateCw size={16}/> MCP 재시작</button>}
