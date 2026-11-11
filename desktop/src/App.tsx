@@ -80,7 +80,6 @@ function App() {
   const [ownedBusy, setOwnedBusy] = useState(false);
   const [ownedError, setOwnedError] = useState("");
   const [ownedToken, setOwnedToken] = useState<string | null>(null);
-  const [ownedUrlNotice, setOwnedUrlNotice] = useState("");
   const [ownedPublicHealth, setOwnedPublicHealth] = useState<PublicTunnelHealth | null>(null);
   const [ownedPublicChecking, setOwnedPublicChecking] = useState(false);
   const [catalog, setCatalog] = useState<CatalogInspection | null>(null);
@@ -189,7 +188,6 @@ function App() {
     }
     setOwnedBusy(true);
     setOwnedError("");
-    setOwnedUrlNotice("");
     try {
       const next = await manageOwnedCli(action);
       setOwnedPublicHealth(previous =>
@@ -232,7 +230,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (screen === "manage" || screen === "overview" || screen === "projects" || screen === "profiles") {
+    if (screen === "connections" || screen === "overview" || screen === "projects" || screen === "profiles") {
       void runOwnedAction("status");
       void refreshCatalog();
     }
@@ -392,8 +390,7 @@ function App() {
     if (!owned?.tunnelRunning || !owned.publicConnector) return;
     try {
       await navigator.clipboard.writeText(owned.publicConnector);
-      setOwnedUrlNotice("");
-      notify("공개 MCP 주소를 복사했습니다. 연결은 OAuth 인증 후 확인하세요.");
+        notify("공개 MCP 주소를 복사했습니다. 연결은 OAuth 인증 후 확인하세요.");
     } catch {
       notify("공개 주소를 복사하지 못했습니다. 직접 선택해 복사하세요.", "error");
     }
@@ -731,6 +728,31 @@ function App() {
             </div>
             {startupError && <p className="form-error" role="alert">{startupError}</p>}
             <div className="info-row"><LockKeyhole size={18}/><div><strong>안전 제한</strong><p>휴대용 ZIP 프리뷰에서는 변경할 수 없습니다. Tauri 전용 설치 경로를 검증한 경우에만 사용자 계정의 별도 등록 항목을 변경하며, 기존 WinForms와 CLI 서버는 변경하지 않습니다.</p></div></div>
+          </section>
+          <section className="panel page-panel" style={{ marginTop: 20 }}>
+            <div className="panel-heading"><div className="panel-title">
+              <span className="icon-tile"><TerminalSquare size={18}/></span>
+              <div><h2>앱·트레이·종료</h2>
+                <p>MCP 제어는 연결 화면에서, Windows 앱 창 제어는 여기에서 관리합니다.</p></div>
+            </div></div>
+            <div className="legacy-body">
+              <div className="legacy-actions">
+                <button type="button" className="legacy-action available" disabled={exitBusy}
+                  onClick={() => { void hideToTray(); }}>트레이로 숨기기</button>
+                <button type="button" className="legacy-action available"
+                  disabled={exitBusy || ownedBusy} onClick={() => { void exitPreview(); }}>
+                  앱만 종료 (MCP 유지)
+                </button>
+                <button type="button" className="legacy-action available"
+                  disabled={exitBusy || ownedBusy} onClick={() => { void exitPreview(true); }}>
+                  앱·전용 MCP 완전 종료
+                </button>
+              </div>
+              <p className="legacy-footnote">앱만 종료하면 전용 MCP/Quick Tunnel은 계속 실행됩니다.
+                완전 종료는 소유권 확인 후 Tauri 전용 서버만 중지하며, 기존 WinForms/7979에는 영향을 주지 않습니다.</p>
+              {trayError && <p className="form-error" role="alert">{trayError}</p>}
+              {exitError && <p className="form-error" role="alert">{exitError}</p>}
+            </div>
           </section>
           <LegacySettingsControls />
           <MigrationPreflight report={migrationReport} busy={migrationBusy} error={migrationError}
