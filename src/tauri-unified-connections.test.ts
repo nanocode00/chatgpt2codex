@@ -110,6 +110,7 @@ describe("Tauri-owned connection and security screen", () => {
     expect(cli).toContain('record?.pid === serverPid');
     expect(cli).toContain("runtimeProcessMatchesRecord(record)");
     expect(cli).toContain("(!expectedRecord || await expectedRecord())");
+    expect(cli).toContain('options.instance === "tauri-preview-v1" ? 20_000 : undefined');
     expect(cli).toContain("(await readRuntimeInstance(stateDir, options.instance))?.pid === serverPid");
     expect(cli).toContain("runtimeTunnelMatchesRecord(candidate)");
     expect(cli).toContain("!isProcessAlive(serverPid)");
