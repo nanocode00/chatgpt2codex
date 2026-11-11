@@ -1,11 +1,12 @@
 import {
-  Activity, Check, ChevronRight, CircleHelp, Clipboard, Code2, Copy,
+  Activity, ChevronRight, Code2,
   ExternalLink, FileText, FolderCode, HardDrive, Layers, LayoutDashboard, LockKeyhole, PlugZap,
   RefreshCcw, Settings2, ShieldCheck, TerminalSquare
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { checkRuntime, inspectInstalledCli, inspectInstalledCliLogs, inspectPublicTunnel, manageOwnedCli, inspectOwnedPublicTunnelHealth, inspectOwnedCatalog, unregisterOwnedRepository, pickOwnedRepositoryFolder, registerOwnedPickedRepository, cancelOwnedPickedRepository, closePreviewWindow, closePreviewWithOwnedMcp, hidePreviewWindow, openTrustedLink, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type CliInspection, type CliLogPreview, type CliLogComponent, type ManagedAction, type ManagedResult, type CatalogInspection, type PickedRepositoryFolder, type PublicTunnelHealth, type RuntimeHealth, type TrustedLink } from "./runtime";
-import { ManagementControls, LegacyConnectionControls, LegacyDiagnosticsControls, LegacySettingsControls } from "./LegacyControls";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { checkRuntime, inspectInstalledCli, inspectInstalledCliLogs, inspectPublicTunnel, manageOwnedCli, inspectOwnedPublicTunnelHealth, inspectOwnedCatalog, unregisterOwnedRepository, pickOwnedRepositoryFolder, registerOwnedPickedRepository, cancelOwnedPickedRepository, closePreviewWindow, closePreviewWithOwnedMcp, hidePreviewWindow, openTrustedLink, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type CliLogPreview, type CliLogComponent, type ManagedAction, type ManagedResult, type CatalogInspection, type PickedRepositoryFolder, type PublicTunnelHealth, type RuntimeHealth, type TrustedLink } from "./runtime";
+import { ManagementControls, LegacyDiagnosticsControls, LegacySettingsControls } from "./LegacyControls";
+import { ConnectionsSecurityScreen } from "./ConnectionsSecurityScreen";
 import { CliParityPanel } from "./CliParityPanel";
 import { Dashboard } from "./Dashboard";
 import { ProjectsScreen } from "./ProjectsScreen";
@@ -68,14 +69,10 @@ function App() {
   const [toast, setToast] = useState<AppToast | null>(null);
   const [status, setStatus] = useState<RuntimeHealth | null>(null);
   const [checking, setChecking] = useState(false);
-  const [cliChecking, setCliChecking] = useState(false);
-  const [cliInspection, setCliInspection] = useState<CliInspection | null>(null);
   const [tunnelHealth, setTunnelHealth] = useState<PublicTunnelHealth | null>(null);
   const [tunnelChecking, setTunnelChecking] = useState(false);
-  const [tunnelNotice, setTunnelNotice] = useState("");
   const [logResult, setLogResult] = useState<CliLogPreview | null>(null);
   const [logsChecking, setLogsChecking] = useState(false);
-  const [publicCopied, setPublicCopied] = useState(false);
   const [exitError, setExitError] = useState("");
   const [exitBusy, setExitBusy] = useState(false);
   const [trayError, setTrayError] = useState("");
@@ -111,7 +108,6 @@ function App() {
   const [rehearsalBusy, setRehearsalBusy] = useState(false);
   const [rehearsalError, setRehearsalError] = useState("");
   const [history, setHistory] = useState<ActivityEntry[]>([]);
-  const [copied, setCopied] = useState(false);
   const [settingError, setSettingError] = useState("");
   const [settingsNotice, setSettingsNotice] = useState("");
   const [previewStartup, setPreviewStartup] = useState<PreviewStartupInspection | null>(null);
@@ -119,7 +115,6 @@ function App() {
   const [startupError, setStartupError] = useState("");
   const requestCounter = useRef(0);
   const tunnelBusy = useRef(false);
-  const lastTunnel = useRef<PublicTunnelHealth | null>(null);
   const publicProbeBusy = useRef(false);
   const toastId = useRef(0);
   const notify = useCallback((message: string, tone: "info" | "error" = "info") => {
@@ -410,8 +405,11 @@ function App() {
     try {
       await navigator.clipboard.writeText(ownedToken);
       setOwnedToken(null);
+      notify("새 Owner Token을 복사하고 앱의 일회성 값을 지웠습니다.");
     } catch {
-      setOwnedError("클립보드 복사에 실패했습니다. 토큰을 표시하지 않았으므로 별도 초기화 절차가 필요합니다.");
+      const message = "클립보드 복사에 실패했습니다. 일회성 토큰은 지워지지 않았습니다.";
+      setOwnedError(message);
+      notify(message, "error");
     }
   }
 
@@ -465,25 +463,6 @@ function App() {
     }
   }, [screen, native, runMigrationCheck, runBackupCheck]);
 
-  const runCliInspection = useCallback(async () => {
-    setCliChecking(true);
-    try {
-      setCliInspection(await inspectInstalledCli("default"));
-    } catch {
-      setCliInspection({
-        available: false, instance: "default", alive: false, healthy: false,
-        tunnelAlive: null, publicHealthy: null, endpoint: null, publicConnector: null,
-        details: "설치된 CLI 상태 조회가 실패했습니다."
-      });
-    } finally {
-      setCliChecking(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (screen === "connections") void runCliInspection();
-  }, [screen, runCliInspection]);
-
   const runTunnelCheck = useCallback(async () => {
     // A foreground/resume event can coincide with the one-minute poll.
     if (tunnelBusy.current) return;
@@ -491,23 +470,13 @@ function App() {
     setTunnelChecking(true);
     try {
       const next = await inspectPublicTunnel("default");
-      const previous = lastTunnel.current;
-      if (previous?.endpoint && next.endpoint && previous.endpoint !== next.endpoint) {
-        setTunnelNotice("Quick Tunnel 주소가 변경됐습니다. ChatGPT에 등록된 커넥터 주소도 확인하세요.");
-      } else if (previous?.state === "online" && next.state === "offline") {
-        setTunnelNotice("로컬 MCP와 별개로 공개 터널 연결이 끊겼습니다. WinForms에서 터널 상태를 확인해 주세요.");
-      } else if (next.state === "online") {
-        setTunnelNotice("");
-      }
       setTunnelHealth(next);
-      lastTunnel.current = next;
     } catch {
       const failed: PublicTunnelHealth = {
         state: "unavailable", endpoint: null,
         details: "공개 상태를 검사하지 못했습니다."
       };
       setTunnelHealth(failed);
-      lastTunnel.current = failed;
     } finally {
       tunnelBusy.current = false;
       setTunnelChecking(false);
@@ -534,24 +503,9 @@ function App() {
   }, [native, runTunnelCheck, runCheck]);
 
   const tunnelOnline = tunnelHealth?.state === "online";
-  const tunnelOffline = tunnelHealth?.state === "offline";
-
-  const publicConnector = cliInspection?.available ? cliInspection.publicConnector : null;
-  const publicState = tunnelHealth?.details ??
-    (!cliInspection ? "설치된 CLI에서 공개 연결 정보를 확인합니다." : cliInspection.details);
 
   function refreshPublicState() {
-    void runCliInspection();
     void runTunnelCheck();
-  }
-
-  async function copyPublicConnector() {
-    if (!publicConnector || tunnelOffline) return;
-    try {
-      await navigator.clipboard.writeText(publicConnector);
-      setPublicCopied(true);
-      window.setTimeout(() => setPublicCopied(false), 1500);
-    } catch { setPublicCopied(false); }
   }
 
   async function loadCliLogs(component: CliLogComponent) {
@@ -607,19 +561,8 @@ function App() {
     }
   }
 
-  const endpoint = useMemo(() => "http://127.0.0.1:" + port + "/mcp", [port]);
   const serverOnline = native && !!status?.online;
   const stateLabel = !native ? "브라우저 미리보기" : checking && !status ? "확인 중" : serverOnline ? "정상 실행 중" : "연결되지 않음";
-
-  async function copyLocalEndpoint() {
-    try {
-      await navigator.clipboard.writeText(endpoint);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      setCopied(false);
-    }
-  }
 
   function saveSettings(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -691,7 +634,7 @@ function App() {
             <button className={"icon-btn " + (checking ? "spin-icon" : "")} type="button" onClick={() => {
                 if (screen === "jobs") {
                   setJobsRefreshKey(value => value + 1);
-                } else if (screen === "overview" || screen === "projects" || screen === "manage") {
+                } else if (screen === "overview" || screen === "projects" || screen === "manage" || screen === "connections") {
                   void runOwnedAction("status"); void refreshCatalog();
                 } else { void runCheck(); }
               }} aria-label="현재 화면 새로고침" title="현재 화면 새로고침" disabled={checking || ownedBusy || catalogBusy}><RefreshCcw size={17}/></button>
@@ -770,36 +713,19 @@ function App() {
           <CliParityPanel />
         </>}
 
-        {screen === "connections" && <>
-          <div className="page-heading"><div><div className="eyebrow">CONNECTIVITY</div><h1>연결</h1><p>C2C 서버의 로컬 주소와 연결 가능 상태를 확인합니다.</p></div></div>
-          <section className="panel page-panel"><div className="panel-heading"><div className="panel-title"><span className="icon-tile"><PlugZap size={18}/></span><div><h2>로컬 MCP 엔드포인트</h2><p>로컬 상태 검사와 동일한 포트를 사용합니다.</p></div></div>{statusTag()}</div><label className="field-label" htmlFor="connections-endpoint">LOCAL ADDRESS</label><div className="endpoint roomy"><input id="connections-endpoint" readOnly value={endpoint}/><button type="button" onClick={() => { void copyLocalEndpoint(); }}>{copied ? <Check size={16}/> : <Clipboard size={16}/>} {copied ? "복사 완료" : "복사"}</button></div><div className="info-row"><ShieldCheck size={18}/><div><strong>로컬 주소만 표시</strong><p>Owner Token을 읽거나 표시하지 않으며 외부 터널을 생성하지 않습니다.</p></div></div><div className="info-row"><CircleHelp size={18}/><div><strong>ChatGPT 웹 연결은 별도 설정</strong><p>기존 Windows 앱의 터널은 별도로 관리됩니다. 새 Tauri 전용 Quick Tunnel의 시작·외부 Health 검사는 관리 화면에서 수행하며 18797 인스턴스만 사용합니다.</p></div></div></section>
-          <section className="panel page-panel" style={{ marginTop: 20 }}>
-            <div className="panel-heading">
-              <div className="panel-title"><span className="icon-tile"><TerminalSquare size={18}/></span>
-                <div><h2>CLI 관리 인스턴스</h2><p>기존 Windows 설치본 · default 인스턴스</p></div>
-              </div>
-              <button className="secondary-btn" type="button" disabled={cliChecking} onClick={() => { void runCliInspection(); }}>
-                <RefreshCcw size={15}/>{cliChecking ? "조회 중..." : "CLI 조회"}
-              </button>
-            </div>
-            <div className="info-row">
-              <ShieldCheck size={18}/>
-              <div>
-                <strong>{cliInspection?.available ? (cliInspection.healthy ? "CLI 인스턴스 정상" : "CLI 인스턴스 미응답") : "CLI 확인 필요"}</strong>
-                <p>{cliInspection?.details ?? "CLI 상태 정보를 조회하는 중입니다."}</p>
-                {cliInspection?.available && <p>인스턴스: {cliInspection.instance} · 서버: {cliInspection.alive ? "실행 중" : "꺼짐"} · 터널: {cliInspection.tunnelAlive === null ? "정보 없음" : cliInspection.tunnelAlive ? "실행 중" : "꺼짐"}</p>}
-                {cliInspection?.available && cliInspection.endpoint && <p>CLI Health: {cliInspection.endpoint}</p>}
-              </div>
-            </div>
-            <div className="info-row">
-              <LockKeyhole size={18}/>
-              <div><strong>안전한 읽기 전용 연결</strong>
-                <p>설치된 CLI의 health 명령만 사용합니다. MCP 서버를 시작·종료하지 않고 Owner Token도 읽지 않습니다.</p>
-              </div>
-            </div>
-          </section>
-          <LegacyConnectionControls publicConnector={publicConnector ?? null} publicState={publicState} publicVerified={tunnelOnline} publicOffline={tunnelOffline} publicNotice={tunnelNotice} onCopyPublic={() => { void copyPublicConnector(); }} publicCopied={publicCopied} onRefreshPublic={refreshPublicState} checking={cliChecking || tunnelChecking}/>
-        </>}
+        {screen === "connections" && <ConnectionsSecurityScreen
+          native={native} owned={owned} ownedBusy={ownedBusy} ownedError={ownedError}
+          ownerTokenPending={!!ownedToken} publicPreferred={publicPreferred}
+          publicHealth={ownedPublicHealth} publicChecking={ownedPublicChecking}
+          onRefresh={() => { void runOwnedAction("status"); }}
+          onManagedAction={action => { void runOwnedAction(action); }}
+          onTogglePublic={togglePublicPreference}
+          onCopyPublic={() => { void copyOwnedConnector(); }}
+          onCopyToken={() => { void copyOwnedToken(); }}
+          onNotify={notify}
+          onDiagnostics={() => setScreen("diagnostics")}
+          onManagement={() => setScreen("manage")}
+        />}
 
         {screen === "diagnostics" && <>
           <div className="page-heading"><div><div className="eyebrow">DIAGNOSTICS</div><h1>진단</h1><p>로컬 Health 검사 기록과 설치된 CLI의 서버·터널 로그를 확인합니다.</p></div><button className="secondary-btn" onClick={() => { void runCheck(); }} disabled={checking}><RefreshCcw size={16}/> 다시 확인</button></div>
