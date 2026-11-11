@@ -9,7 +9,7 @@ import {
   type OwnedCliParityOperation
 } from "./runtime";
 import {
-  filterProfiles, parseProfileDetails, parseProfileTest, validateDraft,
+  filterProfilesForKind, parseProfileDetails, parseProfileTest, validateDraft,
   type ProfileDetails, type ProfileTestResult
 } from "./profile-model";
 import "./profiles.css";
@@ -68,7 +68,7 @@ export function ProfilesScreen({
   const countDocker = profiles.filter(profile => profile.docker).length;
   // (kind, alias) is one GUI profile. Identical aliases in both maps stay independent.
   const inKind = profiles.filter(profile => profile[activeKind]);
-  const filtered = useMemo(() => filterProfiles(inKind, query), [catalog, activeKind, query]);
+  const filtered = useMemo(() => filterProfilesForKind(profiles, activeKind, query), [catalog, activeKind, query]);
   const selected = filtered.find(profile => profile.alias === selectedByKind[activeKind]) ?? filtered[0] ?? null;
   const available = native && catalog?.available === true;
   const busy = saving || catalogBusy || detailsBusy || testBusy;
