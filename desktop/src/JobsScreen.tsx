@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity, AlertCircle, ArrowRight, Ban, CheckCircle2, ChevronRight, CirclePause,
-  ClipboardCopy, Clock3, FileText, FolderCode, History, Layers, LoaderCircle,
+  ClipboardCopy, Clock3, FileText, History, Layers, LoaderCircle,
   Play, RefreshCcw, Search, ShieldCheck, X
 } from "lucide-react";
 import { isNativeApp, runOwnedCliParity } from "./runtime";
@@ -15,6 +15,7 @@ import "./jobs.css";
 interface JobsScreenProps {
   onNotify: (message: string, tone?: "info" | "error") => void;
   onProjects: () => void;
+  refreshKey: number;
 }
 function errorText(error: unknown): string {
   return (typeof error === "string" ? error : error instanceof Error ? error.message : "작업 조회에 실패했습니다.").slice(0, 460);
@@ -30,7 +31,7 @@ const filterItems: { id: JobFilter; label: string; symbol: "layers" | "active" |
   { id: "attention", label: "대기·차단", symbol: "attention" },
   { id: "history", label: "완료·취소", symbol: "history" }
 ];
-export function JobsScreen({ onNotify, onProjects }: JobsScreenProps) {
+export function JobsScreen({ onNotify, onProjects, refreshKey }: JobsScreenProps) {
   const native = isNativeApp();
   const [items, setItems] = useState<JobListItem[] | null>(null);
   const [listBusy, setListBusy] = useState(false);
@@ -87,7 +88,7 @@ export function JobsScreen({ onNotify, onProjects }: JobsScreenProps) {
       window.clearInterval(interval);
       window.removeEventListener("focus", onFocus);
     };
-  }, [native, reloadList]);
+  }, [native, reloadList, refreshKey]);
 
   useEffect(() => {
     if (!native || !selected) {
@@ -281,7 +282,7 @@ export function JobsScreen({ onNotify, onProjects }: JobsScreenProps) {
             </div> : null}
           </div>
           <div className="jobs-transitions">
-            <p>상태 변경은 저장된 Job 기록에만 적용됩니다. **에이전트를 실행하거나 중지하지 않습니다.**</p>
+            <p>상태 변경은 저장된 Job 기록에만 적용됩니다. <strong>에이전트를 실행하거나 중지하지 않습니다.</strong></p>
             <div>
               <button type="button" className="jobs-button secondary"
                 disabled={busy || !details || !permittedJobAction(details.status, "resume")}
