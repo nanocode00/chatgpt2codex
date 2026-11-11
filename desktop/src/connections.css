@@ -36,7 +36,7 @@
 .connections-copy button:hover:not(:disabled){background:#464646}
 .connections-actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
 .connections-actions>.connections-button{flex:1;min-width:132px}
-.connections-lifecycle-actions{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}
+.connections-lifecycle-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}
 .connections-token-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}
 .connections-lifecycle-actions>.connections-button,.connections-token-actions>.connections-button{
   min-width:0;width:100%;white-space:normal;min-height:48px;padding:9px 7px
