@@ -155,7 +155,7 @@ export function ConnectionsSecurityScreen({
             disabled={!running || runtimeBusy} onClick={() => onManagedAction("restart")}>
             <RotateCw size={16}/> 재시작
           </button>
-          <button type="button" className="connections-button secondary" onClick={onRefresh}>
+          <button type="button" className="connections-button secondary" disabled={runtimeBusy} onClick={onRefresh}>
             <RefreshCcw size={15}/> 상태 확인
           </button>
         </div>
