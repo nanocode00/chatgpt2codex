@@ -116,6 +116,7 @@ describe("Tauri-owned connection and security screen", () => {
     expect(cli).toContain("!isProcessAlive(serverPid)");
     expect(rust).toContain('record["tunnelMode"] == "cloudflare"');
     expect(rust).toContain('record["tunnelMode"] == "none"');
+    expect(rust).toContain("전용 MCP 시작 기록이 미완성입니다(tunnelMode 누락)");
   });
 
   it("preserves a responsive neutral design and avoids inline copy-confirmation text", () => {
