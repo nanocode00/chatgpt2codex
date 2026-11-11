@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_HEALTH_PORT, parseUiPort, storedAutoRefresh, storedHealthPort } from "../desktop/src/ui-preferences";
 
 describe("isolated Tauri monitoring preferences", () => {
+  it("defaults new installations to the Tauri-owned server", () => {
+    expect(DEFAULT_HEALTH_PORT).toBe(18797);
+  });
   it("round-trips a saved port and accepts only bounded decimal integers", () => {
     expect(parseUiPort("18797")).toBe(18797);
     expect(storedHealthPort("18797")).toBe(18797);

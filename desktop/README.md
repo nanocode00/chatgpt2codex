@@ -298,27 +298,14 @@ runtime record is present or port 18797 is occupied.
 The higher-level project/lease redesign is deferred to
 [issue #82](https://github.com/nanocode00/chatgpt2codex/issues/82).
 
-## WinForms migration preflight
+## Tauri-only Settings
 
-**Settings → WinForms → Tauri 전환 준비** is a native read-only inventory of legacy
-WinForms settings, existing hashed Owner Token validity and OAuth client *count*.
-It does not copy secrets or take over port 7979. Optional settings snapshot is
-**non-secret, not a full backup**, and cannot overwrite an earlier snapshot.
-See [migration preflight and gated plan](../docs/TAURI_WINFORMS_MIGRATION_PREFLIGHT.md).
+The active Settings screen configures the Tauri app's Windows login auto-start,
+frontend-only health monitoring (default `127.0.0.1:18797`) and app/tray/exit
+lifecycle. It does not modify the MCP listener, Owner Token or OAuth state.
 
-## Optional encrypted credential backup
-
-Windows Tauri **Settings → WinForms → Tauri 전환 준비** now supports an explicit,
-current-user DPAPI-encrypted **Owner Token hash + OAuth state + settings** backup,
-with immediate read-back/integrity validation. It cannot restore to the live
-WinForms location, rotate a token, stop a server or take over port 7979.
-See [DPAPI credential backup limitations](../docs/TAURI_DPAPI_CREDENTIAL_BACKUP.md).
-
-## Encrypted restore rehearsal
-
-After creating/verifying the DPAPI credential backup, use
-**Settings → WinForms → Tauri 전환 준비 → 격리 복원 리허설 실행**
-to test a temporary, **encrypted-only shadow restoration** of the
-archive's owner/OAuth/settings entries. This does not write plaintext
-credential JSON to disk and does not affect WinForms or its port 7979.
-See [rehearsal limitations](../docs/TAURI_ENCRYPTED_RESTORE_REHEARSAL.md).
+The former WinForms migration inventory, settings snapshot, encrypted legacy
+backup/restore rehearsal and cutover dry-run controls have been removed from
+Settings. Their historical design notes remain in `docs/` for reference only;
+they are not available as actions in this UI. Existing legacy WinForms/default
+state is neither modified nor removed by the new Settings screen.

@@ -1,5 +1,5 @@
 /** Frontend-only monitoring preferences. Never writes the owned CLI or WinForms runtime config. */
-export const DEFAULT_HEALTH_PORT = 7979;
+export const DEFAULT_HEALTH_PORT = 18797;
 
 export function parseUiPort(value: string): number | null {
   if (!/^[1-9][0-9]{0,4}$/.test(value)) return null;
