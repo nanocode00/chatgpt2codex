@@ -4,8 +4,8 @@ import {
   RefreshCcw, Settings2, ShieldCheck, TerminalSquare
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { checkRuntime, inspectInstalledCliLogs, inspectPublicTunnel, manageOwnedCli, inspectOwnedPublicTunnelHealth, inspectOwnedCatalog, unregisterOwnedRepository, pickOwnedRepositoryFolder, registerOwnedPickedRepository, cancelOwnedPickedRepository, closePreviewWindow, closePreviewWithOwnedMcp, hidePreviewWindow, openTrustedLink, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type CliLogPreview, type CliLogComponent, type ManagedAction, type ManagedResult, type CatalogInspection, type PickedRepositoryFolder, type PublicTunnelHealth, type RuntimeHealth, type TrustedLink } from "./runtime";
-import { ManagementControls, LegacyDiagnosticsControls, LegacySettingsControls } from "./LegacyControls";
+import { checkRuntime, inspectInstalledCliLogs, inspectPublicTunnel, manageOwnedCli, copyOwnedOwnerToken, registerOwnedOwnerToken, inspectOwnedPublicTunnelHealth, inspectOwnedCatalog, unregisterOwnedRepository, pickOwnedRepositoryFolder, registerOwnedPickedRepository, cancelOwnedPickedRepository, closePreviewWindow, closePreviewWithOwnedMcp, hidePreviewWindow, openTrustedLink, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type CliLogPreview, type CliLogComponent, type ManagedAction, type ManagedResult, type CatalogInspection, type PickedRepositoryFolder, type PublicTunnelHealth, type RuntimeHealth, type TrustedLink } from "./runtime";
+import { LegacyDiagnosticsControls, LegacySettingsControls } from "./LegacyControls";
 import { ConnectionsSecurityScreen } from "./ConnectionsSecurityScreen";
 import { CliParityPanel } from "./CliParityPanel";
 import { Dashboard } from "./Dashboard";
@@ -18,7 +18,7 @@ import { parseUiPort, storedHealthPort, storedAutoRefresh } from "./ui-preferenc
 import { MigrationPreflight } from "./MigrationPreflight";
 import { inspectLegacyMigration, saveLegacySettingsSnapshot, inspectCredentialBackup, createCredentialBackup, rehearseCredentialRestore, type LegacyMigrationReport, type CredentialBackupReport, type RestoreRehearsalReport } from "./runtime";
 
-type Screen = "overview" | "projects" | "profiles" | "jobs" | "manage" | "cli" | "connections" | "diagnostics" | "settings";
+type Screen = "overview" | "projects" | "profiles" | "connections" | "jobs" | "cli" | "diagnostics" | "settings";
 type ActivityEntry = { time: string; message: string; online: boolean };
 
 /** Rust/Tauri invoke rejects with a plain string, not necessarily an Error. */
@@ -50,10 +50,9 @@ const NAV: { name: Screen; label: string; icon: typeof LayoutDashboard }[] = [
   { name: "overview", label: "대시보드", icon: LayoutDashboard },
   { name: "projects", label: "프로젝트", icon: FolderCode },
   { name: "profiles", label: "실행 환경", icon: Layers },
-  { name: "jobs", label: "작업", icon: FileText },
-  { name: "manage", label: "관리", icon: TerminalSquare },
-  { name: "cli", label: "CLI", icon: TerminalSquare },
   { name: "connections", label: "연결", icon: PlugZap },
+  { name: "jobs", label: "작업", icon: FileText },
+  { name: "cli", label: "CLI", icon: TerminalSquare },
   { name: "diagnostics", label: "진단", icon: Activity },
   { name: "settings", label: "설정", icon: Settings2 }
 ];
@@ -634,7 +633,7 @@ function App() {
             <button className={"icon-btn " + (checking ? "spin-icon" : "")} type="button" onClick={() => {
                 if (screen === "jobs") {
                   setJobsRefreshKey(value => value + 1);
-                } else if (screen === "overview" || screen === "projects" || screen === "manage" || screen === "connections") {
+                } else if (screen === "overview" || screen === "projects" || screen === "connections") {
                   void runOwnedAction("status"); void refreshCatalog();
                 } else { void runCheck(); }
               }} aria-label="현재 화면 새로고침" title="현재 화면 새로고침" disabled={checking || ownedBusy || catalogBusy}><RefreshCcw size={17}/></button>
@@ -655,7 +654,7 @@ function App() {
           onTogglePublic={togglePublicPreference}
           onCopyPublic={() => { void copyOwnedConnector(); }}
           onNotify={notify}
-          onNavigate={to => setScreen(to)}
+          onNavigate={to => setScreen(to === "manage" ? "connections" : to)}
         />}
 
         {screen === "projects" && <ProjectsScreen
@@ -674,7 +673,7 @@ function App() {
           onUnregisterTyped={setUnregisterTyped}
           onConfirmUnregister={() => { void confirmUnregister(); }}
           onNotify={notify}
-          onManageRuntime={() => setScreen("manage")}
+          onManageRuntime={() => setScreen("connections")}
         />}
 
         {screen === "profiles" && <ProfilesScreen
@@ -686,28 +685,6 @@ function App() {
           refreshKey={jobsRefreshKey} onProjects={() => setScreen("projects")}
         />}
 
-        {screen === "manage" && <>
-          <div className="page-heading"><div><div className="eyebrow">MANAGEMENT</div><h1>런타임 관리</h1>
-            <p>기존 Windows 런처의 관리 항목을 먼저 배치했어. 실제 서버 제어는 안전성 검증 후 연결해.</p></div></div>
-          <ManagementControls onConnections={() => setScreen("connections")} onSettings={() => setScreen("settings")} onProjects={() => setScreen("projects")} onExit={() => { void exitPreview(); }} onCompleteExit={() => { void exitPreview(true); }} exitBusy={exitBusy} exitError={exitError}
-            onHide={() => { void hideToTray(); }} trayError={trayError}
-            owned={owned} ownedBusy={ownedBusy} ownedError={ownedError} ownedToken={ownedToken}
-            ownedUrlNotice={ownedUrlNotice} onCopyOwnedConnector={() => { void copyOwnedConnector(); }}
-            ownedPublicHealth={ownedPublicHealth} ownedPublicChecking={ownedPublicChecking}
-            onCheckOwnedPublicHealth={() => { void checkOwnedPublicHealth(); }}
-            catalog={catalog} catalogBusy={catalogBusy} catalogError={catalogError} onRefreshCatalog={() => { void refreshCatalog(); }}
-            pickedFolder={pickedFolder} folderBusy={folderBusy} folderName={folderName} onFolderName={setFolderName}
-            folderId={folderId} onFolderId={setFolderId} folderError={folderError} folderNotice={folderNotice}
-            onBrowseFolder={() => { void browseOwnedFolder(); }} onCancelFolder={() => { void discardOwnedFolder(); }}
-            onRegisterFolder={() => { void registerOwnedFolder(); }}
-            unregisterTarget={unregisterTarget} unregisterTyped={unregisterTyped}
-            onUnregisterTyped={setUnregisterTyped} unregisterBusy={unregisterBusy}
-            unregisterError={unregisterError} unregisterNotice={unregisterNotice}
-            onRequestUnregister={requestUnregister} onCancelUnregister={cancelUnregister}
-            onConfirmUnregister={() => { void confirmUnregister(); }}
-            onOwnedAction={(action) => { void runOwnedAction(action); }} onCopyToken={() => { void copyOwnedToken(); }}/>
-        </>}
-
         {screen === "cli" && <>
           <div className="page-heading"><div><div className="eyebrow">CLI PARITY</div><h1>고급 CLI</h1><p>실행 환경은 전용 화면에서 관리합니다. 이곳에서는 설정·진단·고급 조회만 제공합니다.</p></div></div>
           <CliParityPanel />
@@ -715,16 +692,21 @@ function App() {
 
         {screen === "connections" && <ConnectionsSecurityScreen
           native={native} owned={owned} ownedBusy={ownedBusy} ownedError={ownedError}
-          ownerTokenPending={!!ownedToken} publicPreferred={publicPreferred}
+          ownerTokenPending={!!ownedToken}
+          tokenCopyAvailable={owned?.tokenCopyAvailable === true} publicPreferred={publicPreferred}
           publicHealth={ownedPublicHealth} publicChecking={ownedPublicChecking}
           onRefresh={() => { void runOwnedAction("status"); }}
           onManagedAction={action => { void runOwnedAction(action); }}
           onTogglePublic={togglePublicPreference}
           onCopyPublic={() => { void copyOwnedConnector(); }}
           onCopyToken={() => { void copyOwnedToken(); }}
+          onCopyStoredToken={copyOwnedOwnerToken}
+          onRegisterToken={async (candidate) => {
+            await registerOwnedOwnerToken(candidate);
+            await runOwnedAction("status");
+          }}
           onNotify={notify}
           onDiagnostics={() => setScreen("diagnostics")}
-          onManagement={() => setScreen("manage")}
         />}
 
         {screen === "diagnostics" && <>
