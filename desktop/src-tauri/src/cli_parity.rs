@@ -1,7 +1,7 @@
 //! F5-E: Explicit, bounded Tauri -> canonical CLI 1:1 operations.
 //! No arbitrary command strings, PATH executables, shell, credential output,
 //! user-selectable HOME/instance or access to the legacy WinForms/default.
-//! Advanced destructive CLI commands deliberately remain CLI-only.
+//! Advanced destructive CLI commands deliberately remain CLI-only. Bounded job status transitions are separately validated.
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Component, Path};
@@ -105,6 +105,16 @@ fn target<'a>(value: &'a Option<String>) -> Result<&'a str, String> {
     Ok(v)
 }
 
+fn job_id(value: &Option<String>) -> Result<&str, String> {
+    let id = field(value, "작업 ID")?;
+    if id.len() > 128 || !id.starts_with("loop-")
+        || !id.bytes().skip(5).all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
+        || id.len() <= 5 || id.contains("..") {
+        return Err("작업 ID는 유효한 loop-... 형식이어야 하며 프로젝트 ID는 사용할 수 없습니다.".into());
+    }
+    Ok(id)
+}
+
 fn plan(r: &CliParityRequest) -> Result<CommandPlan, String> {
     let mut args: Vec<String> = vec![];
     let mut mutating = false;
@@ -195,12 +205,20 @@ fn plan(r: &CliParityRequest) -> Result<CommandPlan, String> {
         }
         "lock-list" => args.extend(["lock".into(), "list".into()]),
         "job-list" => args.extend(["job".into(), "list".into()]),
-        "job-status" | "job-logs" => {
-            args.extend(["job".into(),
-                if r.operation == "job-status" { "status" } else { "logs" }.into(),
-                target(&r.target)?.into()]);
-            if r.operation == "job-logs" {
+        "job-status" | "job-logs" | "job-resume" | "job-cancel" => {
+            let action = match r.operation.as_str() {
+                "job-status" => "status",
+                "job-logs" => "logs",
+                "job-resume" => "resume",
+                _ => "cancel",
+            };
+            args.extend(["job".into(), action.into(), job_id(&r.target)?.into()]);
+            if action == "logs" {
                 args.extend(["--limit".into(), "10".into()]);
+            }
+            if action == "resume" || action == "cancel" {
+                // Only modifies the durable state. Does not launch/kill agents.
+                mutating = true;
             }
         }
         "control-list" => args.extend(["control".into(), "list".into()]),
@@ -215,7 +233,7 @@ fn plan(r: &CliParityRequest) -> Result<CommandPlan, String> {
                 "--lines".into(), "80".into()]);
             text = true;
         }
-        _ => return Err("허용되지 않은 CLI 명령입니다. secret/job/lock/control 변경 명령은 여기서 실행하지 않습니다.".into()),
+        _ => return Err("허용되지 않은 CLI 명령입니다. 비밀정보·잠금·제어 고위험 명령은 여기서 실행하지 않습니다.".into()),
     }
     Ok(CommandPlan { args, mutating, require_record, text, allow_nonzero })
 }
@@ -320,16 +338,28 @@ mod tests {
             let p = plan(&request(operation)).unwrap();
             assert!(!p.mutating && !p.require_record);
         }
-        for operation in ["secret-set", "job-cancel", "lock-release",
+        for operation in ["secret-set", "lock-release",
                           "control-approve", "control-kill"] {
             assert!(plan(&request(operation)).is_err());
         }
         let mut job = request("job-status");
         assert!(plan(&job).is_err());
-        job.target = Some("job-abc_123".into());
-        assert_eq!(plan(&job).unwrap().args[2], "job-abc_123");
-        job.target = Some("../path".into());
+        job.target = Some("loop-abc123".into());
+        assert_eq!(plan(&job).unwrap().args[2], "loop-abc123");
+        job.target = Some("project-id".into());
         assert!(plan(&job).is_err());
+        job.target = Some("loop-abc_123".into());
+        assert!(plan(&job).is_err());
+        job.target = Some("loop-../path".into());
+        assert!(plan(&job).is_err());
+        for (name, verb) in [("job-resume", "resume"), ("job-cancel", "cancel")] {
+            let mut request = request(name);
+            assert!(plan(&request).is_err());
+            request.target = Some("loop-safe.1".into());
+            let p = plan(&request).unwrap();
+            assert_eq!(p.args.iter().map(String::as_str).collect::<Vec<_>>(), vec!["job", verb, "loop-safe.1"]);
+            assert!(p.mutating && !p.require_record);
+        }
         assert!(plan(&request("config-import")).is_err());
         let p = plan(&request("reload")).unwrap();
         assert!(p.mutating && p.require_record && p.args.contains(&INSTANCE.to_string()));

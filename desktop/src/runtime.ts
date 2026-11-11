@@ -299,7 +299,8 @@ export type OwnedCliParityOperation =
   | "config-show" | "config-export" | "config-set" | "config-unset"
   | "reload" | "status" | "health" | "doctor" | "logs-server" | "logs-tunnel"
   | "repository-show" | "secret-list" | "lock-list" | "job-list"
-  | "job-status" | "job-logs" | "control-list" | "control-auto-status";
+  | "job-status" | "job-logs" | "job-resume" | "job-cancel"
+  | "control-list" | "control-auto-status";
 
 export interface OwnedCliParityRequest {
   operation: OwnedCliParityOperation;
