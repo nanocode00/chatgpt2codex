@@ -5,16 +5,16 @@ import {
   Terminal, Trash2, X
 } from "lucide-react";
 import {
-  isNativeApp, runOwnedCliParity, type CatalogInspection, type CatalogProfile,
+  isNativeApp, runOwnedCliParity, type CatalogInspection,
   type OwnedCliParityOperation
 } from "./runtime";
 import {
-  filterProfilesForKind, parseProfileDetails, parseProfileTest, validateDraft,
-  type ProfileDetails, type ProfileTestResult
+  filterProfileEntries, parseProfileDetails, parseProfileTest, validateDraft,
+  type ProfileDetails, type ProfileTestResult, type ProfileEntry, type ProfileKind, type ProfileFilter
 } from "./profile-model";
 import "./profiles.css";
 
-type Kind = "python" | "docker";
+type Kind = ProfileKind;
 type ProfileForm = {
   alias: string;
   pythonPath: string;
@@ -46,17 +46,15 @@ export function ProfilesScreen({
   catalog, catalogBusy, catalogError, onRefresh, onNotify
 }: ProfilesScreenProps) {
   const native = isNativeApp();
-  const [activeKind, setActiveKind] = useState<Kind>("python");
+  const [filter, setFilter] = useState<ProfileFilter>("all");
   const [query, setQuery] = useState("");
-  const [selectedByKind, setSelectedByKind] = useState<Record<Kind, string | null>>({
-    python: null, docker: null
-  });
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [details, setDetails] = useState<ProfileDetails | null>(null);
   const [detailsBusy, setDetailsBusy] = useState(false);
   const [detailsError, setDetailsError] = useState("");
   const [testResult, setTestResult] = useState<ProfileTestResult | null>(null);
   const [testBusy, setTestBusy] = useState(false);
-  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorKind, setEditorKind] = useState<Kind | null>(null);
   const [editingExisting, setEditingExisting] = useState(false);
   const [form, setForm] = useState<ProfileForm>({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
@@ -66,10 +64,13 @@ export function ProfilesScreen({
   const profiles = catalog?.available ? catalog.profiles : [];
   const countPython = profiles.filter(profile => profile.python).length;
   const countDocker = profiles.filter(profile => profile.docker).length;
-  // (kind, alias) is one GUI profile. Identical aliases in both maps stay independent.
-  const inKind = profiles.filter(profile => profile[activeKind]);
-  const filtered = useMemo(() => filterProfilesForKind(profiles, activeKind, query), [catalog, activeKind, query]);
-  const selected = filtered.find(profile => profile.alias === selectedByKind[activeKind]) ?? filtered[0] ?? null;
+  // Even in "All", matching aliases in Python and Docker remain distinct entries.
+  const filtered = useMemo(() => filterProfileEntries(profiles, filter, query), [catalog, filter, query]);
+  const selected = filtered.find(item => item.kind + ":" + item.alias === selectedKey) ?? filtered[0] ?? null;
+  const selectedKind: Kind = selected?.kind ?? (filter === "docker" ? "docker" : "python");
+  const total = countPython + countDocker;
+  const visibleCount = filter === "all" ? total : filter === "python" ? countPython : countDocker;
+  const listName = filter === "all" ? "전체" : filter === "python" ? "Python" : "Docker";
   const available = native && catalog?.available === true;
   const busy = saving || catalogBusy || detailsBusy || testBusy;
 
@@ -90,7 +91,7 @@ export function ProfilesScreen({
       .then(response => {
         if (!active) return;
         const parsed = parseProfileDetails(response.json, selected.alias);
-        if (!parsed || (activeKind === "python" ? !parsed.python : !parsed.docker)) {
+        if (!parsed || (selected.kind === "python" ? !parsed.python : !parsed.docker)) {
           throw new Error("선택한 실행 환경의 상세 정보를 확인할 수 없습니다.");
         }
         setDetails(parsed);
@@ -98,39 +99,44 @@ export function ProfilesScreen({
       .catch(error => { if (active) setDetailsError(failure(error)); })
       .finally(() => { if (active) setDetailsBusy(false); });
     return () => { active = false; };
-  }, [native, catalog, selected?.alias, activeKind, revision]);
+  }, [native, catalog, selected?.alias, selected?.kind, revision]);
 
-  function switchKind(kind: Kind) {
-    if (kind === activeKind) return;
-    setActiveKind(kind);
+  function switchFilter(next: ProfileFilter) {
+    if (next === filter) return;
+    setFilter(next);
     setQuery("");
-    setEditorOpen(false);
+    setEditorKind(null);
     setEditingExisting(false);
     setOperationError("");
     setTestResult(null);
   }
 
-  function chooseProfile(profile: CatalogProfile) {
-    setSelectedByKind(previous => ({ ...previous, [activeKind]: profile.alias }));
-    setEditorOpen(false);
+  function chooseProfile(entry: ProfileEntry) {
+    setSelectedKey(entry.kind + ":" + entry.alias);
+    setEditorKind(null);
     setEditingExisting(false);
     setOperationError("");
     setTestResult(null);
   }
 
-  function beginEditor(existing: boolean) {
-    if (existing && (!selected || !details)) return;
-    setEditorOpen(true);
+  function beginEditor(kind: Kind, existing = false) {
+    if (existing && (!selected || selected.kind !== kind || !details)) return;
+    if (!existing) {
+      // Add buttons are independent of the current filter.
+      setFilter(kind);
+      setQuery("");
+    }
+    setEditorKind(kind);
     setEditingExisting(existing);
     setOperationError("");
     if (existing && selected && details) {
       setForm({
         alias: selected.alias,
-        pythonPath: activeKind === "python" ? details.python ?? "" : "",
-        composeFile: activeKind === "docker" ? details.docker?.composeFile ?? "compose.yaml" : "compose.yaml",
-        projectName: activeKind === "docker" ? details.docker?.projectName ?? "" : "",
-        services: activeKind === "docker" ? details.docker?.services.join(", ") ?? "" : "",
-        controlServices: activeKind === "docker" ? details.docker?.controlServices.join(", ") ?? "" : ""
+        pythonPath: kind === "python" ? details.python ?? "" : "",
+        composeFile: kind === "docker" ? details.docker?.composeFile ?? "compose.yaml" : "compose.yaml",
+        projectName: kind === "docker" ? details.docker?.projectName ?? "" : "",
+        services: kind === "docker" ? details.docker?.services.join(", ") ?? "" : "",
+        controlServices: kind === "docker" ? details.docker?.controlServices.join(", ") ?? "" : ""
       });
     } else {
       setForm({ ...EMPTY_FORM });
@@ -148,36 +154,37 @@ export function ProfilesScreen({
   }
 
   async function save() {
-    if (!available || busy || !editorOpen) return;
+    if (!available || busy || !editorKind) return;
     const alias = form.alias.trim().toLowerCase();
     const values = {
       ...form, pythonPath: form.pythonPath.trim(), composeFile: form.composeFile.trim(),
       projectName: form.projectName.trim(), services: form.services.trim(),
       controlServices: form.controlServices.trim()
     };
-    const issue = validateDraft(activeKind, alias, values);
+    const issue = validateDraft(editorKind, alias, values);
     if (issue) { setOperationError(issue); return; }
-    const name = activeKind === "python" ? "Python" : "Docker";
-    const replaces = profiles.some(profile => profile.alias === alias && profile[activeKind]);
+    const name = editorKind === "python" ? "Python" : "Docker";
+    const replaces = profiles.some(profile => profile.alias === alias && profile[editorKind]);
     if (replaces && !window.confirm(name + " 프로필 '" + alias +
       "'의 기존 설정을 교체할까요? 다른 종류의 프로필은 유지됩니다.")) return;
     setSaving(true);
     setOperationError("");
     try {
-      const operation: OwnedCliParityOperation = activeKind === "python" ?
+      const operation: OwnedCliParityOperation = editorKind === "python" ?
         "profile-add-python" : "profile-add-docker";
       await runOwnedCliParity({
         operation, alias,
-        ...(activeKind === "python" ? { value: values.pythonPath } : {
+        ...(editorKind === "python" ? { value: values.pythonPath } : {
           composeFile: values.composeFile,
           projectName: values.projectName,
           services: values.services,
           controlServices: values.controlServices
         })
       });
-      setSelectedByKind(previous => ({ ...previous, [activeKind]: alias }));
+      setSelectedKey(editorKind + ":" + alias);
+      setFilter(editorKind);
       setQuery("");
-      setEditorOpen(false);
+      setEditorKind(null);
       setEditingExisting(false);
       setRevision(previous => previous + 1);
       onNotify(name + " 프로필 '" + alias + "' 등록 완료");
@@ -199,11 +206,11 @@ export function ProfilesScreen({
     try {
       const response = await runOwnedCliParity({ operation: "profile-test", alias: selected.alias });
       const parsed = parseProfileTest(response.json, selected.alias);
-      if (!parsed || (activeKind === "python" ? !parsed.python?.configured : !parsed.docker?.configured)) {
+      if (!parsed || (selected.kind === "python" ? !parsed.python?.configured : !parsed.docker?.configured)) {
         throw new Error("선택한 실행 환경의 검사 결과가 올바르지 않습니다.");
       }
       setTestResult(parsed);
-      onNotify(activeKind === "python" ? "Python 실행 파일 검사 완료" : "Docker 설정 확인 완료");
+      onNotify(selected.kind === "python" ? "Python 실행 파일 검사 완료" : "Docker 설정 확인 완료");
     } catch (error) {
       const message = failure(error);
       setOperationError(message);
@@ -213,7 +220,7 @@ export function ProfilesScreen({
 
   async function remove() {
     if (!available || busy || !selected) return;
-    const kind = activeKind;
+    const kind = selected.kind;
     const alias = selected.alias;
     const name = kind === "python" ? "Python" : "Docker";
     if (!window.confirm(name + " 프로필 '" + alias +
@@ -225,10 +232,10 @@ export function ProfilesScreen({
         operation: kind === "python" ? "profile-remove-python" : "profile-remove-docker",
         alias
       });
-      setEditorOpen(false);
+      setEditorKind(null);
       setEditingExisting(false);
       setTestResult(null);
-      setSelectedByKind(previous => ({ ...previous, [kind]: null }));
+      setSelectedKey(null);
       setRevision(previous => previous + 1);
       onNotify(name + " 프로필 '" + alias + "' 등록 해제 완료 · 파일은 유지됩니다.");
       await onRefresh();
@@ -240,7 +247,7 @@ export function ProfilesScreen({
     } finally { setSaving(false); }
   }
 
-  const kindName = activeKind === "python" ? "Python" : "Docker";
+  const kindName = selectedKind === "python" ? "Python" : "Docker";
 
   return <div className="profiles-root">
     <header className="profiles-heading">
