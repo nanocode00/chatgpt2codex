@@ -202,6 +202,7 @@ export interface ManagedResult {
   port: number;
   details: string;
   oneTimeOwnerToken?: string;
+  tokenCopyAvailable: boolean;
 }
 export async function manageOwnedCli(action: ManagedAction): Promise<ManagedResult> {
   if (!isNativeApp()) {
@@ -209,6 +210,18 @@ export async function manageOwnedCli(action: ManagedAction): Promise<ManagedResu
       instance: "tauri-preview-v1", port: 18797, details: "Windows Tauri 프리뷰에서만 지원합니다." };
   }
   return invoke<ManagedResult>("manage_owned_cli", { action });
+}
+
+/** Native Windows clipboard copy: secret never enters WebView JS. */
+export async function copyOwnedOwnerToken(): Promise<void> {
+  if (!isNativeApp()) throw new Error("Owner Token 복사는 Windows Tauri 앱에서만 지원합니다.");
+  await invoke<void>("copy_owned_owner_token");
+}
+
+/** Explicit owner-provided token import, validated against the isolated CLI hash. */
+export async function registerOwnedOwnerToken(candidate: string): Promise<void> {
+  if (!isNativeApp()) throw new Error("Owner Token 등록은 Windows Tauri 앱에서만 지원합니다.");
+  await invoke<boolean>("register_owned_owner_token", { candidate });
 }
 
 export interface LegacyMigrationReport {
