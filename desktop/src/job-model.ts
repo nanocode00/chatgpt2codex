@@ -1,7 +1,7 @@
 import { parseJobList, type JobListItem } from "./job-list";
 
 export type JobState = "active" | "paused" | "completed" | "blocked" | "canceled";
-export type JobFilter = "all" | JobState;
+export type JobFilter = "all" | "attention" | "history" | JobState;
 export interface JobDetail {
   id: string;
   status: JobState;
@@ -67,7 +67,10 @@ export function parseJobLogs(raw: unknown, selectedId: string): JobLogs | null {
 }
 export function filterJobs(items: JobListItem[], filter: JobFilter, query: string): JobListItem[] {
   const needle = query.trim().toLocaleLowerCase();
-  return items.filter(item => (filter === "all" || item.status === filter) &&
+  return items.filter(item => (filter === "all" ||
+    (filter === "attention" && ["paused", "blocked"].includes(item.status)) ||
+    (filter === "history" && ["completed", "canceled"].includes(item.status)) ||
+    item.status === filter) &&
     (!needle || item.id.toLocaleLowerCase().includes(needle) ||
       (item.projectId ?? "").toLocaleLowerCase().includes(needle)));
 }
