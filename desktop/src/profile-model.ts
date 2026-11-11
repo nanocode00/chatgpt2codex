@@ -85,6 +85,29 @@ export function filterProfilesForKind(
   return filterProfiles(profiles.filter(profile => profile[kind]), query);
 }
 
+export type ProfileKind = "python" | "docker";
+export type ProfileFilter = "all" | ProfileKind;
+export interface ProfileEntry { kind: ProfileKind; alias: string }
+
+/** "All" lists two independent rows for an alias configured in both maps. */
+export function filterProfileEntries(
+  profiles: CatalogProfile[], filter: ProfileFilter, search: string
+): ProfileEntry[] {
+  const needle = search.trim().toLocaleLowerCase();
+  const entries: ProfileEntry[] = profiles.flatMap(profile => {
+    const found: ProfileEntry[] = [];
+    if (profile.python && (filter === "all" || filter === "python")) {
+      found.push({ kind: "python", alias: profile.alias });
+    }
+    if (profile.docker && (filter === "all" || filter === "docker")) {
+      found.push({ kind: "docker", alias: profile.alias });
+    }
+    return found;
+  });
+  return entries.filter(item => !needle || item.alias.toLocaleLowerCase().includes(needle))
+    .sort((a, b) => a.alias.localeCompare(b.alias) || (a.kind === "python" ? -1 : 1));
+}
+
 export function profileAliasValid(value: string): boolean { return aliasOk(value); }
 
 /** Candidate validation is for friendly UI errors; Rust and the CLI remain authoritative. */
