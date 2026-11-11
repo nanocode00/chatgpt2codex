@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { filterProfiles, filterProfilesForKind, filterProfileEntries, parseProfileDetails, parseProfileTest, profileAliasValid, validateDraft } from "../desktop/src/profile-model";
+import { filterProfiles, filterProfilesForKind, filterProfileEntries, filterAfterProfileAdd, parseProfileDetails, parseProfileTest, profileAliasValid, validateDraft } from "../desktop/src/profile-model";
 
 const draft = { pythonPath: String.raw`C:\Users\me\miniconda3\envs\dev\python.exe`, composeFile: "compose.yaml",
   projectName: "local-app", services: "api, db", controlServices: "api" };
@@ -121,11 +121,23 @@ describe("Tauri unified execution profiles", () => {
     expect(css).not.toContain('.profiles-kind-nav');
   });
 
+  it("keeps All selected when either add button opens or saves, switching only specific filters", () => {
+    expect(filterAfterProfileAdd("all", "python")).toBe("all");
+    expect(filterAfterProfileAdd("all", "docker")).toBe("all");
+    expect(filterAfterProfileAdd("python", "docker")).toBe("docker");
+    expect(filterAfterProfileAdd("docker", "python")).toBe("python");
+    expect(filterAfterProfileAdd("python", "python")).toBe("python");
+    expect(filterAfterProfileAdd("docker", "docker")).toBe("docker");
+  });
+
   it("keeps Python and Docker add buttons visible and switches filter when registering", () => {
     const screen = readFileSync("desktop/src/ProfilesScreen.tsx", "utf8");
     expect(screen).toContain('onClick={() => beginEditor("python")}');
     expect(screen).toContain('onClick={() => beginEditor("docker")}');
-    expect(screen).toContain('setFilter(kind)');
+    expect(screen).toMatch(/className="profiles-button primary"[\s\S]*?beginEditor\("python"\)/);
+    expect(screen).toMatch(/className="profiles-button primary"[\s\S]*?beginEditor\("docker"\)/);
+    expect(screen).toContain('setFilter(filterAfterProfileAdd(filter, kind))');
+    expect(screen).toContain('setFilter(filterAfterProfileAdd(filter, editorKind))');
     expect(screen).toContain('setEditorKind(kind)');
     expect(screen).toContain('const operation: OwnedCliParityOperation = editorKind === "python" ?');
     expect(screen).toContain('selectedKind === "python" ? "실행 파일 검사" : "설정 확인"');
