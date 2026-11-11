@@ -1643,8 +1643,10 @@ async function waitForRuntimeHealth(
   record: { host: string; port: number },
   attempts = 40,
   expectedRecord?: () => Promise<boolean>,
+  maxElapsedMs?: number,
 ): Promise<boolean> {
-  for (let i = 0; i < attempts; i += 1) {
+  const deadline = maxElapsedMs === undefined ? Infinity : Date.now() + maxElapsedMs;
+  for (let i = 0; i < attempts && Date.now() < deadline; i += 1) {
     // A healthy listener can precede serve --http writing its initial
     // instance record. Do not conclude startup or fail on that race.
     if (await runtimeHealth(record) && (!expectedRecord || await expectedRecord())) return true;
@@ -1737,6 +1739,7 @@ async function cmdStart(flags: Record<string, string | boolean>): Promise<void> 
   const healthy = await waitForRuntimeHealth(
     { host: options.host, port: options.port }, attempts,
     async () => (await readRuntimeInstance(stateDir, options.instance))?.pid === serverPid,
+    options.instance === "tauri-preview-v1" ? 20_000 : undefined,
   );
   const record = await readRuntimeInstance(stateDir, options.instance);
   if (!healthy || !record || record.pid !== serverPid) {
