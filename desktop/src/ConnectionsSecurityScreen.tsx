@@ -1,6 +1,6 @@
 import { useState } from "react";
 import {
-  Activity, ArrowRight, CheckCircle2, ClipboardCopy, Cloud, Globe2,
+  Activity, ArrowRight, CheckCircle2, ChevronDown, ClipboardCopy, Cloud, Globe2,
   HardDrive, KeyRound, LockKeyhole, Play, RefreshCcw, RotateCw,
   ShieldCheck, Square, TerminalSquare, TriangleAlert
 } from "lucide-react";
@@ -49,6 +49,7 @@ export function ConnectionsSecurityScreen({
   const [tokenImportOpen, setTokenImportOpen] = useState(false);
   const [tokenBusy, setTokenBusy] = useState(false);
   const [tokenError, setTokenError] = useState("");
+  const [securityExpanded, setSecurityExpanded] = useState(false);
   const endpoint = "http://127.0.0.1:" + (owned?.port ?? 18797) + "/mcp";
   const publicValue = exposed ? owned?.publicConnector ?? "" : "";
   const publicStatus =
@@ -137,29 +138,22 @@ export function ConnectionsSecurityScreen({
           <button type="button" aria-label="로컬 MCP URL 복사"
             onClick={() => { void copyLocal(); }}><ClipboardCopy size={16}/></button>
         </div>
-        <div className="connections-actions">
-          {state === "setup" && <button type="button" className="connections-button primary"
-            disabled={!available || runtimeBusy} onClick={() => onManagedAction("prepare")}>
-            <KeyRound size={16}/> 초기 설정
-          </button>}
-          {(state === "online" || state === "stopped") &&
-            (running ?
-              <button type="button" className="connections-button primary"
-                disabled={runtimeBusy} onClick={() => onManagedAction("stop")}>
-                <Square size={16}/> MCP 중지
-              </button> :
-              <button type="button" className="connections-button primary"
-                disabled={!ready || runtimeBusy || (publicPreferred && !owned?.tunnelCapable)}
-                onClick={() => onManagedAction(startAction(publicPreferred))}>
-                <Play size={16}/> MCP 시작
-              </button>
-            )}
-          {running && <button type="button" className="connections-button secondary"
-            disabled={runtimeBusy} onClick={() => onManagedAction("restart")}>
+        <div className="connections-actions connections-lifecycle-actions" aria-label="MCP 실행 제어">
+          <button type="button" className={"connections-button " + (!running ? "primary" : "secondary")}
+            disabled={!ready || running || runtimeBusy || (publicPreferred && !owned?.tunnelCapable)}
+            onClick={() => onManagedAction(startAction(publicPreferred))}>
+            <Play size={16}/> MCP 시작
+          </button>
+          <button type="button" className={"connections-button " + (running ? "primary" : "secondary")}
+            disabled={!running || runtimeBusy} onClick={() => onManagedAction("stop")}>
+            <Square size={16}/> MCP 중지
+          </button>
+          <button type="button" className="connections-button secondary"
+            disabled={!running || runtimeBusy} onClick={() => onManagedAction("restart")}>
             <RotateCw size={16}/> 재시작
-          </button>}
-          <button type="button" className="connections-button secondary" disabled={runtimeBusy}
-            onClick={onRefresh}>
+          </button>
+          <button type="button" className="connections-button secondary"
+            disabled={!native || runtimeBusy} onClick={onRefresh}>
             <RefreshCcw size={15}/> 상태 확인
           </button>
         </div>
@@ -222,7 +216,7 @@ export function ConnectionsSecurityScreen({
             <ClipboardCopy size={16}/> 일회성 토큰 복사 후 지우기
           </button>}
         </div>}
-        <div className="connections-actions">
+        <div className="connections-actions connections-token-actions" aria-label="Owner Token 관리">
           <button type="button" className="connections-button primary"
             disabled={!ready || runtimeBusy || tokenBusy || !tokenCopyAvailable}
             onClick={() => { void onCopyStoredToken().then(() =>
@@ -231,15 +225,16 @@ export function ConnectionsSecurityScreen({
               error instanceof Error ? error.message : "Owner Token 복사에 실패했습니다.", "error")); }}>
             <ClipboardCopy size={16}/> Owner Token 복사
           </button>
-          {!ready && <button type="button" className="connections-button secondary"
-            disabled={!available || runtimeBusy} onClick={() => onManagedAction("prepare")}>
-            <KeyRound size={16}/> Owner Token 초기 설정
-          </button>}
-          {ready && <button type="button" className="connections-button secondary"
-            disabled={runtimeBusy || running || ownerTokenPending || tokenBusy}
+          <button type="button" className="connections-button secondary"
+            disabled={!available || ready || runtimeBusy || tokenBusy}
+            onClick={() => onManagedAction("prepare")}>
+            <KeyRound size={16}/> 토큰 초기 설정
+          </button>
+          <button type="button" className="connections-button secondary"
+            disabled={!ready || runtimeBusy || running || ownerTokenPending || tokenBusy}
             onClick={() => onManagedAction("rotate-token")}>
             <KeyRound size={16}/> 토큰 재발급
-          </button>}
+          </button>
         </div>
         {ready && !tokenCopyAvailable && !ownerTokenPending && <div className="connections-token-restore">
           <p>기존 토큰은 해시에서 복구할 수 없습니다. 이전에 보관한 현재 Tauri 토큰이 있다면
@@ -263,12 +258,23 @@ export function ConnectionsSecurityScreen({
           </form>}
         </div>}
         <div className="connections-guidance">
-          <strong>Owner Token 보안 안내</strong>
-          <p>토큰 재발급은 <strong>기존 Tauri 전용 OAuth 승인</strong>을 무효화합니다.
-            변경 전 MCP를 중지하고, 재발급 후 ChatGPT에서 다시 연결해야 합니다.</p>
-          <p>복사 기능은 이 Windows 사용자 계정에 묶인 DPAPI 암호화 보관소만 사용합니다.
-            기존 WinForms/default:7979의 토큰을 조회하거나 수정하지 않습니다.</p>
-          <p>토큰을 클립보드에 복사하면 다른 앱에서 붙여넣을 수 있으므로 사용 후 클립보드를 정리하세요.</p>
+          <button type="button" className="connections-guidance-toggle"
+            aria-controls="connections-security-details" aria-expanded={securityExpanded}
+            onClick={() => setSecurityExpanded(value => !value)}>
+            <span><ShieldCheck size={16}/><strong>Owner Token 보안 안내</strong></span>
+            <span className="connections-guidance-action">{securityExpanded ? "접기" : "자세히 보기"}
+              <ChevronDown size={16} className={securityExpanded ? "is-expanded" : ""}/></span>
+          </button>
+          {!securityExpanded && <p className="connections-guidance-summary">
+            재발급 시 기존 OAuth 승인이 무효화되며 ChatGPT 재연결이 필요합니다.
+          </p>}
+          {securityExpanded && <div id="connections-security-details" className="connections-guidance-details">
+            <p>토큰 재발급은 <strong>기존 Tauri 전용 OAuth 승인</strong>을 무효화합니다.
+              변경 전 MCP를 중지하고, 재발급 후 ChatGPT에서 다시 연결해야 합니다.</p>
+            <p>복사 기능은 이 Windows 사용자 계정에 묶인 DPAPI 암호화 보관소만 사용합니다.
+              기존 WinForms/default:7979의 토큰을 조회하거나 수정하지 않습니다.</p>
+            <p>토큰을 클립보드에 복사하면 다른 앱에서 붙여넣을 수 있으므로 사용 후 클립보드를 정리하세요.</p>
+          </div>}
         </div>
         <p className="connections-subnote">‘인증 준비됨’은 토큰 설정 상태만 의미하며 ChatGPT OAuth 승인 완료를 뜻하지 않습니다.</p>
       </section>
