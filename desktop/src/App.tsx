@@ -697,7 +697,7 @@ function App() {
           onTogglePublic={togglePublicPreference}
           onCopyPublic={() => { void copyOwnedConnector(); }}
           onCopyToken={() => { void copyOwnedToken(); }}
-          onCopyStoredToken={copyOwnedOwnerToken}
+          onCopyStoredToken={async () => { await copyOwnedOwnerToken(); setOwnedToken(null); }}
           onRegisterToken={async (candidate) => {
             await registerOwnedOwnerToken(candidate);
             await runOwnedAction("status");
