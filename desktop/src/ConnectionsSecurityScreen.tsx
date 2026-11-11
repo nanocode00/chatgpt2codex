@@ -139,21 +139,23 @@ export function ConnectionsSecurityScreen({
             onClick={() => { void copyLocal(); }}><ClipboardCopy size={16}/></button>
         </div>
         <div className="connections-actions connections-lifecycle-actions" aria-label="MCP 실행 제어">
-          <button type="button" className={"connections-button " + (!running ? "primary" : "secondary")}
-            disabled={!ready || running || runtimeBusy || (publicPreferred && !owned?.tunnelCapable)}
-            onClick={() => onManagedAction(startAction(publicPreferred))}>
-            <Play size={16}/> MCP 시작
-          </button>
-          <button type="button" className={"connections-button " + (running ? "primary" : "secondary")}
-            disabled={!running || runtimeBusy} onClick={() => onManagedAction("stop")}>
-            <Square size={16}/> MCP 중지
-          </button>
+          {running ? (
+            <button type="button" className="connections-button primary"
+              disabled={runtimeBusy} onClick={() => onManagedAction("stop")}>
+              <Square size={16}/> MCP 중지
+            </button>
+          ) : (
+            <button type="button" className="connections-button primary"
+              disabled={!ready || runtimeBusy || (publicPreferred && !owned?.tunnelCapable)}
+              onClick={() => onManagedAction(startAction(publicPreferred))}>
+              <Play size={16}/> MCP 시작
+            </button>
+          )}
           <button type="button" className="connections-button secondary"
             disabled={!running || runtimeBusy} onClick={() => onManagedAction("restart")}>
             <RotateCw size={16}/> 재시작
           </button>
-          <button type="button" className="connections-button secondary"
-            disabled={!native || runtimeBusy} onClick={onRefresh}>
+          <button type="button" className="connections-button secondary" onClick={onRefresh}>
             <RefreshCcw size={15}/> 상태 확인
           </button>
         </div>
