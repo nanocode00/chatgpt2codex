@@ -233,7 +233,7 @@ fn plan(r: &CliParityRequest) -> Result<CommandPlan, String> {
                 "--lines".into(), "80".into()]);
             text = true;
         }
-        _ => return Err("허용되지 않은 CLI 명령입니다. secret/job/lock/control 변경 명령은 여기서 실행하지 않습니다.".into()),
+        _ => return Err("허용되지 않은 CLI 명령입니다. 비밀정보·잠금·제어 고위험 명령은 여기서 실행하지 않습니다.".into()),
     }
     Ok(CommandPlan { args, mutating, require_record, text, allow_nonzero })
 }
@@ -357,7 +357,7 @@ mod tests {
             assert!(plan(&request).is_err());
             request.target = Some("loop-safe.1".into());
             let p = plan(&request).unwrap();
-            assert_eq!(p.args, ["job", verb, "loop-safe.1"]);
+            assert_eq!(p.args.iter().map(String::as_str).collect::<Vec<_>>(), vec!["job", verb, "loop-safe.1"]);
             assert!(p.mutating && !p.require_record);
         }
         assert!(plan(&request("config-import")).is_err());
