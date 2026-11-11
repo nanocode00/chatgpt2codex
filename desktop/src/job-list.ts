@@ -15,11 +15,10 @@ export function parseJobList(input: unknown): JobListItem[] | null {
     const job = value as Record<string, unknown>;
     return typeof job.id === "string" && job.id.length <= 128 &&
       /^loop-[A-Za-z0-9.-]+$/.test(job.id) && !job.id.includes("..") &&
-      typeof job.status === "string" && job.status.length <= 32 &&
-      (job.projectId === undefined || (typeof job.projectId === "string" && job.projectId.length <= 160)) &&
-      (job.goalPreview === undefined || (typeof job.goalPreview === "string" && job.goalPreview.length <= 200));
+      typeof job.status === "string" && job.status.length <= 32;
   }).slice(0, 128).map(job => ({
-    id: job.id, status: job.status, ...(job.projectId ? { projectId: job.projectId } : {}),
-    ...(job.goalPreview ? { goalPreview: job.goalPreview } : {})
+    id: job.id, status: job.status,
+    ...(typeof job.projectId === "string" ? { projectId: job.projectId.slice(0, 160) } : {}),
+    ...(typeof job.goalPreview === "string" ? { goalPreview: job.goalPreview.slice(0, 200) } : {})
   }));
 }
