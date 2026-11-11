@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { checkRuntime, inspectInstalledCliLogs, inspectPublicTunnel, manageOwnedCli, copyOwnedOwnerToken, registerOwnedOwnerToken, inspectOwnedPublicTunnelHealth, inspectOwnedCatalog, unregisterOwnedRepository, pickOwnedRepositoryFolder, registerOwnedPickedRepository, cancelOwnedPickedRepository, closePreviewWindow, closePreviewWithOwnedMcp, hidePreviewWindow, openTrustedLink, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type CliLogPreview, type CliLogComponent, type ManagedAction, type ManagedResult, type CatalogInspection, type PickedRepositoryFolder, type PublicTunnelHealth, type RuntimeHealth, type TrustedLink } from "./runtime";
 import { LegacyDiagnosticsControls, LegacySettingsControls } from "./LegacyControls";
 import { ConnectionsSecurityScreen } from "./ConnectionsSecurityScreen";
+import { OwnerTokenRotationDialog } from "./OwnerTokenRotationDialog";
 import { CliParityPanel } from "./CliParityPanel";
 import { Dashboard } from "./Dashboard";
 import { ProjectsScreen } from "./ProjectsScreen";
@@ -80,6 +81,7 @@ function App() {
   const [ownedBusy, setOwnedBusy] = useState(false);
   const [ownedError, setOwnedError] = useState("");
   const [ownedToken, setOwnedToken] = useState<string | null>(null);
+  const [rotationDialogOpen, setRotationDialogOpen] = useState(false);
   const [ownedPublicHealth, setOwnedPublicHealth] = useState<PublicTunnelHealth | null>(null);
   const [ownedPublicChecking, setOwnedPublicChecking] = useState(false);
   const [catalog, setCatalog] = useState<CatalogInspection | null>(null);
@@ -174,15 +176,18 @@ function App() {
   }, [autoRefresh, native, runCheck]);
 
 
-  const runOwnedAction = useCallback(async (action: ManagedAction) => {
+  const runOwnedAction = useCallback(async (action: ManagedAction, confirmedRotation = false) => {
     if (action === "start-public" && !window.confirm(
       "Tauri 전용 MCP를 Cloudflare Quick Tunnel로 외부에 공개할까요?\\n\\n별도 18797 인스턴스만 사용하며 기존 WinForms/7979는 변경하지 않습니다. 공개 주소는 재시작 때 변경될 수 있고, 연결에는 인증 승인이 필요합니다."
     )) return;
     if (action === "rotate-token") {
-      const confirmation = window.prompt(
-        "Tauri 전용 Owner Token을 새로 발급할까요?\\n\\n기존 Token을 복구할 수 없으며, 기존 OAuth 승인이 모두 무효화돼 ChatGPT를 다시 연결해야 합니다.\\n\\n전용 MCP를 중지한 상태에서만 가능합니다. 진행하려면 '재발급'을 입력하세요."
-      );
-      if (confirmation !== "재발급") return;
+      if (!confirmedRotation) {
+        setOwnedError("");
+        setRotationDialogOpen(true);
+        return;
+      }
+      // Only the app's typed-acknowledgement dialog passes confirmedRotation.
+      // Native Rust independently enforces fully stopped instance ownership.
       setOwnedToken(null);
       setOwnedPublicHealth(null);
     }
@@ -198,6 +203,7 @@ function App() {
       } else {
         setOwned(next);
       }
+      if (action === "rotate-token") setRotationDialogOpen(false);
       if (action !== "status") {
         const labels: Record<ManagedAction, string> = {
           status: "상태 조회", prepare: "MCP 준비", "rotate-token": "토큰 재발급",
@@ -767,6 +773,12 @@ function App() {
         </div>
         </div>
       </main>
+      {rotationDialogOpen && <OwnerTokenRotationDialog
+        busy={ownedBusy} ready={owned?.ready === true} running={owned?.running === true}
+        error={ownedError}
+        onCancel={() => { if (!ownedBusy) setRotationDialogOpen(false); }}
+        onConfirm={() => { void runOwnedAction("rotate-token", true); }}
+      />}
       <Toast toast={toast}/>
     </div>
   );
