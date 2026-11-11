@@ -9,7 +9,7 @@ import {
   type OwnedCliParityOperation
 } from "./runtime";
 import {
-  filterProfileEntries, parseProfileDetails, parseProfileTest, validateDraft,
+  filterAfterProfileAdd, filterProfileEntries, parseProfileDetails, parseProfileTest, validateDraft,
   type ProfileDetails, type ProfileTestResult, type ProfileEntry, type ProfileKind, type ProfileFilter
 } from "./profile-model";
 import "./profiles.css";
@@ -122,8 +122,8 @@ export function ProfilesScreen({
   function beginEditor(kind: Kind, existing = false) {
     if (existing && (!selected || selected.kind !== kind || !details)) return;
     if (!existing) {
-      // Add buttons are independent of the current filter.
-      setFilter(kind);
+      // The All view remains All; a specific kind view switches to the requested kind.
+      setFilter(filterAfterProfileAdd(filter, kind));
       setQuery("");
     }
     setEditorKind(kind);
@@ -182,7 +182,8 @@ export function ProfilesScreen({
         })
       });
       setSelectedKey(editorKind + ":" + alias);
-      setFilter(editorKind);
+      // Retain All after a successful add as well as while the editor is open.
+      setFilter(filterAfterProfileAdd(filter, editorKind));
       setQuery("");
       setEditorKind(null);
       setEditingExisting(false);
@@ -263,7 +264,7 @@ export function ProfilesScreen({
         <button type="button" className="profiles-button primary"
           disabled={!available || saving || testBusy}
           onClick={() => beginEditor("python")}><Plus size={16}/> Python 추가</button>
-        <button type="button" className="profiles-button secondary"
+        <button type="button" className="profiles-button primary"
           disabled={!available || saving || testBusy}
           onClick={() => beginEditor("docker")}><Plus size={16}/> Docker 추가</button>
       </div>
