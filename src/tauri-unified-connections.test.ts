@@ -92,7 +92,8 @@ describe("Tauri-owned connection and security screen", () => {
     expect(screen).not.toContain("tokenGuidanceOpen");
     expect(app).toContain("await copyOwnedOwnerToken(); setOwnedToken(null);");
     expect(app).toContain("registerOwnedOwnerToken(candidate)");
-    expect(native).toContain("pub async fn copy_owned_owner_token()");
+    expect(native).toContain("pub async fn copy_owned_owner_token(window: tauri::WebviewWindow)");
+    expect(native).toContain("window.hwnd()");
     expect(native).toContain("pub async fn register_owned_owner_token(candidate: String)");
     expect(native).toContain("token_copy_available");
     expect(vault).toContain("crate::migration_backup::dpapi::encrypt");
