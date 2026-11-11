@@ -124,13 +124,13 @@ describe("Tauri-owned connection and security screen", () => {
     const css = readFileSync("desktop/src/connections.css", "utf8");
     expect(screen).toContain('className="connections-actions connections-lifecycle-actions"');
     expect(screen).toContain('className="connections-actions connections-token-actions"');
-    expect(screen).toContain("disabled={!ready || running || runtimeBusy");
+    expect(screen).toContain("disabled={!ready || runtimeBusy || (publicPreferred && !owned?.tunnelCapable)}");
     expect(screen).toContain("disabled={!running || runtimeBusy}");
     expect(screen).toContain('onManagedAction("stop")');
     expect(screen).toContain('onManagedAction("restart")');
     expect(screen).toContain('onManagedAction("prepare")');
     expect(screen).toContain('onManagedAction("rotate-token")');
-    expect(css).toContain("grid-template-columns:repeat(4,minmax(0,1fr))");
+    expect(css).toContain("grid-template-columns:repeat(3,minmax(0,1fr))");
     expect(css).toContain("grid-template-columns:repeat(3,minmax(0,1fr))");
     expect(css).toContain(".connections-button:disabled");
   });
