@@ -37,11 +37,11 @@ export function ConnectionsSecurityScreen({
   const state = runtimeView(native, owned);
   const running = state === "online";
   const available = native && owned?.available === true;
-  const ready = available && owned.ready;
+  const ready = available && owned?.ready === true;
   const runtimeBusy = ownedBusy;
   const exposed = running && owned?.tunnelRunning === true && !!owned.publicConnector;
   const publicState = publicView(owned, publicHealth);
-  const canToggle = available && !runtimeBusy && owned.tunnelCapable && !running;
+  const canToggle = available && !runtimeBusy && owned?.tunnelCapable === true && !running;
   const nextPublic = !running && publicPreferred;
   const [tokenGuidanceOpen, setTokenGuidanceOpen] = useState(false);
   const endpoint = "http://127.0.0.1:" + (owned?.port ?? 18797) + "/mcp";
@@ -213,7 +213,7 @@ export function ConnectionsSecurityScreen({
           </button>
         </div>
         {tokenGuidanceOpen && <div className="connections-guidance">
-          <p>토큰 재발급은 **기존 Tauri 전용 OAuth 승인**을 무효화합니다. 변경 전 MCP를 중지하고, 재발급 후 ChatGPT에서 다시 연결해야 합니다.</p>
+          <p>토큰 재발급은 <strong>기존 Tauri 전용 OAuth 승인</strong>을 무효화합니다. 변경 전 MCP를 중지하고, 재발급 후 ChatGPT에서 다시 연결해야 합니다.</p>
           <p>이 작업은 기존 WinForms/default:7979 인스턴스의 토큰을 읽거나 수정하지 않습니다.</p>
         </div>}
         <p className="connections-subnote">‘인증 준비됨’은 토큰 설정 상태만 의미하며 ChatGPT OAuth 승인 완료를 뜻하지 않습니다.</p>
