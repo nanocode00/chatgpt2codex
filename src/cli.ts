@@ -49,6 +49,7 @@ import {
   type RuntimeCatalogReloadSummary,
 } from "./runtime/live-reload.js";
 import { startWindowsReloadControl } from "./runtime/windows-reload.js";
+import { readRuntimeLogTail } from "./runtime/log-tail.js";
 import {
   getRuntimeSecret,
   defaultRuntimeConfigDir,
@@ -1810,16 +1811,11 @@ async function cmdLogs(flags: Record<string, string | boolean>): Promise<void> {
   if (!Number.isInteger(lines) || lines < 1 || lines > 5000) {
     throw new Error("--lines must be an integer from 1 to 5000");
   }
-  const record = await readRuntimeInstance(defaultStateDir(), instance);
-  if (!record) throw new Error("instance not found: " + instance);
-  const logPath = component === "server" ? record.serverLogPath : record.tunnelLogPath;
-  if (!logPath) throw new Error(component + " log is not recorded for instance " + instance);
-  const content = await fs.readFile(logPath, "utf8").catch((err: NodeJS.ErrnoException) => {
-    if (err.code === "ENOENT") return "";
-    throw err;
-  });
-  const tail = content.split(/\r?\n/).slice(-lines).join("\n");
-  process.stdout.write(tail + (tail.endsWith("\n") || !tail ? "" : "\n"));
+  // Logs are retained after stop removes the runtime record. The fixed
+  // stateDir/logs/<instance> filenames can be read without reviving a
+  // server or trusting arbitrary paths from a stale process record.
+  const tail = await readRuntimeLogTail(defaultStateDir(), instance, component, lines);
+  if (tail) process.stdout.write(tail + (tail.endsWith("\n") ? "" : "\n"));
 }
 
 async function cmdStop(flags: Record<string, string | boolean>): Promise<void> {
