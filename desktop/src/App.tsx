@@ -1,6 +1,6 @@
 import {
   Activity, Check, ChevronRight, CircleHelp, Clipboard, Code2, Copy,
-  ExternalLink, FolderCode, HardDrive, Layers, LayoutDashboard, LockKeyhole, PlugZap,
+  ExternalLink, FileText, FolderCode, HardDrive, Layers, LayoutDashboard, LockKeyhole, PlugZap,
   RefreshCcw, Settings2, ShieldCheck, TerminalSquare
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -10,13 +10,14 @@ import { CliParityPanel } from "./CliParityPanel";
 import { Dashboard } from "./Dashboard";
 import { ProjectsScreen } from "./ProjectsScreen";
 import { ProfilesScreen } from "./ProfilesScreen";
+import { JobsScreen } from "./JobsScreen";
 import { Toast, type AppToast } from "./Toast";
 import { storedPublicPreference } from "./dashboard-state";
 import { parseUiPort, storedHealthPort, storedAutoRefresh } from "./ui-preferences";
 import { MigrationPreflight } from "./MigrationPreflight";
 import { inspectLegacyMigration, saveLegacySettingsSnapshot, inspectCredentialBackup, createCredentialBackup, rehearseCredentialRestore, type LegacyMigrationReport, type CredentialBackupReport, type RestoreRehearsalReport } from "./runtime";
 
-type Screen = "overview" | "projects" | "profiles" | "manage" | "cli" | "connections" | "diagnostics" | "settings";
+type Screen = "overview" | "projects" | "profiles" | "jobs" | "manage" | "cli" | "connections" | "diagnostics" | "settings";
 type ActivityEntry = { time: string; message: string; online: boolean };
 
 /** Rust/Tauri invoke rejects with a plain string, not necessarily an Error. */
@@ -48,6 +49,7 @@ const NAV: { name: Screen; label: string; icon: typeof LayoutDashboard }[] = [
   { name: "overview", label: "대시보드", icon: LayoutDashboard },
   { name: "projects", label: "프로젝트", icon: FolderCode },
   { name: "profiles", label: "실행 환경", icon: Layers },
+  { name: "jobs", label: "작업", icon: FileText },
   { name: "manage", label: "관리", icon: TerminalSquare },
   { name: "cli", label: "CLI", icon: TerminalSquare },
   { name: "connections", label: "연결", icon: PlugZap },
@@ -58,6 +60,7 @@ const NAV: { name: Screen; label: string; icon: typeof LayoutDashboard }[] = [
 function App() {
   const native = isNativeApp();
   const [screen, setScreen] = useState<Screen>("overview");
+  const [jobsRefreshKey, setJobsRefreshKey] = useState(0);
   const [port, setPort] = useState(loadPort);
   const [draftPort, setDraftPort] = useState(String(loadPort()));
   const [autoRefresh, setAutoRefresh] = useState(loadAutoRefresh);
@@ -686,7 +689,9 @@ function App() {
           <div className="header-actions">
             <span className="host-indicator"><span className={"host-dot " + (native ? "connected" : "")} />{native ? "이 컴퓨터" : "웹 미리보기"}</span>
             <button className={"icon-btn " + (checking ? "spin-icon" : "")} type="button" onClick={() => {
-                if (screen === "overview" || screen === "projects" || screen === "manage") {
+                if (screen === "jobs") {
+                  setJobsRefreshKey(value => value + 1);
+                } else if (screen === "overview" || screen === "projects" || screen === "manage") {
                   void runOwnedAction("status"); void refreshCatalog();
                 } else { void runCheck(); }
               }} aria-label="현재 화면 새로고침" title="현재 화면 새로고침" disabled={checking || ownedBusy || catalogBusy}><RefreshCcw size={17}/></button>
@@ -732,6 +737,10 @@ function App() {
         {screen === "profiles" && <ProfilesScreen
           catalog={catalog} catalogBusy={catalogBusy} catalogError={catalogError}
           onRefresh={refreshCatalog} onNotify={notify}
+        />}
+
+        {screen === "jobs" && <JobsScreen onNotify={notify}
+          refreshKey={jobsRefreshKey} onProjects={() => setScreen("projects")}
         />}
 
         {screen === "manage" && <>
