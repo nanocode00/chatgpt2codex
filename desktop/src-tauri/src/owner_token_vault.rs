@@ -93,7 +93,8 @@ mod clipboard {
     }
 
     /// Native clipboard write: the token is never returned to JS/WebView.
-    pub(super) fn set_token(token: &str) -> Result<(), String> {
+    pub(super) fn set_token(token: &str, owner: usize) -> Result<(), String> {
+        if owner == 0 { return Err("클립보드 대상 앱 창이 유효하지 않습니다.".into()); }
         let wide: Vec<u16> = token.encode_utf16().chain(std::iter::once(0)).collect();
         let len = wide.len() * std::mem::size_of::<u16>();
         unsafe {
@@ -107,7 +108,7 @@ mod clipboard {
             ptr::copy_nonoverlapping(wide.as_ptr() as *const u8, dest as *mut u8, len);
             let _ = GlobalUnlock(memory);
             for attempt in 0..5 {
-                if OpenClipboard(ptr::null_mut()) != 0 {
+                if OpenClipboard(owner as *mut c_void) != 0 {
                     if EmptyClipboard() == 0 || SetClipboardData(CF_UNICODETEXT, memory).is_null() {
                         let _ = CloseClipboard();
                         let _ = GlobalFree(memory);
@@ -126,13 +127,13 @@ mod clipboard {
 }
 #[cfg(not(windows))]
 mod clipboard {
-    pub(super) fn set_token(_: &str) -> Result<(), String> {
+    pub(super) fn set_token(_: &str, _: usize) -> Result<(), String> {
         Err("Owner Token 클립보드 복사는 Windows Tauri 앱에서만 지원합니다.".into())
     }
 }
-pub(crate) fn copy_to_clipboard(home: &Path) -> Result<(), String> {
+pub(crate) fn copy_to_clipboard(home: &Path, owner_window: usize) -> Result<(), String> {
     let token = recover(home)?;
-    clipboard::set_token(&token)
+    clipboard::set_token(&token, owner_window)
 }
 
 #[cfg(all(test, windows))]
