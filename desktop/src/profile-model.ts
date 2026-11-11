@@ -89,6 +89,11 @@ export type ProfileKind = "python" | "docker";
 export type ProfileFilter = "all" | ProfileKind;
 export interface ProfileEntry { kind: ProfileKind; alias: string }
 
+/** Add actions keep the full catalog visible, but switch between specific kind filters. */
+export function filterAfterProfileAdd(current: ProfileFilter, kind: ProfileKind): ProfileFilter {
+  return current === "all" ? "all" : kind;
+}
+
 /** "All" lists two independent rows for an alias configured in both maps. */
 export function filterProfileEntries(
   profiles: CatalogProfile[], filter: ProfileFilter, search: string
