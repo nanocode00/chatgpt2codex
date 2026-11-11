@@ -90,7 +90,7 @@ describe("Tauri-owned connection and security screen", () => {
     expect(screen).toContain("onRegisterToken(knownToken)");
     expect(screen).toContain("connections-guidance");
     expect(screen).not.toContain("tokenGuidanceOpen");
-    expect(app).toContain("onCopyStoredToken={copyOwnedOwnerToken}");
+    expect(app).toContain("await copyOwnedOwnerToken(); setOwnedToken(null);");
     expect(app).toContain("registerOwnedOwnerToken(candidate)");
     expect(native).toContain("pub async fn copy_owned_owner_token()");
     expect(native).toContain("pub async fn register_owned_owner_token(candidate: String)");
