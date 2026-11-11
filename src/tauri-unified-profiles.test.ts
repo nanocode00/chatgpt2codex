@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { filterProfiles, parseProfileDetails, parseProfileTest, profileAliasValid, validateDraft, validateProfileSelection } from "../desktop/src/profile-model";
+import { filterProfiles, filterProfilesForKind, parseProfileDetails, parseProfileTest, profileAliasValid, validateDraft } from "../desktop/src/profile-model";
 
 const draft = { pythonPath: String.raw`C:\Users\me\miniconda3\envs\dev\python.exe`, composeFile: "compose.yaml",
   projectName: "local-app", services: "api, db", controlServices: "api" };
@@ -64,41 +64,53 @@ describe("Tauri unified execution profiles", () => {
   });
 
 
-  it("allows either one or both profile kinds, but never neither", () => {
-    expect(validateProfileSelection("dev", draft, { python: false, docker: false })).toContain("하나 이상");
-    expect(validateProfileSelection("dev", draft, { python: true, docker: false })).toBeNull();
-    expect(validateProfileSelection("dev", draft, { python: false, docker: true })).toBeNull();
-    expect(validateProfileSelection("dev", draft, { python: true, docker: true })).toBeNull();
-    expect(validateProfileSelection("dev", { ...draft, pythonPath: "" }, { python: false, docker: true })).toBeNull();
-    expect(validateProfileSelection("dev", { ...draft, projectName: "" }, { python: true, docker: false })).toBeNull();
-    expect(validateProfileSelection("dev", { ...draft, pythonPath: "" }, { python: true, docker: true })).toBeTruthy();
-    expect(validateProfileSelection("dev", { ...draft, services: "" }, { python: true, docker: true })).toBeTruthy();
-    expect(validateProfileSelection("-invalid", draft, { python: false, docker: true })).toBeTruthy();
+
+  it("treats identical aliases in Python and Docker as two independent profiles", () => {
+    const profiles = [
+      { alias: "shared", python: true, docker: true },
+      { alias: "python-only", python: true, docker: false },
+      { alias: "docker-only", python: false, docker: true }
+    ];
+    expect(filterProfilesForKind(profiles, "python", "").map(p => p.alias))
+      .toEqual(["python-only", "shared"]);
+    expect(filterProfilesForKind(profiles, "docker", "").map(p => p.alias))
+      .toEqual(["docker-only", "shared"]);
+    expect(filterProfilesForKind(profiles, "python", "shared").length).toBe(1);
+    expect(filterProfilesForKind(profiles, "docker", "shared").length).toBe(1);
+    expect(profiles[0]).toEqual({ alias: "shared", python: true, docker: true });
   });
 
-  it("shows optional Python/Docker sections and calls one combined operation", () => {
+  it("separates type-specific UI operations without bulk removal or combined registration", () => {
     const screen = readFileSync("desktop/src/ProfilesScreen.tsx", "utf8");
     const css = readFileSync("desktop/src/profiles.css", "utf8");
     const runtime = readFileSync("desktop/src/runtime.ts", "utf8");
-    expect(screen).toContain('checked={includePython}');
-    expect(screen).toContain('checked={includeDocker}');
-    expect(screen).toContain('"profile-add-both"');
-    expect(screen).toContain('includePython && includeDocker ? "profile-add-both"');
-    expect(screen).toContain("validateProfileSelection");
-    expect(css).toContain(".profiles-form-kind-grid");
-    expect(runtime).toContain('"profile-add-both"');
+    const rust = readFileSync("desktop/src-tauri/src/cli_parity.rs", "utf8");
+    expect(screen).toContain('role="tablist" aria-label="실행 환경 종류"');
+    expect(screen).toContain('profile[activeKind]');
+    expect(screen).toContain('filterProfilesForKind(profiles, activeKind, query)');
+    expect(screen).toContain('key={activeKind + ":" + profile.alias}');
+    expect(screen).toContain('operation: kind === "python" ? "profile-remove-python" : "profile-remove-docker"');
+    expect(screen).toContain('activeKind === "python" ?');
+    expect(screen).toContain('"profile-add-python" : "profile-add-docker"');
+    expect(screen).not.toContain('"profile-add-both"');
+    expect(screen).not.toContain('"profile-remove-all"');
+    expect(screen).not.toContain('별칭 전체 제거');
+    expect(screen).not.toContain('같은 별칭에 추가');
+    expect(runtime).not.toContain('"profile-add-both"');
+    expect(rust).not.toContain('"profile-add-both" =>');
+    expect(css).toContain(".profiles-kind-nav");
+    expect(css).toContain("#profiles-kind-content");
+    expect(css).not.toContain(".profiles-form-kind-grid");
   });
 
-  it("focuses the configured kind and keeps another kind as a compact add action", () => {
-    const code = readFileSync("desktop/src/ProfilesScreen.tsx", "utf8");
-    const css = readFileSync("desktop/src/profiles.css", "utf8");
-    expect(code).toContain('selected.python && selected.docker && <div className="profiles-detail-switch"');
-    expect(code).toContain('selected.python !== selected.docker && <div className="profiles-secondary-kind"');
-    expect(code).toContain('visibleKind === "python" ?');
-    expect(code).toContain("profiles-docker-fields");
-    expect(code).toContain("Docker 데몬 연결이나 컨테이너 실행 여부를 검사하지 않습니다");
-    expect(css).toContain(".profiles-kind-focused");
-    expect(css).toContain(".profiles-secondary-kind");
+  it("keeps the inspector scoped to selected type and describes Docker checks correctly", () => {
+    const screen = readFileSync("desktop/src/ProfilesScreen.tsx", "utf8");
+    expect(screen).toContain('activeKind === "python" ? "실행 파일 검사" : "설정 확인"');
+    expect(screen).toContain("데몬·컨테이너 미검사");
+    expect(screen).toContain("다른 종류의 동일 별칭 프로필과 실제 설치·파일은 유지됩니다.");
+    expect(screen).toContain("profile-show");
+    expect(screen).toContain("profile-test");
+    expect(screen).toContain("readOnly={editingExisting}");
   });
 
   it("keeps the execution environment list to 3 rows and marks Docker checks honestly", () => {
@@ -110,7 +122,7 @@ describe("Tauri unified execution profiles", () => {
     expect(screen).toContain("데몬·컨테이너 미검사");
     expect(screen).toContain('"profile-add-python"');
     expect(screen).toContain('"profile-add-docker"');
-    expect(screen).toContain('"profile-remove-all"');
+    expect(screen).not.toContain('"profile-remove-all"');
     expect(screen).toContain("profile-show");
   });
 });
