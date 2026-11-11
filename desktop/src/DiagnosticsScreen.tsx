@@ -140,8 +140,13 @@ export function DiagnosticsScreen({
     setBusy("reload"); setReloadError(""); setReloadResult("");
     try {
       const result = await runOwnedCliParity({ operation: "reload" });
+      const response = result.json;
+      if (!response || typeof response !== "object" || Array.isArray(response) ||
+          (response as Record<string, unknown>).reloaded !== true) {
+        throw new Error("CLI가 재로드 완료를 명시적으로 확인하지 않았습니다.");
+      }
       setReloadOpen(false);
-      setReloadResult(result.note || "프로젝트·프로필 구성 재로드 명령이 완료되었습니다.");
+      setReloadResult("Tauri 전용 프로젝트·실행 환경 구성 재로드가 확인되었습니다.");
       onNotify("Tauri 전용 프로젝트·실행 환경 재로드 완료");
     } catch (e) {
       setReloadError(failure(e));
@@ -152,7 +157,7 @@ export function DiagnosticsScreen({
   const active = runtime?.healthy === true && health?.healthy === true;
   const localLabel = busy === "overview" ? "점검 중" : !runtime || !health ? "미확인" :
     active ? "정상 응답" : runtime.alive ? "실행 중 · Health 실패" : "중지됨";
-  const publicLabel = !owned?.tunnelRunning ? "외부 공개 없음" :
+  const publicLabel = owned === null ? "외부 공개 미확인" : !owned.tunnelRunning ? "외부 공개 없음" :
     publicChecking ? "HTTPS 확인 중" :
     publicHealth?.state === "online" ? "HTTPS 응답 정상" :
     publicHealth?.state === "offline" ? "HTTPS 응답 실패" : "외부 상태 미확인";
@@ -306,7 +311,7 @@ export function DiagnosticsScreen({
           실행 중인 작업, MCP 서버, 터널은 종료하지 않습니다.</p>
         {reloadError && <p className="diag-inline-error" role="alert">{reloadError}</p>}
         <div className="diag-dialog-actions">
-          <button type="button" className="diag-button secondary"
+          <button type="button" className="diag-button secondary" autoFocus
             disabled={busy === "reload"} onClick={() => setReloadOpen(false)}>취소</button>
           <button type="button" className="diag-button primary"
             disabled={!owned?.running || busy !== null} onClick={() => { void reload(); }}>
