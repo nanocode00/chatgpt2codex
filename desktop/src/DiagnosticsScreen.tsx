@@ -39,7 +39,7 @@ export function DiagnosticsScreen({
   const [locks, setLocks] = useState<LockDiagnostic[] | null>(null);
   const [checkedAt, setCheckedAt] = useState("");
   const [snapshotError, setSnapshotError] = useState("");
-  const [busy, setBusy] = useState<"overview" | "doctor" | "logs" | "reload" | null>(null);
+  const [busy, setBusy] = useState<"overview" | "doctor" | "logs" | "locks" | "reload" | null>(null);
   const [doctor, setDoctor] = useState<string | null>(null);
   const [doctorError, setDoctorError] = useState("");
   const [logTab, setLogTab] = useState<"server" | "tunnel">("server");
@@ -49,26 +49,23 @@ export function DiagnosticsScreen({
   const [reloadResult, setReloadResult] = useState("");
   const [reloadError, setReloadError] = useState("");
   const [lockExpanded, setLockExpanded] = useState(false);
+  const [lockError, setLockError] = useState("");
 
   async function fetchOverview(): Promise<void> {
     setBusy("overview");
     setSnapshotError("");
     try {
-      const [s, h, l] = await Promise.allSettled([
+      const [s, h] = await Promise.allSettled([
         runOwnedCliParity({ operation: "status" }),
-        runOwnedCliParity({ operation: "health" }),
-        runOwnedCliParity({ operation: "lock-list" })
+        runOwnedCliParity({ operation: "health" })
       ]);
       const valueStatus = s.status === "fulfilled" ? parseRuntimeStatus(s.value.json) : null;
       const valueHealth = h.status === "fulfilled" ? parseHealth(h.value.json) : null;
-      const valueLocks = l.status === "fulfilled" ? parseLocks(l.value.json) : null;
       setRuntime(valueStatus);
       setHealth(valueHealth);
-      setLocks(valueLocks);
       const errors = [
         s.status === "rejected" ? "상태: " + failure(s.reason) : !valueStatus ? "상태: CLI 형식 확인 필요" : "",
-        h.status === "rejected" ? "Health: " + failure(h.reason) : !valueHealth ? "Health: CLI 형식 확인 필요" : "",
-        l.status === "rejected" ? "잠금: " + failure(l.reason) : !valueLocks ? "잠금: CLI 형식 확인 필요" : ""
+        h.status === "rejected" ? "Health: " + failure(h.reason) : !valueHealth ? "Health: CLI 형식 확인 필요" : ""
       ].filter(Boolean);
       setSnapshotError(errors.join(" · ").slice(0, 650));
       setCheckedAt(labelTime());
@@ -84,19 +81,16 @@ export function DiagnosticsScreen({
       try {
         const result = await Promise.allSettled([
           runOwnedCliParity({ operation: "status" }),
-          runOwnedCliParity({ operation: "health" }),
-          runOwnedCliParity({ operation: "lock-list" })
+          runOwnedCliParity({ operation: "health" })
         ]);
         if (!active) return;
-        const [s, h, l] = result;
+        const [s, h] = result;
         const rs = s.status === "fulfilled" ? parseRuntimeStatus(s.value.json) : null;
         const rh = h.status === "fulfilled" ? parseHealth(h.value.json) : null;
-        const rl = l.status === "fulfilled" ? parseLocks(l.value.json) : null;
-        setRuntime(rs); setHealth(rh); setLocks(rl); setCheckedAt(labelTime());
+        setRuntime(rs); setHealth(rh); setCheckedAt(labelTime());
         setSnapshotError([
           s.status === "rejected" ? "상태: " + failure(s.reason) : !rs ? "상태: 응답 형식 확인 필요" : "",
-          h.status === "rejected" ? "Health: " + failure(h.reason) : !rh ? "Health: 응답 형식 확인 필요" : "",
-          l.status === "rejected" ? "잠금: " + failure(l.reason) : !rl ? "잠금: 응답 형식 확인 필요" : ""
+          h.status === "rejected" ? "Health: " + failure(h.reason) : !rh ? "Health: 응답 형식 확인 필요" : ""
         ].filter(Boolean).join(" · ").slice(0, 650));
       } finally { if (active) setBusy(null); }
     };
@@ -127,6 +121,17 @@ export function DiagnosticsScreen({
       const r = await runOwnedCliParity({ operation: op });
       setLogText(displayCliText(r.text));
     } catch (e) { setLogError(failure(e)); }
+    finally { setBusy(null); }
+  }
+  async function checkLocks() {
+    if (busy || !native) return;
+    setBusy("locks"); setLockError("");
+    try {
+      const r = await runOwnedCliParity({ operation: "lock-list" });
+      const result = parseLocks(r.json);
+      if (!result) throw new Error("잠금 목록의 응답 형식을 확인할 수 없습니다.");
+      setLocks(result);
+    } catch (e) { setLockError(failure(e)); setLocks(null); }
     finally { setBusy(null); }
   }
   async function reload() {
@@ -171,7 +176,7 @@ export function DiagnosticsScreen({
     <div className="diag-summary" aria-label="진단 요약">
       <div><HeartPulse size={19}/><strong>{localLabel}</strong><span>로컬 MCP · 127.0.0.1:18797</span></div>
       <div><Cloud size={19}/><strong>{publicLabel}</strong><span>Quick Tunnel · HTTPS (OAuth 별도)</span></div>
-      <div><LockKeyhole size={19}/><strong>{lockLabel}</strong><span>Tauri 격리 HOME · 읽기 전용 목록</span></div>
+      <div><LockKeyhole size={19}/><strong>{lockLabel}</strong><span>Tauri 격리 HOME · 활성 잠금 조회</span></div>
     </div>
 
     {(snapshotError || ownedError) && <div className="diag-error" role="alert">
@@ -247,6 +252,11 @@ export function DiagnosticsScreen({
         <div className="diag-panel-heading"><div><LockKeyhole size={19}/><h2 id="diag-locks">프로젝트 작업 잠금</h2></div>
           <span className="diag-pill">{lockLabel}</span></div>
         <p>읽기·쓰기 작업 중인 프로젝트와 소유 PID를 조회합니다. <strong>강제 잠금 해제는 제공하지 않습니다.</strong></p>
+        <div className="diag-actions"><button type="button" className="diag-button secondary"
+          disabled={!native || isBusy} onClick={() => { void checkLocks(); }}>
+          <RefreshCcw size={16}/> 잠금 목록 조회
+        </button></div>
+        {lockError && <p className="diag-inline-error" role="alert">{lockError}</p>}
         {locks === null ? <div className="diag-empty">잠금 목록을 아직 확인하지 못했습니다.</div> :
           locks.length === 0 ? <div className="diag-empty"><CheckCircle2 size={18}/> 현재 목록에 활성 잠금이 없습니다.</div> :
             <div className="diag-lock-list">
@@ -260,7 +270,7 @@ export function DiagnosticsScreen({
             </div>}
         {locks && locks.length > 5 && <button type="button" className="diag-text-button"
           onClick={() => setLockExpanded(v => !v)}>{lockExpanded ? "5개만 보기" : "모두 보기 (" + locks.length + "개)"}</button>}
-        <p className="diag-note">이 목록은 CLI의 <code>lock list</code> 결과입니다. 실시간 PID 소유권 재검증이나 안전한 강제 해제 승인으로 사용하지 않습니다.</p>
+        <p className="diag-note">이 목록은 CLI의 <code>lock list</code> 결과입니다. 조회 시 만료되거나 종료된 잠금 기록을 CLI가 자동 정리할 수 있습니다. 활성 잠금을 강제 해제하거나 PID를 종료하지 않습니다.</p>
       </section>
     </div>
 
