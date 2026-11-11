@@ -261,30 +261,31 @@ export function ProfilesScreen({
           disabled={!native || catalogBusy || saving}
           onClick={() => { void refresh(); }}><RefreshCcw size={16}/> 새로고침</button>
         <button type="button" className="profiles-button primary"
-          disabled={!available || saving}
-          onClick={() => beginEditor(false)}><Plus size={16}/> {kindName} 추가</button>
+          disabled={!available || saving || testBusy}
+          onClick={() => beginEditor("python")}><Plus size={16}/> Python 추가</button>
+        <button type="button" className="profiles-button secondary"
+          disabled={!available || saving || testBusy}
+          onClick={() => beginEditor("docker")}><Plus size={16}/> Docker 추가</button>
       </div>
     </header>
 
-    <div className="profiles-kind-nav" role="tablist" aria-label="실행 환경 종류">
-      <button type="button" role="tab" id="profiles-tab-python" aria-controls="profiles-kind-content"
-        aria-selected={activeKind === "python"} className={activeKind === "python" ? "active" : ""}
-        disabled={saving || testBusy} onClick={() => switchKind("python")}>
-        <Code2 size={17}/><span>Python</span><small>{available ? countPython : "—"}개</small>
-      </button>
-      <button type="button" role="tab" id="profiles-tab-docker" aria-controls="profiles-kind-content"
-        aria-selected={activeKind === "docker"} className={activeKind === "docker" ? "active" : ""}
-        disabled={saving || testBusy} onClick={() => switchKind("docker")}>
-        <Box size={17}/><span>Docker</span><small>{available ? countDocker : "—"}개</small>
-      </button>
-    </div>
-
-    <div id="profiles-kind-content" role="tabpanel"
-      aria-labelledby={activeKind === "python" ? "profiles-tab-python" : "profiles-tab-docker"}>
-      <section className="profiles-stats" aria-label="실행 환경 요약">
-        <div><Layers size={16}/><strong>{available ? countPython + countDocker : "—"}</strong><span>전체 실행 환경</span></div>
-        <div><Code2 size={16}/><strong>{available ? countPython : "—"}</strong><span>Python 프로필</span></div>
-        <div><Box size={16}/><strong>{available ? countDocker : "—"}</strong><span>Docker 프로필</span></div>
+    <div id="profiles-kind-content" className="profiles-content">
+      <section className="profiles-stats" role="group" aria-label="프로필 목록 필터">
+        <button type="button" className={filter === "all" ? "active" : ""}
+          aria-pressed={filter === "all"} disabled={saving || testBusy}
+          onClick={() => switchFilter("all")}>
+          <Layers size={16}/><strong>{available ? total : "—"}</strong><span>전체</span>
+        </button>
+        <button type="button" className={filter === "python" ? "active" : ""}
+          aria-pressed={filter === "python"} disabled={saving || testBusy}
+          onClick={() => switchFilter("python")}>
+          <Code2 size={16}/><strong>{available ? countPython : "—"}</strong><span>Python</span>
+        </button>
+        <button type="button" className={filter === "docker" ? "active" : ""}
+          aria-pressed={filter === "docker"} disabled={saving || testBusy}
+          onClick={() => switchFilter("docker")}>
+          <Box size={16}/><strong>{available ? countDocker : "—"}</strong><span>Docker</span>
+        </button>
       </section>
 
       {catalogError && <div className="profiles-error" role="alert"><AlertCircle size={16}/>{catalogError}</div>}
@@ -292,14 +293,14 @@ export function ProfilesScreen({
         <CircleHelp size={16}/> Tauri 전용 CLI의 실행 환경 목록을 읽을 수 없습니다. 런타임 상태를 확인하세요.
       </div>}
 
-      {editorOpen && <section className="profiles-editor" aria-labelledby="profiles-editor-title">
+      {editorKind !== null && <section className="profiles-editor" aria-labelledby="profiles-editor-title">
         <div className="profiles-panel-heading">
           <div>
-            <p>{activeKind === "python" ? "PYTHON PROFILE" : "DOCKER PROFILE"}</p>
-            <h2 id="profiles-editor-title">{kindName} {editingExisting ? "설정 교체" : "프로필 등록"}</h2>
+            <p>{editorKind === "python" ? "PYTHON PROFILE" : "DOCKER PROFILE"}</p>
+            <h2 id="profiles-editor-title">{editorKind === "python" ? "Python" : "Docker"} {editingExisting ? "설정 교체" : "프로필 등록"}</h2>
           </div>
           <button type="button" className="profiles-icon-button" disabled={saving}
-            onClick={() => setEditorOpen(false)} aria-label="편집 닫기"><X size={17}/></button>
+            onClick={() => setEditorKind(null)} aria-label="편집 닫기"><X size={17}/></button>
         </div>
         <form className="profiles-form" onSubmit={event => { event.preventDefault(); void save(); }}>
           <label>프로필 별칭
@@ -311,7 +312,7 @@ export function ProfilesScreen({
             {editingExisting ? "기존 프로필 설정을 변경합니다. 별칭을 바꾸려면 새 프로필을 등록하세요." :
               "동일한 별칭이 다른 종류에 있어도 별도 프로필로 등록됩니다."}
           </p>
-          {activeKind === "python" ? <>
+          {editorKind === "python" ? <>
             <label>Python 실행 파일의 절대 경로
               <input value={form.pythonPath} disabled={saving} maxLength={512} spellCheck={false}
                 onChange={event => setField("pythonPath", event.target.value)}
@@ -342,10 +343,10 @@ export function ProfilesScreen({
           {operationError && <div className="profiles-error" role="alert"><AlertCircle size={15}/>{operationError}</div>}
           <div className="profiles-form-actions">
             <button type="button" className="profiles-button secondary" disabled={saving}
-              onClick={() => { setEditorOpen(false); setOperationError(""); }}>취소</button>
+              onClick={() => { setEditorKind(null); setOperationError(""); }}>취소</button>
             <button type="submit" className="profiles-button primary" disabled={!available || saving}>
               {saving && <LoaderCircle size={15} className="profiles-spinning"/>}
-              {editingExisting ? kindName + " 설정 저장" : kindName + " 등록"}
+              {editingExisting ? (editorKind === "python" ? "Python" : "Docker") + " 설정 저장" : (editorKind === "python" ? "Python" : "Docker") + " 등록"}
             </button>
           </div>
         </form>
@@ -354,32 +355,32 @@ export function ProfilesScreen({
       <div className="profiles-layout">
         <section className="profiles-list-panel" aria-labelledby="profiles-list-heading">
           <div className="profiles-panel-heading">
-            <div><p>CONFIGURED PROFILES</p><h2 id="profiles-list-heading">{kindName} 목록</h2></div>
-            <span className="profiles-count">{filtered.length} / {inKind.length}</span>
+            <div><p>CONFIGURED PROFILES</p><h2 id="profiles-list-heading">{listName} 프로필 목록</h2></div>
+            <span className="profiles-count">{filtered.length} / {visibleCount}</span>
           </div>
           <div className="profiles-search">
             <Search size={16}/>
-            <input aria-label={kindName + " 프로필 별칭 검색"} value={query}
-              placeholder={kindName + " 별칭 검색"} disabled={saving || testBusy}
+            <input aria-label={listName + " 프로필 별칭 검색"} value={query}
+              placeholder={listName + " 별칭 검색"} disabled={saving || testBusy}
               onChange={event => setQuery(event.target.value)}/>
             {query && <button type="button" aria-label="검색 지우기"
               onClick={() => setQuery("")}><X size={15}/></button>}
           </div>
-          <div className="profiles-items" role="region" aria-label={kindName + " 프로필 목록 스크롤 영역"} tabIndex={0}>
+          <div className="profiles-items" role="region" aria-label={listName + " 프로필 목록 스크롤 영역"} tabIndex={0}>
             {filtered.length === 0 && <div className="profiles-empty">
               <Layers size={25}/>
-              <strong>{inKind.length ? "검색 결과가 없습니다." : kindName + " 프로필이 없습니다."}</strong>
-              <span>{kindName} 추가 버튼으로 새 프로필을 등록할 수 있습니다.</span>
+              <strong>{visibleCount ? "검색 결과가 없습니다." : listName + " 프로필이 없습니다."}</strong>
+              <span>Python 추가 또는 Docker 추가 버튼으로 새 프로필을 등록할 수 있습니다.</span>
             </div>}
-            {filtered.map(profile => <button type="button" key={activeKind + ":" + profile.alias}
-              className={"profiles-item " + (selected?.alias === profile.alias ? "selected" : "")}
-              aria-pressed={selected?.alias === profile.alias} disabled={saving || testBusy}
-              onClick={() => chooseProfile(profile)}>
+            {filtered.map(profile => <button type="button" key={profile.kind + ":" + profile.alias}
+              className={"profiles-item " + (selected?.kind === profile.kind && selected?.alias === profile.alias ? "selected" : "")}
+              aria-pressed={selected?.kind === profile.kind && selected?.alias === profile.alias}
+              disabled={saving || testBusy} onClick={() => chooseProfile(profile)}>
               <span className="profiles-item-icon">
-                {activeKind === "python" ? <Terminal size={17}/> : <Box size={17}/>}
+                {profile.kind === "python" ? <Terminal size={17}/> : <Box size={17}/>}
               </span>
               <span className="profiles-item-name"><strong>{profile.alias}</strong>
-                <small>{kindName} 실행 환경</small>
+                <small>{profile.kind === "python" ? "Python" : "Docker"} 실행 환경</small>
               </span>
               <ChevronRight size={15}/>
             </button>)}
@@ -392,7 +393,7 @@ export function ProfilesScreen({
             {selected && <button type="button" className="profiles-button secondary"
               disabled={!available || busy} onClick={() => { void inspect(); }}>
               <Activity size={15}/>{testBusy ? "검사 중..." :
-                activeKind === "python" ? "실행 파일 검사" : "설정 확인"}</button>}
+                selectedKind === "python" ? "실행 파일 검사" : "설정 확인"}</button>}
           </div>
           {!selected ? <div className="profiles-empty profiles-inspector-empty">
             <Layers size={27}/><strong>조회할 {kindName} 프로필을 선택하세요.</strong>
@@ -400,7 +401,7 @@ export function ProfilesScreen({
           </div> : <>
             <div className="profiles-selected">
               <div className="profiles-selected-icon">
-                {activeKind === "python" ? <Code2 size={20}/> : <Box size={20}/>}
+                {selectedKind === "python" ? <Code2 size={20}/> : <Box size={20}/>}
               </div>
               <div><h3>{selected.alias}</h3><p>{kindName} 프로필</p></div>
             </div>
@@ -413,7 +414,7 @@ export function ProfilesScreen({
 
             <div className="profiles-main-runtime">
               <div className="profiles-kind-panel profiles-kind-focused">
-                {activeKind === "python" ? <>
+                {selectedKind === "python" ? <>
                   <div className="profiles-kind-title">
                     <Code2 size={18}/><strong>Python 실행 환경</strong><span>등록됨</span>
                   </div>
@@ -440,7 +441,7 @@ export function ProfilesScreen({
                 </>}
                 <div className="profiles-card-actions">
                   <button type="button" className="profiles-button secondary"
-                    disabled={!available || busy || !details} onClick={() => beginEditor(true)}>
+                    disabled={!available || busy || !details} onClick={() => beginEditor(selectedKind, true)}>
                     {kindName} 설정 / 교체
                   </button>
                   <button type="button" className="profiles-button danger"
@@ -453,7 +454,7 @@ export function ProfilesScreen({
 
             {testResult && <div className="profiles-test-result" role="status">
               <div><CheckCircle2 size={16}/><strong>{kindName} 검사 결과</strong></div>
-              {activeKind === "python" ? <p>
+              {selectedKind === "python" ? <p>
                 {testResult.python?.available === true ? "실행 파일 확인됨" :
                   testResult.python?.available === false ? "실행 파일 확인 실패" : "실행 파일 상태 미확인"}
                 {testResult.python?.version ? " · " + testResult.python.version : ""}
@@ -462,7 +463,7 @@ export function ProfilesScreen({
                   "설정 검증 필요"}
               </p>}
             </div>}
-            {operationError && !editorOpen && <div className="profiles-error" role="alert">
+            {operationError && editorKind === null && <div className="profiles-error" role="alert">
               <AlertCircle size={15}/>{operationError}
             </div>}
             <div className="profiles-remove-area">
