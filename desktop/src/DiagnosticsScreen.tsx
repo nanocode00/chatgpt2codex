@@ -251,7 +251,7 @@ export function DiagnosticsScreen({
           <pre>{busy === "logs" ? "로그 읽는 중..." : logText === null ?
             "로그 종류를 선택하면 최근 기록을 확인합니다." : logText || "출력할 로그가 없습니다."}</pre>
         </div>
-        <p className="diag-note">Rust 네이티브 단계에서 민감정보 포함 행을 숨기고 출력량을 제한합니다. 로그가 없다는 사실만으로 실행 실패를 단정하지 않습니다.</p>
+        <p className="diag-note">Rust 네이티브 단계에서 민감정보 포함 행을 숨기고 출력량을 제한합니다. MCP 중지 후에도 이전 실행의 로그가 남을 수 있으며, 로그 내용만으로 현재 실행 상태를 판단하지 않습니다. 기록이 없으면 빈 상태로 표시합니다.</p>
       </section>
 
       <section className="diag-panel" aria-labelledby="diag-locks">
