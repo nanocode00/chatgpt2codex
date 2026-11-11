@@ -262,12 +262,12 @@ export function ProfilesScreen({
     <div className="profiles-kind-nav" role="tablist" aria-label="실행 환경 종류">
       <button type="button" role="tab" id="profiles-tab-python" aria-controls="profiles-kind-content"
         aria-selected={activeKind === "python"} className={activeKind === "python" ? "active" : ""}
-        onClick={() => switchKind("python")}>
+        disabled={saving || testBusy} onClick={() => switchKind("python")}>
         <Code2 size={17}/><span>Python</span><small>{available ? countPython : "—"}개</small>
       </button>
       <button type="button" role="tab" id="profiles-tab-docker" aria-controls="profiles-kind-content"
         aria-selected={activeKind === "docker"} className={activeKind === "docker" ? "active" : ""}
-        onClick={() => switchKind("docker")}>
+        disabled={saving || testBusy} onClick={() => switchKind("docker")}>
         <Box size={17}/><span>Docker</span><small>{available ? countDocker : "—"}개</small>
       </button>
     </div>
@@ -353,7 +353,8 @@ export function ProfilesScreen({
           <div className="profiles-search">
             <Search size={16}/>
             <input aria-label={kindName + " 프로필 별칭 검색"} value={query}
-              placeholder={kindName + " 별칭 검색"} onChange={event => setQuery(event.target.value)}/>
+              placeholder={kindName + " 별칭 검색"} disabled={saving || testBusy}
+              onChange={event => setQuery(event.target.value)}/>
             {query && <button type="button" aria-label="검색 지우기"
               onClick={() => setQuery("")}><X size={15}/></button>}
           </div>
@@ -365,7 +366,7 @@ export function ProfilesScreen({
             </div>}
             {filtered.map(profile => <button type="button" key={activeKind + ":" + profile.alias}
               className={"profiles-item " + (selected?.alias === profile.alias ? "selected" : "")}
-              aria-pressed={selected?.alias === profile.alias}
+              aria-pressed={selected?.alias === profile.alias} disabled={saving || testBusy}
               onClick={() => chooseProfile(profile)}>
               <span className="profiles-item-icon">
                 {activeKind === "python" ? <Terminal size={17}/> : <Box size={17}/>}
