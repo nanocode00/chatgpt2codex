@@ -115,7 +115,7 @@ export function JobsScreen({ onNotify, onProjects, refreshKey }: JobsScreenProps
       .catch(err => { if (active) setDetailsError(errorText(err)); })
       .finally(() => { if (active) setDetailsBusy(false); });
     return () => { active = false; };
-  }, [native, selected?.id, revision]);
+  }, [native, selected?.id, selected?.status, revision]);
 
   async function showLogs() {
     if (!native || busy || !selected || !details) return;
@@ -192,7 +192,7 @@ export function JobsScreen({ onNotify, onProjects, refreshKey }: JobsScreenProps
       {filterItems.map(item => <button type="button" key={item.id}
         aria-pressed={filter === item.id} className={filter === item.id ? "active" : ""}
         onClick={() => { setFilter(item.id); setQuery(""); }}
-        disabled={actionBusy}>
+        disabled={actionBusy || logsBusy}>
         {item.symbol === "layers" ? <Layers size={17}/> : item.symbol === "active" ?
           <Activity size={17}/> : item.symbol === "attention" ? <CirclePause size={17}/> : <History size={17}/>}
         <strong>{items ? counts[item.id] : "—"}</strong><span>{item.label}</span>
@@ -225,7 +225,7 @@ export function JobsScreen({ onNotify, onProjects, refreshKey }: JobsScreenProps
             <span>{count === 0 ? "작업이 생성되면 이 화면에 나타납니다." : "다른 검색어 또는 필터를 선택하세요."}</span>
           </div> : filtered.map(job => <button type="button" key={job.id}
             className={"jobs-entry " + (selected?.id === job.id ? "selected" : "")}
-            aria-pressed={selected?.id === job.id} disabled={actionBusy}
+            aria-pressed={selected?.id === job.id} disabled={actionBusy || logsBusy}
             onClick={() => { setSelectedId(job.id); setLogs(null); }}>
             <span className="jobs-entry-icon"><FileText size={18}/></span>
             <span className="jobs-entry-text">
