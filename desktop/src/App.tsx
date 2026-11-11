@@ -178,7 +178,7 @@ function App() {
 
   const runOwnedAction = useCallback(async (action: ManagedAction, confirmedRotation = false) => {
     if (action === "start-public" && !window.confirm(
-      "Tauri 전용 MCP를 Cloudflare Quick Tunnel로 외부에 공개할까요?\\n\\n별도 18797 인스턴스만 사용하며 기존 WinForms/7979는 변경하지 않습니다. 공개 주소는 재시작 때 변경될 수 있고, 연결에는 인증 승인이 필요합니다."
+      "Tauri 전용 MCP를 Cloudflare Quick Tunnel로 외부에 공개할까요?\n\n별도 18797 인스턴스만 사용하며 기존 WinForms/7979는 변경하지 않습니다. 공개 주소는 재시작 때 변경될 수 있고, 연결에는 인증 승인이 필요합니다."
     )) return;
     if (action === "rotate-token") {
       if (!confirmedRotation) {
