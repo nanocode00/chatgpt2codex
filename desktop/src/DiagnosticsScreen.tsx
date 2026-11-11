@@ -16,6 +16,7 @@ interface DiagnosticsScreenProps {
   ownedError: string;
   publicHealth: PublicTunnelHealth | null;
   publicChecking: boolean;
+  refreshKey: number;
   onRefreshOwned: () => void;
   onRefreshPublic: () => void;
   onConnections: () => void;
@@ -31,7 +32,7 @@ const labelTime = () => new Intl.DateTimeFormat("ko-KR", {
 }).format(new Date());
 
 export function DiagnosticsScreen({
-  native, owned, ownedBusy, ownedError, publicHealth, publicChecking,
+  native, owned, ownedBusy, ownedError, publicHealth, publicChecking, refreshKey,
   onRefreshOwned, onRefreshPublic, onConnections, onNotify
 }: DiagnosticsScreenProps) {
   const [runtime, setRuntime] = useState<RuntimeDiagnostic | null>(null);
@@ -96,7 +97,7 @@ export function DiagnosticsScreen({
     };
     void init();
     return () => { active = false; };
-  }, [native]);
+  }, [native, refreshKey]);
 
   async function refresh() {
     if (busy || !native) return;
@@ -156,7 +157,7 @@ export function DiagnosticsScreen({
     publicHealth?.state === "online" ? "HTTPS 응답 정상" :
     publicHealth?.state === "offline" ? "HTTPS 응답 실패" : "외부 상태 미확인";
   const holderCount = locks?.reduce((sum, lock) => sum + (lock.writer ? 1 : 0) + lock.readers.length, 0) ?? 0;
-  const lockLabel = busy === "overview" ? "조회 중" : locks === null ? "조회 불가" :
+  const lockLabel = busy === "locks" ? "조회 중" : locks === null ? "조회 안 됨" :
     holderCount === 0 ? "활성 잠금 없음" : "잠금 " + holderCount + "개";
   const visibleLocks = lockExpanded ? locks ?? [] : (locks ?? []).slice(0, 5);
 
@@ -176,7 +177,7 @@ export function DiagnosticsScreen({
     <div className="diag-summary" aria-label="진단 요약">
       <div><HeartPulse size={19}/><strong>{localLabel}</strong><span>로컬 MCP · 127.0.0.1:18797</span></div>
       <div><Cloud size={19}/><strong>{publicLabel}</strong><span>Quick Tunnel · HTTPS (OAuth 별도)</span></div>
-      <div><LockKeyhole size={19}/><strong>{lockLabel}</strong><span>Tauri 격리 HOME · 활성 잠금 조회</span></div>
+      <div><LockKeyhole size={19}/><strong>{lockLabel}</strong><span>Tauri 격리 HOME · 수동 잠금 조회</span></div>
     </div>
 
     {(snapshotError || ownedError) && <div className="diag-error" role="alert">
@@ -257,7 +258,7 @@ export function DiagnosticsScreen({
           <RefreshCcw size={16}/> 잠금 목록 조회
         </button></div>
         {lockError && <p className="diag-inline-error" role="alert">{lockError}</p>}
-        {locks === null ? <div className="diag-empty">잠금 목록을 아직 확인하지 못했습니다.</div> :
+        {locks === null ? <div className="diag-empty">잠금 목록을 조회하지 않았거나 확인할 수 없습니다.</div> :
           locks.length === 0 ? <div className="diag-empty"><CheckCircle2 size={18}/> 현재 목록에 활성 잠금이 없습니다.</div> :
             <div className="diag-lock-list">
               {visibleLocks.map((lock, index) => <div className="diag-lock-row" key={lock.projectRoot + index}>
