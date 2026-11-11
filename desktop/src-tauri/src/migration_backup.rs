@@ -188,7 +188,7 @@ fn validate_payload(payload: &BackupPayload) -> Result<usize, String> {
 }
 
 #[cfg(windows)]
-mod dpapi {
+pub(crate) mod dpapi {
     use std::ffi::c_void;
     use std::ptr;
     #[repr(C)]
@@ -231,16 +231,16 @@ mod dpapi {
         };
         Ok(bytes)
     }
-    pub(super) fn encrypt(input: &[u8]) -> Result<Vec<u8>, String> { convert(input, true) }
-    pub(super) fn decrypt(input: &[u8]) -> Result<Vec<u8>, String> { convert(input, false) }
+    pub(crate) fn encrypt(input: &[u8]) -> Result<Vec<u8>, String> { convert(input, true) }
+    pub(crate) fn decrypt(input: &[u8]) -> Result<Vec<u8>, String> { convert(input, false) }
 }
 
 #[cfg(not(windows))]
-mod dpapi {
-    pub(super) fn encrypt(_: &[u8]) -> Result<Vec<u8>, String> {
+pub(crate) mod dpapi {
+    pub(crate) fn encrypt(_: &[u8]) -> Result<Vec<u8>, String> {
         Err("Windows DPAPI 백업은 Windows에서만 지원합니다.".into())
     }
-    pub(super) fn decrypt(_: &[u8]) -> Result<Vec<u8>, String> {
+    pub(crate) fn decrypt(_: &[u8]) -> Result<Vec<u8>, String> {
         Err("Windows DPAPI 백업은 Windows에서만 지원합니다.".into())
     }
 }

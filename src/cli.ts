@@ -1639,9 +1639,17 @@ async function cmdReload(flags: Record<string, string | boolean>): Promise<void>
   }, null, 2));
 }
 
-async function waitForRuntimeHealth(record: { host: string; port: number }, attempts = 40): Promise<boolean> {
-  for (let i = 0; i < attempts; i += 1) {
-    if (await runtimeHealth(record)) return true;
+async function waitForRuntimeHealth(
+  record: { host: string; port: number },
+  attempts = 40,
+  expectedRecord?: () => Promise<boolean>,
+  maxElapsedMs?: number,
+): Promise<boolean> {
+  const deadline = maxElapsedMs === undefined ? Infinity : Date.now() + maxElapsedMs;
+  for (let i = 0; i < attempts && Date.now() < deadline; i += 1) {
+    // A healthy listener can precede serve --http writing its initial
+    // instance record. Do not conclude startup or fail on that race.
+    if (await runtimeHealth(record) && (!expectedRecord || await expectedRecord())) return true;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   return false;
@@ -1724,11 +1732,48 @@ async function cmdStart(flags: Record<string, string | boolean>): Promise<void> 
   const serverLogPath = path.join(stateDir, "logs", options.instance + ".server.log");
   const serverPid = await spawnDetachedLogged(process.execPath, args, serverLogPath, serverEnv);
 
-  const healthy = await waitForRuntimeHealth({ host: options.host, port: options.port });
+  // The isolated Windows Tauri preview often needs >4 seconds on cold
+  // starts. Its owned MCP may finish loading after the old 40x100ms probe,
+  // leaving a partial serve-owned record without tunnel metadata.
+  const attempts = options.instance === "tauri-preview-v1" ? 200 : 40;
+  const healthy = await waitForRuntimeHealth(
+    { host: options.host, port: options.port }, attempts,
+    async () => (await readRuntimeInstance(stateDir, options.instance))?.pid === serverPid,
+    options.instance === "tauri-preview-v1" ? 20_000 : undefined,
+  );
   const record = await readRuntimeInstance(stateDir, options.instance);
-  if (!healthy || !record) {
-    if (tunnelPid && isProcessAlive(tunnelPid)) process.kill(tunnelPid, "SIGTERM");
-    throw new Error("instance " + options.instance + " failed to become healthy");
+  if (!healthy || !record || record.pid !== serverPid) {
+    // A timed-out start must not orphan its half-started server and tunnel.
+    // Only signal a child after verifying the recorded PID, actual Windows
+    // command line, executable path and creation time all still match.
+    const verifiedServer = record?.pid === serverPid &&
+      await runtimeProcessMatchesRecord(record);
+    if (verifiedServer) {
+      process.kill(serverPid, "SIGTERM");
+      for (let i = 0; i < 50 && isProcessAlive(serverPid); i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    }
+    if (tunnelPid && isProcessAlive(tunnelPid)) {
+      const candidate = record && {
+        ...record, tunnelPid, tunnelMode: options.tunnel,
+        tunnelLogPath, publicUrl: options.publicUrl
+      };
+      if (candidate && await runtimeTunnelMatchesRecord(candidate)) {
+        process.kill(tunnelPid, "SIGTERM");
+      }
+    }
+    // Never delete the record when a process may still be using its PID.
+    // The next attempt must fail closed until ownership is proven.
+    if (record?.pid === serverPid && !isProcessAlive(serverPid) &&
+        (!tunnelPid || !isProcessAlive(tunnelPid))) {
+      await removeRuntimeInstance(stateDir, options.instance);
+    }
+    throw new Error(
+      "instance " + options.instance +
+      " failed to become healthy or write its owned startup record; " +
+      "verify the runtime PID and port before attempting recovery"
+    );
   }
   const mergedRecord = {
     ...record,

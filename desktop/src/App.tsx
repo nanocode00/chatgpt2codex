@@ -1,11 +1,13 @@
 import {
-  Activity, Check, ChevronRight, CircleHelp, Clipboard, Code2, Copy,
+  Activity, ChevronRight, Code2,
   ExternalLink, FileText, FolderCode, HardDrive, Layers, LayoutDashboard, LockKeyhole, PlugZap,
   RefreshCcw, Settings2, ShieldCheck, TerminalSquare
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { checkRuntime, inspectInstalledCli, inspectInstalledCliLogs, inspectPublicTunnel, manageOwnedCli, inspectOwnedPublicTunnelHealth, inspectOwnedCatalog, unregisterOwnedRepository, pickOwnedRepositoryFolder, registerOwnedPickedRepository, cancelOwnedPickedRepository, closePreviewWindow, closePreviewWithOwnedMcp, hidePreviewWindow, openTrustedLink, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type CliInspection, type CliLogPreview, type CliLogComponent, type ManagedAction, type ManagedResult, type CatalogInspection, type PickedRepositoryFolder, type PublicTunnelHealth, type RuntimeHealth, type TrustedLink } from "./runtime";
-import { ManagementControls, LegacyConnectionControls, LegacyDiagnosticsControls, LegacySettingsControls } from "./LegacyControls";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { checkRuntime, inspectInstalledCliLogs, inspectPublicTunnel, manageOwnedCli, copyOwnedOwnerToken, registerOwnedOwnerToken, inspectOwnedPublicTunnelHealth, inspectOwnedCatalog, unregisterOwnedRepository, pickOwnedRepositoryFolder, registerOwnedPickedRepository, cancelOwnedPickedRepository, closePreviewWindow, closePreviewWithOwnedMcp, hidePreviewWindow, openTrustedLink, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type CliLogPreview, type CliLogComponent, type ManagedAction, type ManagedResult, type CatalogInspection, type PickedRepositoryFolder, type PublicTunnelHealth, type RuntimeHealth, type TrustedLink } from "./runtime";
+import { LegacyDiagnosticsControls, LegacySettingsControls } from "./LegacyControls";
+import { ConnectionsSecurityScreen } from "./ConnectionsSecurityScreen";
+import { OwnerTokenRotationDialog } from "./OwnerTokenRotationDialog";
 import { CliParityPanel } from "./CliParityPanel";
 import { Dashboard } from "./Dashboard";
 import { ProjectsScreen } from "./ProjectsScreen";
@@ -17,7 +19,7 @@ import { parseUiPort, storedHealthPort, storedAutoRefresh } from "./ui-preferenc
 import { MigrationPreflight } from "./MigrationPreflight";
 import { inspectLegacyMigration, saveLegacySettingsSnapshot, inspectCredentialBackup, createCredentialBackup, rehearseCredentialRestore, type LegacyMigrationReport, type CredentialBackupReport, type RestoreRehearsalReport } from "./runtime";
 
-type Screen = "overview" | "projects" | "profiles" | "jobs" | "manage" | "cli" | "connections" | "diagnostics" | "settings";
+type Screen = "overview" | "projects" | "profiles" | "connections" | "jobs" | "cli" | "diagnostics" | "settings";
 type ActivityEntry = { time: string; message: string; online: boolean };
 
 /** Rust/Tauri invoke rejects with a plain string, not necessarily an Error. */
@@ -49,10 +51,9 @@ const NAV: { name: Screen; label: string; icon: typeof LayoutDashboard }[] = [
   { name: "overview", label: "대시보드", icon: LayoutDashboard },
   { name: "projects", label: "프로젝트", icon: FolderCode },
   { name: "profiles", label: "실행 환경", icon: Layers },
-  { name: "jobs", label: "작업", icon: FileText },
-  { name: "manage", label: "관리", icon: TerminalSquare },
-  { name: "cli", label: "CLI", icon: TerminalSquare },
   { name: "connections", label: "연결", icon: PlugZap },
+  { name: "jobs", label: "작업", icon: FileText },
+  { name: "cli", label: "CLI", icon: TerminalSquare },
   { name: "diagnostics", label: "진단", icon: Activity },
   { name: "settings", label: "설정", icon: Settings2 }
 ];
@@ -68,14 +69,10 @@ function App() {
   const [toast, setToast] = useState<AppToast | null>(null);
   const [status, setStatus] = useState<RuntimeHealth | null>(null);
   const [checking, setChecking] = useState(false);
-  const [cliChecking, setCliChecking] = useState(false);
-  const [cliInspection, setCliInspection] = useState<CliInspection | null>(null);
   const [tunnelHealth, setTunnelHealth] = useState<PublicTunnelHealth | null>(null);
   const [tunnelChecking, setTunnelChecking] = useState(false);
-  const [tunnelNotice, setTunnelNotice] = useState("");
   const [logResult, setLogResult] = useState<CliLogPreview | null>(null);
   const [logsChecking, setLogsChecking] = useState(false);
-  const [publicCopied, setPublicCopied] = useState(false);
   const [exitError, setExitError] = useState("");
   const [exitBusy, setExitBusy] = useState(false);
   const [trayError, setTrayError] = useState("");
@@ -84,7 +81,7 @@ function App() {
   const [ownedBusy, setOwnedBusy] = useState(false);
   const [ownedError, setOwnedError] = useState("");
   const [ownedToken, setOwnedToken] = useState<string | null>(null);
-  const [ownedUrlNotice, setOwnedUrlNotice] = useState("");
+  const [rotationDialogOpen, setRotationDialogOpen] = useState(false);
   const [ownedPublicHealth, setOwnedPublicHealth] = useState<PublicTunnelHealth | null>(null);
   const [ownedPublicChecking, setOwnedPublicChecking] = useState(false);
   const [catalog, setCatalog] = useState<CatalogInspection | null>(null);
@@ -111,7 +108,6 @@ function App() {
   const [rehearsalBusy, setRehearsalBusy] = useState(false);
   const [rehearsalError, setRehearsalError] = useState("");
   const [history, setHistory] = useState<ActivityEntry[]>([]);
-  const [copied, setCopied] = useState(false);
   const [settingError, setSettingError] = useState("");
   const [settingsNotice, setSettingsNotice] = useState("");
   const [previewStartup, setPreviewStartup] = useState<PreviewStartupInspection | null>(null);
@@ -119,7 +115,6 @@ function App() {
   const [startupError, setStartupError] = useState("");
   const requestCounter = useRef(0);
   const tunnelBusy = useRef(false);
-  const lastTunnel = useRef<PublicTunnelHealth | null>(null);
   const publicProbeBusy = useRef(false);
   const toastId = useRef(0);
   const notify = useCallback((message: string, tone: "info" | "error" = "info") => {
@@ -181,21 +176,23 @@ function App() {
   }, [autoRefresh, native, runCheck]);
 
 
-  const runOwnedAction = useCallback(async (action: ManagedAction) => {
+  const runOwnedAction = useCallback(async (action: ManagedAction, confirmedRotation = false) => {
     if (action === "start-public" && !window.confirm(
-      "Tauri 전용 MCP를 Cloudflare Quick Tunnel로 외부에 공개할까요?\\n\\n별도 18797 인스턴스만 사용하며 기존 WinForms/7979는 변경하지 않습니다. 공개 주소는 재시작 때 변경될 수 있고, 연결에는 인증 승인이 필요합니다."
+      "Tauri 전용 MCP를 Cloudflare Quick Tunnel로 외부에 공개할까요?\n\n별도 18797 인스턴스만 사용하며 기존 WinForms/7979는 변경하지 않습니다. 공개 주소는 재시작 때 변경될 수 있고, 연결에는 인증 승인이 필요합니다."
     )) return;
     if (action === "rotate-token") {
-      const confirmation = window.prompt(
-        "Tauri 전용 Owner Token을 새로 발급할까요?\\n\\n기존 Token을 복구할 수 없으며, 기존 OAuth 승인이 모두 무효화돼 ChatGPT를 다시 연결해야 합니다.\\n\\n전용 MCP를 중지한 상태에서만 가능합니다. 진행하려면 '재발급'을 입력하세요."
-      );
-      if (confirmation !== "재발급") return;
+      if (!confirmedRotation) {
+        setOwnedError("");
+        setRotationDialogOpen(true);
+        return;
+      }
+      // Only the app's typed-acknowledgement dialog passes confirmedRotation.
+      // Native Rust independently enforces fully stopped instance ownership.
       setOwnedToken(null);
       setOwnedPublicHealth(null);
     }
     setOwnedBusy(true);
     setOwnedError("");
-    setOwnedUrlNotice("");
     try {
       const next = await manageOwnedCli(action);
       setOwnedPublicHealth(previous =>
@@ -206,6 +203,7 @@ function App() {
       } else {
         setOwned(next);
       }
+      if (action === "rotate-token") setRotationDialogOpen(false);
       if (action !== "status") {
         const labels: Record<ManagedAction, string> = {
           status: "상태 조회", prepare: "MCP 준비", "rotate-token": "토큰 재발급",
@@ -238,7 +236,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (screen === "manage" || screen === "overview" || screen === "projects" || screen === "profiles") {
+    if (screen === "connections" || screen === "overview" || screen === "projects" || screen === "profiles") {
       void runOwnedAction("status");
       void refreshCatalog();
     }
@@ -398,8 +396,7 @@ function App() {
     if (!owned?.tunnelRunning || !owned.publicConnector) return;
     try {
       await navigator.clipboard.writeText(owned.publicConnector);
-      setOwnedUrlNotice("");
-      notify("공개 MCP 주소를 복사했습니다. 연결은 OAuth 인증 후 확인하세요.");
+        notify("공개 MCP 주소를 복사했습니다. 연결은 OAuth 인증 후 확인하세요.");
     } catch {
       notify("공개 주소를 복사하지 못했습니다. 직접 선택해 복사하세요.", "error");
     }
@@ -410,8 +407,11 @@ function App() {
     try {
       await navigator.clipboard.writeText(ownedToken);
       setOwnedToken(null);
+      notify("새 Owner Token을 복사하고 앱의 일회성 값을 지웠습니다.");
     } catch {
-      setOwnedError("클립보드 복사에 실패했습니다. 토큰을 표시하지 않았으므로 별도 초기화 절차가 필요합니다.");
+      const message = "클립보드 복사에 실패했습니다. 일회성 토큰은 지워지지 않았습니다.";
+      setOwnedError(message);
+      notify(message, "error");
     }
   }
 
@@ -465,25 +465,6 @@ function App() {
     }
   }, [screen, native, runMigrationCheck, runBackupCheck]);
 
-  const runCliInspection = useCallback(async () => {
-    setCliChecking(true);
-    try {
-      setCliInspection(await inspectInstalledCli("default"));
-    } catch {
-      setCliInspection({
-        available: false, instance: "default", alive: false, healthy: false,
-        tunnelAlive: null, publicHealthy: null, endpoint: null, publicConnector: null,
-        details: "설치된 CLI 상태 조회가 실패했습니다."
-      });
-    } finally {
-      setCliChecking(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (screen === "connections") void runCliInspection();
-  }, [screen, runCliInspection]);
-
   const runTunnelCheck = useCallback(async () => {
     // A foreground/resume event can coincide with the one-minute poll.
     if (tunnelBusy.current) return;
@@ -491,23 +472,13 @@ function App() {
     setTunnelChecking(true);
     try {
       const next = await inspectPublicTunnel("default");
-      const previous = lastTunnel.current;
-      if (previous?.endpoint && next.endpoint && previous.endpoint !== next.endpoint) {
-        setTunnelNotice("Quick Tunnel 주소가 변경됐습니다. ChatGPT에 등록된 커넥터 주소도 확인하세요.");
-      } else if (previous?.state === "online" && next.state === "offline") {
-        setTunnelNotice("로컬 MCP와 별개로 공개 터널 연결이 끊겼습니다. WinForms에서 터널 상태를 확인해 주세요.");
-      } else if (next.state === "online") {
-        setTunnelNotice("");
-      }
       setTunnelHealth(next);
-      lastTunnel.current = next;
     } catch {
       const failed: PublicTunnelHealth = {
         state: "unavailable", endpoint: null,
         details: "공개 상태를 검사하지 못했습니다."
       };
       setTunnelHealth(failed);
-      lastTunnel.current = failed;
     } finally {
       tunnelBusy.current = false;
       setTunnelChecking(false);
@@ -534,24 +505,9 @@ function App() {
   }, [native, runTunnelCheck, runCheck]);
 
   const tunnelOnline = tunnelHealth?.state === "online";
-  const tunnelOffline = tunnelHealth?.state === "offline";
-
-  const publicConnector = cliInspection?.available ? cliInspection.publicConnector : null;
-  const publicState = tunnelHealth?.details ??
-    (!cliInspection ? "설치된 CLI에서 공개 연결 정보를 확인합니다." : cliInspection.details);
 
   function refreshPublicState() {
-    void runCliInspection();
     void runTunnelCheck();
-  }
-
-  async function copyPublicConnector() {
-    if (!publicConnector || tunnelOffline) return;
-    try {
-      await navigator.clipboard.writeText(publicConnector);
-      setPublicCopied(true);
-      window.setTimeout(() => setPublicCopied(false), 1500);
-    } catch { setPublicCopied(false); }
   }
 
   async function loadCliLogs(component: CliLogComponent) {
@@ -607,19 +563,8 @@ function App() {
     }
   }
 
-  const endpoint = useMemo(() => "http://127.0.0.1:" + port + "/mcp", [port]);
   const serverOnline = native && !!status?.online;
   const stateLabel = !native ? "브라우저 미리보기" : checking && !status ? "확인 중" : serverOnline ? "정상 실행 중" : "연결되지 않음";
-
-  async function copyLocalEndpoint() {
-    try {
-      await navigator.clipboard.writeText(endpoint);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      setCopied(false);
-    }
-  }
 
   function saveSettings(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -691,7 +636,7 @@ function App() {
             <button className={"icon-btn " + (checking ? "spin-icon" : "")} type="button" onClick={() => {
                 if (screen === "jobs") {
                   setJobsRefreshKey(value => value + 1);
-                } else if (screen === "overview" || screen === "projects" || screen === "manage") {
+                } else if (screen === "overview" || screen === "projects" || screen === "connections") {
                   void runOwnedAction("status"); void refreshCatalog();
                 } else { void runCheck(); }
               }} aria-label="현재 화면 새로고침" title="현재 화면 새로고침" disabled={checking || ownedBusy || catalogBusy}><RefreshCcw size={17}/></button>
@@ -712,7 +657,7 @@ function App() {
           onTogglePublic={togglePublicPreference}
           onCopyPublic={() => { void copyOwnedConnector(); }}
           onNotify={notify}
-          onNavigate={to => setScreen(to)}
+          onNavigate={to => setScreen(to === "manage" ? "connections" : to)}
         />}
 
         {screen === "projects" && <ProjectsScreen
@@ -731,7 +676,7 @@ function App() {
           onUnregisterTyped={setUnregisterTyped}
           onConfirmUnregister={() => { void confirmUnregister(); }}
           onNotify={notify}
-          onManageRuntime={() => setScreen("manage")}
+          onManageRuntime={() => setScreen("connections")}
         />}
 
         {screen === "profiles" && <ProfilesScreen
@@ -743,68 +688,34 @@ function App() {
           refreshKey={jobsRefreshKey} onProjects={() => setScreen("projects")}
         />}
 
-        {screen === "manage" && <>
-          <div className="page-heading"><div><div className="eyebrow">MANAGEMENT</div><h1>런타임 관리</h1>
-            <p>기존 Windows 런처의 관리 항목을 먼저 배치했어. 실제 서버 제어는 안전성 검증 후 연결해.</p></div></div>
-          <ManagementControls onConnections={() => setScreen("connections")} onSettings={() => setScreen("settings")} onProjects={() => setScreen("projects")} onExit={() => { void exitPreview(); }} onCompleteExit={() => { void exitPreview(true); }} exitBusy={exitBusy} exitError={exitError}
-            onHide={() => { void hideToTray(); }} trayError={trayError}
-            owned={owned} ownedBusy={ownedBusy} ownedError={ownedError} ownedToken={ownedToken}
-            ownedUrlNotice={ownedUrlNotice} onCopyOwnedConnector={() => { void copyOwnedConnector(); }}
-            ownedPublicHealth={ownedPublicHealth} ownedPublicChecking={ownedPublicChecking}
-            onCheckOwnedPublicHealth={() => { void checkOwnedPublicHealth(); }}
-            catalog={catalog} catalogBusy={catalogBusy} catalogError={catalogError} onRefreshCatalog={() => { void refreshCatalog(); }}
-            pickedFolder={pickedFolder} folderBusy={folderBusy} folderName={folderName} onFolderName={setFolderName}
-            folderId={folderId} onFolderId={setFolderId} folderError={folderError} folderNotice={folderNotice}
-            onBrowseFolder={() => { void browseOwnedFolder(); }} onCancelFolder={() => { void discardOwnedFolder(); }}
-            onRegisterFolder={() => { void registerOwnedFolder(); }}
-            unregisterTarget={unregisterTarget} unregisterTyped={unregisterTyped}
-            onUnregisterTyped={setUnregisterTyped} unregisterBusy={unregisterBusy}
-            unregisterError={unregisterError} unregisterNotice={unregisterNotice}
-            onRequestUnregister={requestUnregister} onCancelUnregister={cancelUnregister}
-            onConfirmUnregister={() => { void confirmUnregister(); }}
-            onOwnedAction={(action) => { void runOwnedAction(action); }} onCopyToken={() => { void copyOwnedToken(); }}/>
-        </>}
-
         {screen === "cli" && <>
           <div className="page-heading"><div><div className="eyebrow">CLI PARITY</div><h1>고급 CLI</h1><p>실행 환경은 전용 화면에서 관리합니다. 이곳에서는 설정·진단·고급 조회만 제공합니다.</p></div></div>
           <CliParityPanel />
         </>}
 
-        {screen === "connections" && <>
-          <div className="page-heading"><div><div className="eyebrow">CONNECTIVITY</div><h1>연결</h1><p>C2C 서버의 로컬 주소와 연결 가능 상태를 확인합니다.</p></div></div>
-          <section className="panel page-panel"><div className="panel-heading"><div className="panel-title"><span className="icon-tile"><PlugZap size={18}/></span><div><h2>로컬 MCP 엔드포인트</h2><p>로컬 상태 검사와 동일한 포트를 사용합니다.</p></div></div>{statusTag()}</div><label className="field-label" htmlFor="connections-endpoint">LOCAL ADDRESS</label><div className="endpoint roomy"><input id="connections-endpoint" readOnly value={endpoint}/><button type="button" onClick={() => { void copyLocalEndpoint(); }}>{copied ? <Check size={16}/> : <Clipboard size={16}/>} {copied ? "복사 완료" : "복사"}</button></div><div className="info-row"><ShieldCheck size={18}/><div><strong>로컬 주소만 표시</strong><p>Owner Token을 읽거나 표시하지 않으며 외부 터널을 생성하지 않습니다.</p></div></div><div className="info-row"><CircleHelp size={18}/><div><strong>ChatGPT 웹 연결은 별도 설정</strong><p>기존 Windows 앱의 터널은 별도로 관리됩니다. 새 Tauri 전용 Quick Tunnel의 시작·외부 Health 검사는 관리 화면에서 수행하며 18797 인스턴스만 사용합니다.</p></div></div></section>
-          <section className="panel page-panel" style={{ marginTop: 20 }}>
-            <div className="panel-heading">
-              <div className="panel-title"><span className="icon-tile"><TerminalSquare size={18}/></span>
-                <div><h2>CLI 관리 인스턴스</h2><p>기존 Windows 설치본 · default 인스턴스</p></div>
-              </div>
-              <button className="secondary-btn" type="button" disabled={cliChecking} onClick={() => { void runCliInspection(); }}>
-                <RefreshCcw size={15}/>{cliChecking ? "조회 중..." : "CLI 조회"}
-              </button>
-            </div>
-            <div className="info-row">
-              <ShieldCheck size={18}/>
-              <div>
-                <strong>{cliInspection?.available ? (cliInspection.healthy ? "CLI 인스턴스 정상" : "CLI 인스턴스 미응답") : "CLI 확인 필요"}</strong>
-                <p>{cliInspection?.details ?? "CLI 상태 정보를 조회하는 중입니다."}</p>
-                {cliInspection?.available && <p>인스턴스: {cliInspection.instance} · 서버: {cliInspection.alive ? "실행 중" : "꺼짐"} · 터널: {cliInspection.tunnelAlive === null ? "정보 없음" : cliInspection.tunnelAlive ? "실행 중" : "꺼짐"}</p>}
-                {cliInspection?.available && cliInspection.endpoint && <p>CLI Health: {cliInspection.endpoint}</p>}
-              </div>
-            </div>
-            <div className="info-row">
-              <LockKeyhole size={18}/>
-              <div><strong>안전한 읽기 전용 연결</strong>
-                <p>설치된 CLI의 health 명령만 사용합니다. MCP 서버를 시작·종료하지 않고 Owner Token도 읽지 않습니다.</p>
-              </div>
-            </div>
-          </section>
-          <LegacyConnectionControls publicConnector={publicConnector ?? null} publicState={publicState} publicVerified={tunnelOnline} publicOffline={tunnelOffline} publicNotice={tunnelNotice} onCopyPublic={() => { void copyPublicConnector(); }} publicCopied={publicCopied} onRefreshPublic={refreshPublicState} checking={cliChecking || tunnelChecking}/>
-        </>}
+        {screen === "connections" && <ConnectionsSecurityScreen
+          native={native} owned={owned} ownedBusy={ownedBusy} ownedError={ownedError}
+          ownerTokenPending={!!ownedToken}
+          tokenCopyAvailable={owned?.tokenCopyAvailable === true} publicPreferred={publicPreferred}
+          publicHealth={ownedPublicHealth} publicChecking={ownedPublicChecking}
+          onRefresh={() => { void runOwnedAction("status"); }}
+          onManagedAction={action => { void runOwnedAction(action); }}
+          onTogglePublic={togglePublicPreference}
+          onCopyPublic={() => { void copyOwnedConnector(); }}
+          onCopyToken={() => { void copyOwnedToken(); }}
+          onCopyStoredToken={async () => { await copyOwnedOwnerToken(); setOwnedToken(null); }}
+          onRegisterToken={async (candidate) => {
+            await registerOwnedOwnerToken(candidate);
+            await runOwnedAction("status");
+          }}
+          onNotify={notify}
+          onDiagnostics={() => setScreen("diagnostics")}
+        />}
 
         {screen === "diagnostics" && <>
           <div className="page-heading"><div><div className="eyebrow">DIAGNOSTICS</div><h1>진단</h1><p>로컬 Health 검사 기록과 설치된 CLI의 서버·터널 로그를 확인합니다.</p></div><button className="secondary-btn" onClick={() => { void runCheck(); }} disabled={checking}><RefreshCcw size={16}/> 다시 확인</button></div>
           <section className="panel page-panel"><div className="panel-heading"><div className="panel-title"><span className="icon-tile"><Activity size={18}/></span><div><h2>상태 확인 기록</h2><p>현재 세션 · 최근 12건</p></div></div>{statusTag()}</div><div className="event-list">{history.length ? history.map((item, i) => <div className="event" key={item.time + i}><span className={"event-dot " + (item.online ? "ok" : "")}/><div><strong>{item.online ? "Health 확인 성공" : "Health 확인"}</strong><p>{item.message}</p></div><time>{item.time}</time></div>) : <p className="description">아직 검사 기록이 없습니다.</p>}</div></section>
-          <LegacyDiagnosticsControls checking={checking} onLocalHealth={() => { void runCheck(); }} onPublicHealth={refreshPublicState} tunnelChecking={tunnelChecking || cliChecking} tunnelStatus={tunnelHealth?.details ?? "아직 검사하지 않았습니다."} onViewLogs={(component) => { void loadCliLogs(component); }} logsChecking={logsChecking} logResult={logResult}
+          <LegacyDiagnosticsControls checking={checking} onLocalHealth={() => { void runCheck(); }} onPublicHealth={refreshPublicState} tunnelChecking={tunnelChecking} tunnelStatus={tunnelHealth?.details ?? "아직 검사하지 않았습니다."} onViewLogs={(component) => { void loadCliLogs(component); }} logsChecking={logsChecking} logResult={logResult}
             native={native} localVerified={serverOnline} localChecked={status !== null} localDetails={status?.details ?? "로컬 MCP 서버 상태를 확인하고 있습니다."} localPort={port}
             publicVerified={tunnelOnline} publicHealthState={tunnelHealth?.state ?? null} openError={linkError}
             onOpenLocalHealth={() => { void openLink("local_health"); }} onOpenPublicHealth={() => { void openLink("public_health"); }}
@@ -824,6 +735,31 @@ function App() {
             {startupError && <p className="form-error" role="alert">{startupError}</p>}
             <div className="info-row"><LockKeyhole size={18}/><div><strong>안전 제한</strong><p>휴대용 ZIP 프리뷰에서는 변경할 수 없습니다. Tauri 전용 설치 경로를 검증한 경우에만 사용자 계정의 별도 등록 항목을 변경하며, 기존 WinForms와 CLI 서버는 변경하지 않습니다.</p></div></div>
           </section>
+          <section className="panel page-panel" style={{ marginTop: 20 }}>
+            <div className="panel-heading"><div className="panel-title">
+              <span className="icon-tile"><TerminalSquare size={18}/></span>
+              <div><h2>앱·트레이·종료</h2>
+                <p>MCP 제어는 연결 화면에서, Windows 앱 창 제어는 여기에서 관리합니다.</p></div>
+            </div></div>
+            <div className="legacy-body">
+              <div className="legacy-actions">
+                <button type="button" className="legacy-action available" disabled={exitBusy}
+                  onClick={() => { void hideToTray(); }}>트레이로 숨기기</button>
+                <button type="button" className="legacy-action available"
+                  disabled={exitBusy || ownedBusy} onClick={() => { void exitPreview(); }}>
+                  앱만 종료 (MCP 유지)
+                </button>
+                <button type="button" className="legacy-action available"
+                  disabled={exitBusy || ownedBusy} onClick={() => { void exitPreview(true); }}>
+                  앱·전용 MCP 완전 종료
+                </button>
+              </div>
+              <p className="legacy-footnote">앱만 종료하면 전용 MCP/Quick Tunnel은 계속 실행됩니다.
+                완전 종료는 소유권 확인 후 Tauri 전용 서버만 중지하며, 기존 WinForms/7979에는 영향을 주지 않습니다.</p>
+              {trayError && <p className="form-error" role="alert">{trayError}</p>}
+              {exitError && <p className="form-error" role="alert">{exitError}</p>}
+            </div>
+          </section>
           <LegacySettingsControls />
           <MigrationPreflight report={migrationReport} busy={migrationBusy} error={migrationError}
             onInspect={() => { void runMigrationCheck(); }} onSnapshot={() => { void runMigrationCheck(true); }}
@@ -837,6 +773,12 @@ function App() {
         </div>
         </div>
       </main>
+      {rotationDialogOpen && <OwnerTokenRotationDialog
+        busy={ownedBusy} ready={owned?.ready === true} running={owned?.running === true}
+        error={ownedError}
+        onCancel={() => { if (!ownedBusy) setRotationDialogOpen(false); }}
+        onConfirm={() => { void runOwnedAction("rotate-token", true); }}
+      />}
       <Toast toast={toast}/>
     </div>
   );
