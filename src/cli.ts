@@ -1639,9 +1639,15 @@ async function cmdReload(flags: Record<string, string | boolean>): Promise<void>
   }, null, 2));
 }
 
-async function waitForRuntimeHealth(record: { host: string; port: number }, attempts = 40): Promise<boolean> {
+async function waitForRuntimeHealth(
+  record: { host: string; port: number },
+  attempts = 40,
+  expectedRecord?: () => Promise<boolean>,
+): Promise<boolean> {
   for (let i = 0; i < attempts; i += 1) {
-    if (await runtimeHealth(record)) return true;
+    // A healthy listener can precede serve --http writing its initial
+    // instance record. Do not conclude startup or fail on that race.
+    if (await runtimeHealth(record) && (!expectedRecord || await expectedRecord())) return true;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   return false;
@@ -1728,7 +1734,10 @@ async function cmdStart(flags: Record<string, string | boolean>): Promise<void> 
   // starts. Its owned MCP may finish loading after the old 40x100ms probe,
   // leaving a partial serve-owned record without tunnel metadata.
   const attempts = options.instance === "tauri-preview-v1" ? 200 : 40;
-  const healthy = await waitForRuntimeHealth({ host: options.host, port: options.port }, attempts);
+  const healthy = await waitForRuntimeHealth(
+    { host: options.host, port: options.port }, attempts,
+    async () => (await readRuntimeInstance(stateDir, options.instance))?.pid === serverPid,
+  );
   const record = await readRuntimeInstance(stateDir, options.instance);
   if (!healthy || !record || record.pid !== serverPid) {
     // A timed-out start must not orphan its half-started server and tunnel.
