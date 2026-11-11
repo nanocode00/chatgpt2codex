@@ -14,6 +14,7 @@ interface ConnectionsSecurityProps {
   ownedBusy: boolean;
   ownedError: string;
   ownerTokenPending: boolean;
+  tokenCopyAvailable: boolean;
   publicPreferred: boolean;
   publicHealth: PublicTunnelHealth | null;
   publicChecking: boolean;
@@ -22,17 +23,18 @@ interface ConnectionsSecurityProps {
   onTogglePublic: (enable: boolean) => void;
   onCopyPublic: () => void;
   onCopyToken: () => void;
+  onCopyStoredToken: () => Promise<void>;
+  onRegisterToken: (candidate: string) => Promise<void>;
   onNotify: (message: string, tone?: "info" | "error") => void;
   onDiagnostics: () => void;
-  onManagement: () => void;
 }
 
 /** Inspect only the dedicated Tauri-managed instance, never the legacy/default probe. */
 export function ConnectionsSecurityScreen({
-  native, owned, ownedBusy, ownedError, ownerTokenPending,
+  native, owned, ownedBusy, ownedError, ownerTokenPending, tokenCopyAvailable,
   publicPreferred, publicHealth, publicChecking,
-  onRefresh, onManagedAction, onTogglePublic, onCopyPublic, onCopyToken, onNotify,
-  onDiagnostics, onManagement
+  onRefresh, onManagedAction, onTogglePublic, onCopyPublic, onCopyToken,
+  onCopyStoredToken, onRegisterToken, onNotify, onDiagnostics
 }: ConnectionsSecurityProps) {
   const state = runtimeView(native, owned);
   const running = state === "online";
@@ -43,7 +45,10 @@ export function ConnectionsSecurityScreen({
   const publicState = publicView(owned, publicHealth);
   const canToggle = available && !runtimeBusy && owned?.tunnelCapable === true && !running;
   const nextPublic = !running && publicPreferred;
-  const [tokenGuidanceOpen, setTokenGuidanceOpen] = useState(false);
+  const [knownToken, setKnownToken] = useState("");
+  const [tokenImportOpen, setTokenImportOpen] = useState(false);
+  const [tokenBusy, setTokenBusy] = useState(false);
+  const [tokenError, setTokenError] = useState("");
   const endpoint = "http://127.0.0.1:" + (owned?.port ?? 18797) + "/mcp";
   const publicValue = exposed ? owned?.publicConnector ?? "" : "";
   const publicStatus =
@@ -62,6 +67,23 @@ export function ConnectionsSecurityScreen({
       onNotify("Tauri 전용 로컬 MCP 주소를 복사했습니다.");
     } catch {
       onNotify("주소 복사에 실패했습니다. 입력 영역에서 직접 선택해 복사하세요.", "error");
+    }
+  }
+
+  async function saveKnownToken(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (tokenBusy || runtimeBusy) return;
+    setTokenBusy(true); setTokenError("");
+    try {
+      await onRegisterToken(knownToken);
+      setKnownToken("");
+      setTokenImportOpen(false);
+      onNotify("현재 Tauri Owner Token을 Windows 사용자 전용 암호화 보관소에 등록했습니다.");
+    } catch (error) {
+      setTokenError(typeof error === "string" ? error.slice(0, 220) :
+        error instanceof Error ? error.message.slice(0, 220) : "Owner Token 등록에 실패했습니다.");
+    } finally {
+      setTokenBusy(false);
     }
   }
 
@@ -136,8 +158,9 @@ export function ConnectionsSecurityScreen({
             disabled={runtimeBusy} onClick={() => onManagedAction("restart")}>
             <RotateCw size={16}/> 재시작
           </button>}
-          <button type="button" className="connections-button secondary" onClick={onManagement}>
-            상세 관리 <ArrowRight size={15}/>
+          <button type="button" className="connections-button secondary" disabled={runtimeBusy}
+            onClick={onRefresh}>
+            <RefreshCcw size={15}/> 상태 확인
           </button>
         </div>
         <p className="connections-subnote">모니터링용 포트 설정은 실제 MCP 수신 포트를 변경하지 않습니다.</p>
@@ -189,33 +212,62 @@ export function ConnectionsSecurityScreen({
           <div><LockKeyhole size={19}/><h2 id="connections-token-heading">Owner Token·인증</h2></div>
           <span className="connections-pill">{ready ? "설정됨" : "초기화 필요"}</span>
         </div>
-        <p>Owner Token은 서버 접근 권한의 근거입니다. 이미 저장된 토큰 원문은 이 화면에서 다시 조회하지 않습니다.</p>
+        <p>Owner Token은 인증 승인에 사용하는 민감한 값입니다. CLI에는 해시만 보관되며,
+          별도 암호화 보관을 한 토큰만 나중에 복사할 수 있습니다.</p>
         {ownerTokenPending && <div className="connections-token-once">
-          <strong>새 토큰은 지금 한 번만 복사할 수 있습니다.</strong>
-          <p>복사 후 앱이 보관한 일회성 표시 값을 즉시 지웁니다. 개인 비밀번호 관리 도구에 안전하게 보관하세요.</p>
+          <strong>새 Owner Token이 발급됐습니다.</strong>
+          <p>원문은 화면에 표시하지 않습니다. 지금 복사해 안전하게 보관하세요.</p>
           <button type="button" className="connections-button primary" disabled={runtimeBusy}
             onClick={onCopyToken}><ClipboardCopy size={16}/> 새 토큰 복사 후 지우기</button>
         </div>}
         <div className="connections-actions">
-          {!ready && <button type="button" className="connections-button primary"
+          <button type="button" className="connections-button primary"
+            disabled={!ready || runtimeBusy || tokenBusy || !tokenCopyAvailable}
+            onClick={() => { void onCopyStoredToken().then(() =>
+              onNotify("Owner Token을 클립보드에 복사했습니다. 민감정보가 남지 않도록 사용 후 클립보드를 정리하세요.")
+            ).catch((error: unknown) => onNotify(typeof error === "string" ? error :
+              error instanceof Error ? error.message : "Owner Token 복사에 실패했습니다.", "error")); }}>
+            <ClipboardCopy size={16}/> Owner Token 복사
+          </button>
+          {!ready && <button type="button" className="connections-button secondary"
             disabled={!available || runtimeBusy} onClick={() => onManagedAction("prepare")}>
             <KeyRound size={16}/> Owner Token 초기 설정
           </button>}
           {ready && <button type="button" className="connections-button secondary"
-            disabled={runtimeBusy || running || ownerTokenPending}
+            disabled={runtimeBusy || running || ownerTokenPending || tokenBusy}
             onClick={() => onManagedAction("rotate-token")}>
             <KeyRound size={16}/> 토큰 재발급
           </button>}
-          <button type="button" className="connections-button secondary"
-            onClick={() => setTokenGuidanceOpen(value => !value)}
-            aria-expanded={tokenGuidanceOpen}>
-            <ShieldCheck size={16}/> 보안 안내 {tokenGuidanceOpen ? "접기" : "보기"}
-          </button>
         </div>
-        {tokenGuidanceOpen && <div className="connections-guidance">
-          <p>토큰 재발급은 <strong>기존 Tauri 전용 OAuth 승인</strong>을 무효화합니다. 변경 전 MCP를 중지하고, 재발급 후 ChatGPT에서 다시 연결해야 합니다.</p>
-          <p>이 작업은 기존 WinForms/default:7979 인스턴스의 토큰을 읽거나 수정하지 않습니다.</p>
+        {ready && !tokenCopyAvailable && !ownerTokenPending && <div className="connections-token-restore">
+          <p>기존 토큰은 해시에서 복구할 수 없습니다. 이전에 보관한 현재 Tauri 토큰이 있다면
+            아래에서 한 번 검증·암호화 등록하면 이후부터 복사할 수 있습니다.
+            재발급은 기존 OAuth 승인에 영향을 줍니다.</p>
+          <button type="button" className="connections-button secondary"
+            disabled={runtimeBusy || tokenBusy}
+            onClick={() => { setTokenImportOpen(v => !v); setKnownToken(""); setTokenError(""); }}>
+            {tokenImportOpen ? "기존 토큰 등록 취소" : "보관 중인 토큰 등록"}
+          </button>
+          {tokenImportOpen && <form className="connections-token-import" onSubmit={event => { void saveKnownToken(event); }}>
+            <label htmlFor="connections-token-candidate">현재 Tauri Owner Token</label>
+            <input id="connections-token-candidate" type="password" value={knownToken}
+              spellCheck={false} autoComplete="off" maxLength={160}
+              disabled={tokenBusy || runtimeBusy}
+              onChange={event => setKnownToken(event.target.value)}
+              placeholder="보관 중인 현재 Owner Token 입력"/>
+            <button type="submit" className="connections-button primary"
+              disabled={tokenBusy || runtimeBusy || knownToken.length < 20}>검증 후 암호화 저장</button>
+            {tokenError && <p className="connections-inline-error" role="alert">{tokenError}</p>}
+          </form>}
         </div>}
+        <div className="connections-guidance">
+          <strong>Owner Token 보안 안내</strong>
+          <p>토큰 재발급은 <strong>기존 Tauri 전용 OAuth 승인</strong>을 무효화합니다.
+            변경 전 MCP를 중지하고, 재발급 후 ChatGPT에서 다시 연결해야 합니다.</p>
+          <p>복사 기능은 이 Windows 사용자 계정에 묶인 DPAPI 암호화 보관소만 사용합니다.
+            기존 WinForms/default:7979의 토큰을 조회하거나 수정하지 않습니다.</p>
+          <p>토큰을 클립보드에 복사하면 다른 앱에서 붙여넣을 수 있으므로 사용 후 클립보드를 정리하세요.</p>
+        </div>
         <p className="connections-subnote">‘인증 준비됨’은 토큰 설정 상태만 의미하며 ChatGPT OAuth 승인 완료를 뜻하지 않습니다.</p>
       </section>
 
