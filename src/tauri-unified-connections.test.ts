@@ -119,6 +119,42 @@ describe("Tauri-owned connection and security screen", () => {
     expect(rust).toContain("전용 MCP 시작 기록이 미완성입니다(tunnelMode 누락)");
   });
 
+  it("keeps the MCP and token action slots stable across start and stop states", () => {
+    const screen = readFileSync("desktop/src/ConnectionsSecurityScreen.tsx", "utf8");
+    const css = readFileSync("desktop/src/connections.css", "utf8");
+    expect(screen).toContain('className="connections-actions connections-lifecycle-actions"');
+    expect(screen).toContain('className="connections-actions connections-token-actions"');
+    expect(screen).toContain("disabled={!ready || running || runtimeBusy");
+    expect(screen).toContain("disabled={!running || runtimeBusy}");
+    expect(screen).toContain('onManagedAction("stop")');
+    expect(screen).toContain('onManagedAction("restart")');
+    expect(screen).toContain('onManagedAction("prepare")');
+    expect(screen).toContain('onManagedAction("rotate-token")');
+    expect(css).toContain("grid-template-columns:repeat(4,minmax(0,1fr))");
+    expect(css).toContain("grid-template-columns:repeat(3,minmax(0,1fr))");
+    expect(css).toContain(".connections-button:disabled");
+  });
+
+  it("uses a styled guarded rotation dialog instead of browser prompt", () => {
+    const app = readFileSync("desktop/src/App.tsx", "utf8");
+    const dialog = readFileSync("desktop/src/OwnerTokenRotationDialog.tsx", "utf8");
+    const screen = readFileSync("desktop/src/ConnectionsSecurityScreen.tsx", "utf8");
+    expect(app).not.toContain("window.prompt(");
+    expect(app).toContain('if (!confirmedRotation)');
+    expect(app).toContain("setRotationDialogOpen(true)");
+    expect(app).toContain('<OwnerTokenRotationDialog');
+    expect(app).toContain('runOwnedAction("rotate-token", true)');
+    expect(dialog).toContain('role="dialog" aria-modal="true"');
+    expect(dialog).toContain('typed === "재발급"');
+    expect(dialog).toContain('disabled={!canConfirm}');
+    expect(dialog).toContain('기존 OAuth 승인이 모두 무효화됩니다.');
+    expect(dialog).toContain("onCancel()");
+    expect(screen).toContain("const [securityExpanded, setSecurityExpanded] = useState(false)");
+    expect(screen).toContain("aria-expanded={securityExpanded}");
+    expect(screen).toContain("securityExpanded &&");
+    expect(screen).toContain("재발급 시 기존 OAuth 승인이 무효화되며");
+  });
+
   it("preserves a responsive neutral design and avoids inline copy-confirmation text", () => {
     const css = readFileSync("desktop/src/connections.css", "utf8");
     expect(css).toContain("container-type:inline-size");
