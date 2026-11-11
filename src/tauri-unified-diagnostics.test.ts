@@ -72,6 +72,8 @@ describe("Tauri isolated diagnostics data models", () => {
     expect(screen).toContain('if (busy || !native || !owned?.running');
     expect(screen).toContain('role="dialog" aria-modal="true"');
     expect(screen).toContain("구성 재로드");
+    expect(screen).toContain('(response as Record<string, unknown>).reloaded !== true');
+    expect(screen).toContain('setReloadResult("Tauri 전용 프로젝트·실행 환경 구성 재로드가 확인되었습니다.")');
     // CLI lock list can clear stale records: not called on screen entry or every auto refresh.
     const autoRange = screen.slice(screen.indexOf("// This screen is mounted"), screen.indexOf("  async function refresh()"));
     expect(autoRange).not.toContain('"lock-list"');
