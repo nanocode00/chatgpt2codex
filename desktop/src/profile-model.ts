@@ -78,6 +78,13 @@ export function filterProfiles(profiles: CatalogProfile[], search: string): Cata
     .filter(p => p.alias.toLocaleLowerCase().includes(needle));
 }
 
+/** A matching alias in Python and Docker represents two distinct GUI profiles. */
+export function filterProfilesForKind(
+  profiles: CatalogProfile[], kind: "python" | "docker", query: string
+): CatalogProfile[] {
+  return filterProfiles(profiles.filter(profile => profile[kind]), query);
+}
+
 export function profileAliasValid(value: string): boolean { return aliasOk(value); }
 
 /** Candidate validation is for friendly UI errors; Rust and the CLI remain authoritative. */
