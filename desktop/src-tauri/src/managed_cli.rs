@@ -197,6 +197,14 @@ fn record_if_any(root: &Payload) -> Result<Option<serde_json::Value>, String> {
             let v: serde_json::Value = serde_json::from_slice(&bytes)
                 .map_err(|_| "인스턴스 기록이 유효하지 않아 서버를 조작하지 않습니다.")?;
             if !expected_record(root, &v) {
+                // A detached serve --http process can write a provisional
+                // record before 'c2c start' merges tunnel ownership metadata.
+                // Never accept that partial record as authority to stop, rotate
+                // or control a process: merely provide actionable diagnostics.
+                if v["name"] == INSTANCE && v["port"] == PORT &&
+                    v.get("tunnelMode").is_none() {
+                    return Err("전용 MCP 시작 기록이 미완성입니다(tunnelMode 누락). 인스턴스 PID, 로컬 Health, Cloudflare 프로세스를 확인하세요. 안전한 소유권 확인 전 기록을 수정·삭제하거나 프로세스를 종료하지 않습니다.".into());
+                }
                 return Err("인스턴스 기록이 Tauri 소유로 확인되지 않아 조작을 거부했습니다.".into());
             }
             Ok(Some(v))
