@@ -294,7 +294,7 @@ export async function inspectCutoverReadiness(): Promise<CutoverReadiness> {
 /** F5-E: typed, finite CLI parity contract; no generic argv/shell bridge. */
 export type OwnedCliParityOperation =
   | "profile-list" | "profile-show" | "profile-test"
-  | "profile-add-python" | "profile-add-docker" | "profile-add-both"
+  | "profile-add-python" | "profile-add-docker"
   | "profile-remove-python" | "profile-remove-docker" | "profile-remove-all"
   | "config-show" | "config-export" | "config-set" | "config-unset"
   | "reload" | "status" | "health" | "doctor" | "logs-server" | "logs-tunnel"
