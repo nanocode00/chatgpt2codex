@@ -96,27 +96,18 @@
 @keyframes profiles-spin{to{transform:rotate(360deg)}}
 
 
-/* Unified profile editor: independent optional Python/Docker settings.
-   An active kind exposes its inputs; both can be active at once. */
-.profiles-form-kind-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;gap:12px}
-.profiles-form-kind{background:#292929;border:1px solid #494949;border-radius:12px;min-width:0;overflow:hidden}
-.profiles-form-kind.active{background:#2c2c2c;border-color:#717171}
-.profiles-kind-toggle{display:flex!important;flex-direction:row!important;align-items:flex-start;gap:10px!important;cursor:pointer;padding:16px}
-.profiles-kind-toggle input{flex:none;appearance:auto;accent-color:#dedede;width:17px;height:17px;min-height:17px;margin:2px 0 0;padding:0}
-.profiles-kind-toggle span{display:flex;flex-direction:column;gap:6px;min-width:0}
-.profiles-kind-toggle strong{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:#eee}
-.profiles-kind-toggle small{font-size:10px;color:#aaa;line-height:1.6}
-.profiles-kind-fields{display:flex;flex-direction:column;gap:13px;border-top:1px solid #4b4b4b;padding:14px 15px 17px}
-.profiles-kind-fields label{font-size:11px;font-weight:600;min-width:0}
-.profiles-kind-fields .profiles-hint{margin:0;line-height:1.65}
-@container profiles (max-width:760px){.profiles-form-kind-grid{grid-template-columns:1fr}}
+/* Python and Docker are separate catalog views, not parts of one profile. */
+.profiles-kind-nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;min-width:0}
+.profiles-kind-nav button{display:flex;align-items:center;justify-content:flex-start;gap:10px;min-height:54px;border:1px solid #4c4c4c;border-radius:12px;background:#292929;color:#bdbdbd;padding:13px 17px;font-size:13px}
+.profiles-kind-nav button.active{color:#f2f2f2;background:#393939;border-color:#858585;font-weight:650}
+.profiles-kind-nav button:not(.active):hover{background:#333}
+.profiles-kind-nav button:focus-visible{outline:2px solid #aaa;outline-offset:2px}
+.profiles-kind-nav button span{flex:1;text-align:left}
+.profiles-kind-nav button small{display:inline-flex;justify-content:center;align-items:center;min-width:33px;padding:4px 7px;border-radius:20px;background:#212121;border:1px solid #545454;color:#ddd;font-size:10px}
+#profiles-kind-content{display:flex;flex-direction:column;gap:20px;min-width:0}
 
 /* Profile inspector presents only the selected kind; do not make an unconfigured
    Python/Docker type consume an equal-sized detail card. */
-.profiles-detail-switch{display:flex;gap:8px;margin:17px 20px 0;padding:4px;background:#292929;border:1px solid #444;border-radius:10px}
-.profiles-detail-switch button{display:flex;align-items:center;justify-content:center;gap:8px;flex:1;min-height:38px;background:transparent;border:1px solid transparent;border-radius:8px;font-size:12px;color:#b9b9b9}
-.profiles-detail-switch button.active{background:#464646;color:#f0f0f0;border-color:#626262;font-weight:650}
-.profiles-detail-switch button:hover:not(.active){background:#333}
 .profiles-main-runtime{margin:18px 20px 0;min-width:0}
 .profiles-kind-focused{gap:14px;padding:19px;min-width:0}
 .profiles-kind-focused .profiles-kind-title strong{font-size:14px}
@@ -128,11 +119,7 @@
 .profiles-docker-fields>div{display:flex;flex-direction:column;gap:6px;padding:11px 12px;background:#242424;border:1px solid #464646;border-radius:8px;min-width:0}
 .profiles-docker-fields span{font-size:10px;color:#aaa}
 .profiles-docker-fields strong{font-size:11px;color:#ddd;font-weight:600;line-height:1.6;overflow-wrap:anywhere}
-.profiles-secondary-kind{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:15px 17px;margin:12px 20px 0;border:1px dashed #525252;border-radius:10px;color:#ddd;background:#262626}
-.profiles-secondary-kind strong{font-size:11px;font-weight:650}
-.profiles-secondary-kind p{font-size:10px;margin-top:6px;line-height:1.6;color:#aaa}
-.profiles-secondary-kind .profiles-button{flex:none}
-@container profiles (max-width:620px){.profiles-secondary-kind{flex-direction:column;align-items:stretch}.profiles-docker-fields{grid-template-columns:1fr}.profiles-card-actions{flex-wrap:wrap}}
+@container profiles (max-width:620px){.profiles-docker-fields{grid-template-columns:1fr}.profiles-card-actions{flex-wrap:wrap}}
 
 @container profiles (max-width:1000px){.profiles-layout{grid-template-columns:1fr}.profiles-settings-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @container profiles (max-width:680px){.profiles-heading{flex-direction:column}.profiles-header-actions{width:100%}.profiles-header-actions .profiles-button{flex:1}.profiles-form-grid,.profiles-settings-grid{grid-template-columns:1fr}}
