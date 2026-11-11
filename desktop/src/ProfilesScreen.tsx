@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Activity, AlertCircle, Box, CheckCircle2, ChevronRight, CircleHelp, Code2,
-  Layers, LoaderCircle, Plus, RefreshCcw, Search, Settings2, ShieldCheck,
+  Layers, LoaderCircle, Plus, RefreshCcw, Search, ShieldCheck,
   Terminal, Trash2, X
 } from "lucide-react";
 import {
