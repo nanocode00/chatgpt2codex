@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { RefreshCcw, TerminalSquare, Settings2, Activity, Layers, Trash2, CircleAlert } from "lucide-react";
 import { isNativeApp, runOwnedCliParity, type OwnedCliParityRequest, type OwnedCliParityOperation, type OwnedCliParityResponse } from "./runtime";
-import { parseJobList, type JobListItem } from "./job-list";
 
 type Group = "config" | "operations" | "advanced";
 
@@ -13,17 +12,13 @@ function missingInput(request: OwnedCliParityRequest): string | null {
   if (operation === "repository-show" && !request.target?.trim()) {
     return "조회할 프로젝트 ID를 입력하세요.";
   }
-  if ((operation === "job-status" || operation === "job-logs") &&
-      !/^loop-[A-Za-z0-9.-]+$/.test(request.target?.trim() ?? "")) {
-    return "유효한 작업 ID(loop-...)가 필요합니다. 먼저 job list에서 작업을 확인하세요. 프로젝트 ID로는 조회할 수 없습니다.";
-  }
   return null;
 }
 
 const GROUPS: { key: Group; title: string; subtitle: string }[] = [
   { key: "config", title: "설정", subtitle: "config show / set / unset / export" },
   { key: "operations", title: "진단·재로드", subtitle: "status / health / doctor / logs / reload" },
-  { key: "advanced", title: "추가 조회", subtitle: "repository / secret / job / lock / control" }
+  { key: "advanced", title: "추가 조회", subtitle: "repository / secret / lock / control" }
 ];
 
 export function CliParityPanel() {
@@ -33,7 +28,6 @@ export function CliParityPanel() {
   const [result, setResult] = useState<OwnedCliParityResponse | null>(null);
   const [error, setError] = useState("");
   const [target, setTarget] = useState("");
-  const [jobs, setJobs] = useState<JobListItem[] | null>(null);
   const [configKey, setConfigKey] = useState("port");
   const [configValue, setConfigValue] = useState("18797");
 
@@ -52,7 +46,6 @@ export function CliParityPanel() {
     try {
       const reply = await runOwnedCliParity(request);
       setResult(reply);
-      if (reply.operation === "job-list") setJobs(parseJobList(reply.json));
     } catch (err) {
       setError(typeof err === "string" ? err : err instanceof Error ? err.message : "CLI 작업에 실패했습니다.");
     } finally {
@@ -129,7 +122,7 @@ export function CliParityPanel() {
         </div>}
         {group === "advanced" && <div className="cli-parity-section">
           <div className="legacy-pref-row"><div><strong>추가 읽기 전용 CLI 명령</strong>
-            <p>프리뷰 격리 HOME의 프로젝트 상세, 비밀정보 이름, 작업·잠금 및 제어 요청 상태만 조회합니다.</p>
+            <p>프리뷰 격리 HOME의 프로젝트 상세, 비밀정보 이름, 잠금 및 제어 요청 상태를 조회합니다. 작업 관련 명령은 작업 화면으로 이동했습니다.</p>
           </div></div>
           <div className="legacy-actions">
             <button type="button" disabled={!native || busy} className="legacy-action available"
@@ -137,38 +130,22 @@ export function CliParityPanel() {
             <button type="button" disabled={!native || busy} className="legacy-action available"
               onClick={() => run("lock-list")}><Layers size={15}/>lock list</button>
             <button type="button" disabled={!native || busy} className="legacy-action available"
-              onClick={() => run("job-list")}><Layers size={15}/>job list</button>
-            <button type="button" disabled={!native || busy} className="legacy-action available"
               onClick={() => run("control-list")}><Layers size={15}/>control list</button>
             <button type="button" disabled={!native || busy} className="legacy-action available"
               onClick={() => run("control-auto-status")}><Activity size={15}/>control auto status</button>
           </div>
-          {jobs !== null && (jobs.length ? <div className="cli-parity-section">
-            <p className="legacy-footnote">조회할 작업을 선택하면 실제 Job ID가 입력됩니다. 프로젝트 ID와는 다릅니다.</p>
-            <ul className="cli-profile-list">{jobs.map(job => <li key={job.id}>
-              <button type="button" className="text-action" disabled={busy}
-                onClick={() => setTarget(job.id)}>{job.id}</button>
-              <small>{job.status}{job.projectId ? " · " + job.projectId : ""}</small>
-            </li>)}</ul>
-          </div> : <p className="legacy-footnote" role="status">
-            현재 프리뷰 인스턴스에 저장된 Job이 없습니다. 작업을 생성한 뒤 다시 조회하세요.
-          </p>)}
           <div className="legacy-form-row"><label className="legacy-form-label" htmlFor="cli-parity-target">
-            <strong>조회 대상 ID</strong><span>repository show는 프로젝트 ID, job 명령은 실제 loop- 작업 ID</span></label>
+            <strong>프로젝트 ID</strong><span>repository show 조회를 위한 프로젝트 ID</span></label>
             <div className="legacy-form-control"><input id="cli-parity-target" className="legacy-field"
               value={target} onChange={e => setTarget(e.target.value)} maxLength={128}
-              placeholder="예: my-project 또는 loop-abc123"/></div>
+              placeholder="예: my-project"/></div>
           </div>
           <div className="legacy-actions">
             <button type="button" disabled={!native || busy} className="legacy-action available"
               onClick={() => run("repository-show", { target: target.trim() })}>repository show</button>
-            <button type="button" disabled={!native || busy} className="legacy-action available"
-              onClick={() => run("job-status", { target: target.trim() })}>job status</button>
-            <button type="button" disabled={!native || busy} className="legacy-action available"
-              onClick={() => run("job-logs", { target: target.trim() })}>job logs (최대 10건)</button>
           </div>
           <p className="legacy-footnote">상세 결과에 포함될 수 있는 토큰·인증 문자열은 숨깁니다.
-            강제 잠금 해제, 작업 취소·재개, 제어 승인·중지, secret 설정·삭제는 실행할 수 없습니다.</p>
+            강제 잠금 해제, 제어 승인·중지, secret 설정·삭제는 실행할 수 없습니다. 작업의 조회·상태 변경은 전용 작업 화면에서 제공합니다.</p>
         </div>}
         {busy && <p className="legacy-footnote" role="status">번들 CLI 명령 실행 중…</p>}
         {result && <div className="cli-parity-output" role="region" aria-label="CLI 실행 결과">
@@ -188,8 +165,9 @@ export function CliParityPanel() {
         <span><strong>config show / set / unset / export</strong><small>이 화면 · 고정 인스턴스 안전 값만 수정</small></span>
         <span><strong>status / health / doctor / logs / reload</strong><small>이 화면 · 진단·재로드</small></span>
         <span><strong>config import / import-env, profile import-env</strong><small>CLI 전용 · 파일/환경 변수 반입</small></span>
-        <span><strong>secret list / lock list / job list·status·logs / control list·auto status</strong><small>추가 조회 탭 · 읽기 전용</small></span>
-        <span><strong>secret set/remove, job cancel/resume, lock release, control approve/reject/kill/auto</strong><small>CLI 전용 · 인증정보 및 권한이 필요한 변경</small></span>
+        <span><strong>job list / status / logs / resume / cancel</strong><small>작업 화면 · 저장된 상태 변경, 실제 에이전트 실행/종료 아님</small></span>
+        <span><strong>secret list / lock list / control list·auto status</strong><small>추가 조회 탭 · 읽기 전용</small></span>
+        <span><strong>secret set/remove, lock release, control approve/reject/kill/auto</strong><small>CLI 전용 · 인증정보 및 권한이 필요한 변경</small></span>
         <span><strong>serve / init / repository use</strong><small>내부 런타임 전용 · Tauri 고정 작업 공간과 분리</small></span>
       </div><p className="legacy-footnote">CLI 전용 항목은 이 UI에서 실행되지 않습니다.
         권한·인증 경계를 유지한 채 후속 단계에서 개별 제공 여부를 결정합니다.</p></div>
