@@ -38,6 +38,7 @@ pub struct ManagedResult {
     pub details: String,
     pub tunnel_capable: bool,
     pub tunnel_running: bool,
+    pub token_copy_available: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub public_connector: Option<String>,
     // Only populated when the user explicitly chooses "Prepare". Never
@@ -60,7 +61,7 @@ fn response(available: bool, ready: bool, running: bool, details: impl Into<Stri
     ManagedResult {
         available, ready, running, instance: INSTANCE, port: PORT,
         details: details.into(), one_time_owner_token: None,
-        tunnel_capable: false, tunnel_running: false, public_connector: None,
+        tunnel_capable: false, tunnel_running: false, token_copy_available: false, public_connector: None,
     }
 }
 
@@ -611,6 +612,7 @@ fn status(root: &Payload) -> Result<ManagedResult, String> {
         "전용 인스턴스가 중지돼 있습니다. WinForms 서버는 별도로 유지됩니다."
     });
     result.tunnel_capable = root.cloudflared.is_some();
+    result.token_copy_available = ready && crate::owner_token_vault::available(&root.home);
     result.tunnel_running = tunnel_running;
     result.public_connector = connector;
     Ok(result)
@@ -643,6 +645,12 @@ fn operate(root: Payload, action: &str) -> Result<ManagedResult, String> {
                 .ok_or("CLI가 새 토큰을 반환하지 않았습니다.")?;
             let mut value = response(true, true, false,
                 "전용 Owner Token을 생성했습니다. 한 번만 보여주므로 안전하게 보관하세요.");
+            // The canonical CLI persists only SHA-256; the optional DPAPI vault
+            // allows safe later copying without reissuing a token.
+            value.token_copy_available = crate::owner_token_vault::store(&root.home, token).is_ok();
+            if !value.token_copy_available {
+                value.details.push_str(" Windows 암호화 보관에 실패했으므로 이번 일회성 토큰을 반드시 복사해 보관하세요.");
+            }
             value.one_time_owner_token = Some(token.to_string());
             value.tunnel_capable = root.cloudflared.is_some();
             Ok(value)
@@ -665,6 +673,12 @@ fn operate(root: Payload, action: &str) -> Result<ManagedResult, String> {
             }
             let mut value = response(true, true, false,
                 "Tauri 전용 Owner Token을 재발급했습니다. 기존 OAuth 승인은 무효화됐으며 ChatGPT를 다시 연결해야 합니다.");
+            // The canonical CLI persists only SHA-256; the optional DPAPI vault
+            // allows safe later copying without reissuing a token.
+            value.token_copy_available = crate::owner_token_vault::store(&root.home, token).is_ok();
+            if !value.token_copy_available {
+                value.details.push_str(" Windows 암호화 보관에 실패했으므로 이번 일회성 토큰을 반드시 복사해 보관하세요.");
+            }
             value.one_time_owner_token = Some(token.to_string());
             value.tunnel_capable = root.cloudflared.is_some();
             Ok(value)
@@ -787,6 +801,30 @@ pub async fn manage_owned_cli(action: String) -> Result<ManagedResult, String> {
     })
     .await
     .map_err(|_| "CLI 수명주기 작업이 실패했습니다.".to_owned())?
+}
+
+/// Native clipboard copy; the DPAPI-protected token never reaches the WebView.
+#[tauri::command]
+pub async fn copy_owned_owner_token() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let root = payload()?;
+        let lock = MUTATION_LOCK.get_or_init(|| Mutex::new(()));
+        let _guard = lock.lock().map_err(|_| "Owner Token 제어 잠금을 획득하지 못했습니다.")?;
+        crate::owner_token_vault::copy_to_clipboard(&root.home)
+    }).await.map_err(|_| "토큰 복사 작업이 실패했습니다.".to_owned())?
+}
+
+/// Import requires an exact candidate matching this Tauri-only owner's hash.
+#[tauri::command]
+pub async fn register_owned_owner_token(candidate: String) -> Result<bool, String> {
+    if candidate.len() > 160 { return Err("Owner Token 길이가 올바르지 않습니다.".into()); }
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = payload()?;
+        let lock = MUTATION_LOCK.get_or_init(|| Mutex::new(()));
+        let _guard = lock.lock().map_err(|_| "Owner Token 제어 잠금을 획득하지 못했습니다.")?;
+        crate::owner_token_vault::store(&root.home, &candidate)?;
+        Ok(true)
+    }).await.map_err(|_| "토큰 암호화 등록 작업이 실패했습니다.".to_owned())?
 }
 
 #[cfg(test)]
