@@ -4,7 +4,7 @@ import { normalizeInstanceName } from "./instances.js";
 
 export type RuntimeLogComponent = "server" | "tunnel";
 
-const MAX_LOG_BYTES = 128 * 1024;
+const MAX_LOG_BYTES = 64 * 1024;
 const MAX_LOG_LINES = 5000;
 
 /** Logs are persistent artifacts, not proof of a live MCP instance.
