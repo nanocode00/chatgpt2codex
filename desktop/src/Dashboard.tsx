@@ -8,7 +8,7 @@ import type { CatalogInspection, ManagedAction, ManagedResult, PublicTunnelHealt
 import { publicView, runtimeView, startAction } from "./dashboard-state";
 import "./dashboard.css";
 
-type Destination = "projects" | "manage" | "cli" | "connections" | "diagnostics" | "settings";
+type Destination = "projects" | "profiles" | "manage" | "cli" | "connections" | "diagnostics" | "settings";
 interface DashboardProps {
   native: boolean;
   owned: ManagedResult | null;
@@ -168,9 +168,9 @@ export function Dashboard({
       </section>
       <section className="dash-summary" aria-labelledby="dash-profile-title">
         <div className="dash-summary-heading"><Layers size={17}/><h2 id="dash-profile-title">실행 환경</h2></div>
-        <strong className="dash-summary-value">{hasProjects ? catalog.profiles.length + "개" : "—"}</strong>
-        <p>{hasProjects ? "등록된 Python·Docker 프로필입니다." : "전용 CLI 프로필을 확인할 수 없습니다."}</p>
-        <button type="button" className="dash-card-button" onClick={() => onNavigate("cli")}>
+        <strong className="dash-summary-value">{hasProjects ? catalog.profiles.reduce((count, profile) => count + Number(profile.python) + Number(profile.docker), 0) + "개" : "—"}</strong>
+        <p>{hasProjects ? "등록된 Python·Docker 실행 환경을 종류별로 계산합니다." : "전용 CLI 프로필을 확인할 수 없습니다."}</p>
+        <button type="button" className="dash-card-button" onClick={() => onNavigate("profiles")}>
           프로필 확인 <ArrowRight size={15}/>
         </button>
       </section>

@@ -314,6 +314,7 @@ mod tests {
         assert!(plan(&request("secret-set")).is_err());
         assert!(plan(&request("serve")).is_err());
         assert!(plan(&request("profile-import-env")).is_err());
+        assert!(plan(&request("profile-add-both")).is_err());
         for operation in ["secret-list", "lock-list", "job-list",
                           "control-list", "control-auto-status"] {
             let p = plan(&request(operation)).unwrap();
