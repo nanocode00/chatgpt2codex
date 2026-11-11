@@ -58,6 +58,50 @@ describe("Tauri-owned connection and security screen", () => {
     expect(screen).toContain("workspace_list_projects");
   });
 
+  it("puts Connections fourth and removes obsolete Management navigation and route", () => {
+    const app = readFileSync("desktop/src/App.tsx", "utf8");
+    const first = app.indexOf('  { name: "overview", label: "대시보드"');
+    const projects = app.indexOf('  { name: "projects", label: "프로젝트"');
+    const profiles = app.indexOf('  { name: "profiles", label: "실행 환경"');
+    const connections = app.indexOf('  { name: "connections", label: "연결"');
+    const jobs = app.indexOf('  { name: "jobs", label: "작업"');
+    expect(first).toBeLessThan(projects);
+    expect(projects).toBeLessThan(profiles);
+    expect(profiles).toBeLessThan(connections);
+    expect(connections).toBeLessThan(jobs);
+    expect(app).not.toContain('  { name: "manage",');
+    expect(app).not.toContain('screen === "manage" && <>');
+    expect(app).toContain('onNavigate={to => setScreen(to === "manage" ? "connections" : to)}');
+    expect(app).toContain('onManageRuntime={() => setScreen("connections")}');
+    expect(app).toContain("앱·전용 MCP 완전 종료");
+    expect(app).toContain("트레이로 숨기기");
+  });
+
+  it("provides native-only repeated Owner Token copy without exposing the secret to React", () => {
+    const screen = readFileSync("desktop/src/ConnectionsSecurityScreen.tsx", "utf8");
+    const app = readFileSync("desktop/src/App.tsx", "utf8");
+    const native = readFileSync("desktop/src-tauri/src/managed_cli.rs", "utf8");
+    const vault = readFileSync("desktop/src-tauri/src/owner_token_vault.rs", "utf8");
+    const lib = readFileSync("desktop/src-tauri/src/lib.rs", "utf8");
+    expect(screen).toContain("Owner Token 복사");
+    expect(screen).toContain("보관 중인 토큰 등록");
+    expect(screen).toContain('type="password"');
+    expect(screen).toContain("tokenCopyAvailable");
+    expect(screen).toContain("onRegisterToken(knownToken)");
+    expect(screen).toContain("connections-guidance");
+    expect(screen).not.toContain("tokenGuidanceOpen");
+    expect(app).toContain("onCopyStoredToken={copyOwnedOwnerToken}");
+    expect(app).toContain("registerOwnedOwnerToken(candidate)");
+    expect(native).toContain("pub async fn copy_owned_owner_token()");
+    expect(native).toContain("pub async fn register_owned_owner_token(candidate: String)");
+    expect(native).toContain("token_copy_available");
+    expect(vault).toContain("crate::migration_backup::dpapi::encrypt");
+    expect(vault).toContain("matching_current_token");
+    expect(vault).toContain("CF_UNICODETEXT");
+    expect(lib).toContain("mod owner_token_vault;");
+    expect(lib).toContain("managed_cli::copy_owned_owner_token");
+  });
+
   it("preserves a responsive neutral design and avoids inline copy-confirmation text", () => {
     const css = readFileSync("desktop/src/connections.css", "utf8");
     expect(css).toContain("container-type:inline-size");
