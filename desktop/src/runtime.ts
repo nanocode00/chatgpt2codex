@@ -202,7 +202,7 @@ export interface ManagedResult {
   port: number;
   details: string;
   oneTimeOwnerToken?: string;
-  tokenCopyAvailable: boolean;
+  tokenCopyAvailable?: boolean;
 }
 export async function manageOwnedCli(action: ManagedAction): Promise<ManagedResult> {
   if (!isNativeApp()) {
