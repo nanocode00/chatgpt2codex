@@ -103,6 +103,18 @@ describe("Tauri-owned connection and security screen", () => {
     expect(lib).toContain("managed_cli::copy_owned_owner_token");
   });
 
+  it("uses a bounded longer Tauri cold-start probe and verifies PID ownership on timeout", () => {
+    const cli = readFileSync("src/cli.ts", "utf8");
+    const rust = readFileSync("desktop/src-tauri/src/managed_cli.rs", "utf8");
+    expect(cli).toContain('options.instance === "tauri-preview-v1" ? 200 : 40');
+    expect(cli).toContain('record?.pid === serverPid');
+    expect(cli).toContain("runtimeProcessMatchesRecord(record)");
+    expect(cli).toContain("runtimeTunnelMatchesRecord(candidate)");
+    expect(cli).toContain("!isProcessAlive(serverPid)");
+    expect(rust).toContain('record["tunnelMode"] == "cloudflare"');
+    expect(rust).toContain('record["tunnelMode"] == "none"');
+  });
+
   it("preserves a responsive neutral design and avoids inline copy-confirmation text", () => {
     const css = readFileSync("desktop/src/connections.css", "utf8");
     expect(css).toContain("container-type:inline-size");
