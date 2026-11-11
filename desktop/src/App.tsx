@@ -50,7 +50,7 @@ const NAV: { name: Screen; label: string; icon: typeof LayoutDashboard }[] = [
   { name: "connections", label: "연결", icon: PlugZap },
   { name: "jobs", label: "작업", icon: FileText },
   { name: "cli", label: "CLI", icon: TerminalSquare },
-  { name: "diagnostics", label: "진단", icon: Activity },
+  { name: "diagnostics", label: "진단·복구", icon: Activity },
   { name: "settings", label: "설정", icon: Settings2 }
 ];
 
