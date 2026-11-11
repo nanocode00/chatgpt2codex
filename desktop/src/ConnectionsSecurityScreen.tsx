@@ -216,9 +216,11 @@ export function ConnectionsSecurityScreen({
           별도 암호화 보관을 한 토큰만 나중에 복사할 수 있습니다.</p>
         {ownerTokenPending && <div className="connections-token-once">
           <strong>새 Owner Token이 발급됐습니다.</strong>
-          <p>원문은 화면에 표시하지 않습니다. 지금 복사해 안전하게 보관하세요.</p>
-          <button type="button" className="connections-button primary" disabled={runtimeBusy}
-            onClick={onCopyToken}><ClipboardCopy size={16}/> 새 토큰 복사 후 지우기</button>
+          <p>원문은 화면에 표시하지 않습니다. ‘Owner Token 복사’로 안전하게 보관하세요.</p>
+          {!tokenCopyAvailable && <button type="button" className="connections-button primary"
+            disabled={runtimeBusy} onClick={onCopyToken}>
+            <ClipboardCopy size={16}/> 일회성 토큰 복사 후 지우기
+          </button>}
         </div>}
         <div className="connections-actions">
           <button type="button" className="connections-button primary"
