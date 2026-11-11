@@ -805,12 +805,19 @@ pub async fn manage_owned_cli(action: String) -> Result<ManagedResult, String> {
 
 /// Native clipboard copy; the DPAPI-protected token never reaches the WebView.
 #[tauri::command]
-pub async fn copy_owned_owner_token() -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(|| {
+pub async fn copy_owned_owner_token(window: tauri::WebviewWindow) -> Result<(), String> {
+    // OpenClipboard(NULL) followed by EmptyClipboard breaks SetClipboardData.
+    // Use this authenticated Tauri window as the native clipboard owner.
+    #[cfg(windows)]
+    let owner_window = window.hwnd()
+        .map_err(|_| "Tauri 창 핸들을 확인하지 못했습니다.".to_string())?.0 as usize;
+    #[cfg(not(windows))]
+    let owner_window = { let _ = window; 0usize };
+    tauri::async_runtime::spawn_blocking(move || {
         let root = payload()?;
         let lock = MUTATION_LOCK.get_or_init(|| Mutex::new(()));
         let _guard = lock.lock().map_err(|_| "Owner Token 제어 잠금을 획득하지 못했습니다.")?;
-        crate::owner_token_vault::copy_to_clipboard(&root.home)
+        crate::owner_token_vault::copy_to_clipboard(&root.home, owner_window)
     }).await.map_err(|_| "토큰 복사 작업이 실패했습니다.".to_owned())?
 }
 
