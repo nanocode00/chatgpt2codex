@@ -8,13 +8,13 @@ if ($env:C2C_CI_PERF_RUN -ne "1" -or [string]::IsNullOrWhiteSpace($env:C2C_CI_PE
 }
 $reportPath = $env:C2C_CI_PERF_OUTPUT
 if (Test-Path -LiteralPath $reportPath) { Remove-Item -LiteralPath $reportPath -Force }
-$process = Start-Process -FilePath $exe -PassThru
+$guiProcess = Start-Process -FilePath $exe -PassThru
 try {
     $deadline = [DateTime]::UtcNow.AddSeconds(180)
     while (-not (Test-Path -LiteralPath $reportPath) -and [DateTime]::UtcNow -lt $deadline) {
         Start-Sleep -Milliseconds 500
-        $process.Refresh()
-        if ($process.HasExited) { throw "WebView2 app exited before finishing the benchmark" }
+        $guiProcess.Refresh()
+        if ($guiProcess.HasExited) { throw "WebView2 app exited before finishing the benchmark" }
     }
     if (-not (Test-Path -LiteralPath $reportPath)) {
         throw "Timeout waiting for the real WebView2 benchmark"
@@ -44,8 +44,8 @@ try {
         $bridge = [double[]]@($rows | ForEach-Object { $_.bridgeMs })
         $cli = [double[]]@($rows | ForEach-Object { $_.cliMs })
         $verify = [double[]]@($rows | ForEach-Object { $_.bundleVerifyMs })
-        $process = [double[]]@($rows | ForEach-Object { $_.childProcessMs })
-        $lines += "| $command | $(Percentile $gui 0.5) / $(Percentile $gui 0.95) ms | $(Percentile $bridge 0.5) / $(Percentile $bridge 0.95) ms | $(Percentile $verify 0.5) / $(Percentile $verify 0.95) ms | $(Percentile $process 0.5) / $(Percentile $process 0.95) ms | $(Percentile $cli 0.5) / $(Percentile $cli 0.95) ms |"
+        $nodeProcessTimes = [double[]]@($rows | ForEach-Object { $_.childProcessMs })
+        $lines += "| $command | $(Percentile $gui 0.5) / $(Percentile $gui 0.95) ms | $(Percentile $bridge 0.5) / $(Percentile $bridge 0.95) ms | $(Percentile $verify 0.5) / $(Percentile $verify 0.95) ms | $(Percentile $nodeProcessTimes 0.5) / $(Percentile $nodeProcessTimes 0.95) ms | $(Percentile $cli 0.5) / $(Percentile $cli 0.95) ms |"
     }
     $lines += ""
     $lines += "GUI = WebView invoke to response; bridge = Rust request/CLI/parse; bundle verification = hash initial load or locked-handle cache reuse; Node process = spawn through child exit; CLI = command handler (Node startup excluded)."
@@ -53,9 +53,9 @@ try {
     Write-Host $markdown
     if ($env:GITHUB_STEP_SUMMARY) { Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $markdown }
 } finally {
-    $process.Refresh()
-    if (-not $process.HasExited) {
-        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-        $process.WaitForExit(10000) | Out-Null
+    $guiProcess.Refresh()
+    if (-not $guiProcess.HasExited) {
+        Stop-Process -Id $guiProcess.Id -Force -ErrorAction SilentlyContinue
+        $guiProcess.WaitForExit(10000) | Out-Null
     }
 }

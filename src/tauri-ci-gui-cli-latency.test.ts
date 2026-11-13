@@ -62,7 +62,9 @@ describe("CI measures real GUI, Rust bridge and CLI handler separately", () => {
     expect(script).toContain("Percentile $bridge 0.95");
     expect(script).toContain("Percentile $cli 0.95");
     expect(script).toContain("Percentile $verify 0.95");
-    expect(script).toContain("Percentile $process 0.95");
+    expect(script).toContain("Percentile $nodeProcessTimes 0.95");
+    expect(script).toContain("$guiProcess = Start-Process -FilePath $exe -PassThru");
+    expect(script).toContain("$guiProcess.Refresh()");
     expect(script).toContain("Node startup excluded");
     expect(script).toContain("GITHUB_STEP_SUMMARY");
   });
