@@ -117,6 +117,12 @@ fn probe_local_runtime(port: u16) -> RuntimeHealth {
     snapshot
 }
 
+/// Read-only native status fast path: only an authenticated localhost C2C
+/// health response counts as healthy. No process is launched or stopped.
+pub(crate) fn native_local_c2c_health(port: u16) -> bool {
+    probe_local_runtime(port).online
+}
+
 #[tauri::command]
 async fn runtime_health(port: u16) -> Result<RuntimeHealth, String> {
     // A synchronous TCP probe must not block the Tauri UI event loop.

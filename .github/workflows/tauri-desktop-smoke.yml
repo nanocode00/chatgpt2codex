@@ -115,6 +115,8 @@ jobs:
         run: cargo --version
       - name: Unit-test native CLI URL, DPAPI backup and log safety checks
         run: cargo test --manifest-path desktop/src-tauri/Cargo.toml --lib
+      - name: Measure read-only native status cost on Windows fixture
+        run: cargo test --manifest-path desktop/src-tauri/Cargo.toml --lib native_status_uses_owned_record_without_running_node_or_modifying_files -- --nocapture
       - name: F3 disposable DPAPI restore and authenticated MCP E2E
         env:
           C2C_F3_E2E: "true"

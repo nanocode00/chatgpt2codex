@@ -7,6 +7,7 @@ use serde_json::Value;
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Component, Path};
+use std::time::Instant;
 
 use crate::managed_cli;
 
@@ -534,6 +535,26 @@ pub async fn run_owned_cli_console(input: String, confirmed: bool) -> Result<Cli
             tauri::async_runtime::spawn_blocking(move || {
                 fast_console_logs(if request.operation == "logs-server" { "server" } else { "tunnel" }, check)
             }).await.map_err(|_| "로그 조회를 완료하지 못했습니다.".to_string())?
+        }
+        ConsoleAction::Parity(request) if matches!(request.operation.as_str(), "status" | "health") => {
+            tauri::async_runtime::spawn_blocking(move || {
+                let start = Instant::now();
+                match managed_cli::native_console_status(&request.operation)? {
+                    Some(snapshot) => Ok(CliParityResponse {
+                        operation: request.operation,
+                        command: check.command,
+                        json: Some(redact_json(snapshot, 0)), text: None,
+                        note: format!("Windows 네이티브 상태 조회 · {}ms · Node 실행 없음",
+                            start.elapsed().as_millis()),
+                    }),
+                    None => {
+                        let mut result = execute(request)?;
+                        result.note = format!("기존 Node CLI 조회 · {}ms · 이전 형식/검증 대체 경로",
+                            start.elapsed().as_millis());
+                        Ok(result)
+                    }
+                }
+            }).await.map_err(|_| "CLI 상태 조회를 완료하지 못했습니다.".to_string())?
         }
         ConsoleAction::Parity(request) =>
             tauri::async_runtime::spawn_blocking(move || execute(request))

@@ -184,6 +184,156 @@ fn payload() -> Result<Payload, String> {
     payload_for(directory, &PathBuf::from(local))
 }
 
+/// The console status/health fast path *never executes a binary or mutates
+/// server state*. Resolve only fixed bundle paths without hashing large
+/// executables. Every operation which can execute a CLI still uses payload()
+/// and verifies all SHA-256 manifest hashes.
+fn read_only_payload() -> Result<Payload, String> {
+    if !cfg!(target_os = "windows") {
+        return Err("빠른 상태 조회는 현재 Windows 전용입니다.".into());
+    }
+    let exe = std::env::current_exe().map_err(|_| "Tauri 실행 위치를 확인하지 못했습니다.")?;
+    let directory = exe.parent().ok_or("Tauri 실행 위치가 올바르지 않습니다.")?;
+    let resource_root = if directory.join("c2c-runtime").join("manifest.json").is_file() {
+        directory.to_path_buf()
+    } else {
+        directory.join("resources")
+    };
+    let bundle = resource_root.join("c2c-runtime");
+    if !bundle.join("manifest.json").is_file() {
+        return Err("번들 CLI 매니페스트를 찾지 못했습니다.".into());
+    }
+    let node = bundle.join("bin").join("node.exe");
+    let cli = bundle.join("dist").join("cli.js");
+    if !node.is_file() || !cli.is_file() {
+        return Err("번들 CLI 실행 파일이 없습니다.".into());
+    }
+    let local = std::env::var_os("LOCALAPPDATA").ok_or("LOCALAPPDATA를 확인할 수 없습니다.")?;
+    let base = PathBuf::from(local).join("ChatGPTToCodex-Tauri-Preview");
+    let cloudflared = bundle.join("bin").join("cloudflared.exe");
+    Ok(Payload {
+        node, cli, home: base.join("isolated-home"),
+        workspace: base.join("workspace"),
+        cloudflared: cloudflared.is_file().then_some(cloudflared),
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn native_pid_alive(pid: u32) -> Option<bool> {
+    use windows_sys::Win32::Foundation::{CloseHandle, WAIT_TIMEOUT};
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    if pid == 0 { return Some(false); }
+    // WaitForSingleObject requires SYNCHRONIZE (0x0010_0000) in addition
+    // to query access. These are read-only rights; never request terminate.
+    const SYNCHRONIZE_ACCESS: u32 = 0x0010_0000;
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE_ACCESS, 0, pid) };
+    if handle.is_null() {
+        // Access denied or a recycled PID: let the canonical CLI determine
+        // the state instead of guessing or probing a foreign process.
+        return None;
+    }
+    let result = unsafe { WaitForSingleObject(handle, 0) };
+    unsafe { CloseHandle(handle) };
+    match result {
+        WAIT_TIMEOUT => Some(true),
+        0 => Some(false), // WAIT_OBJECT_0
+        _ => None,
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn native_pid_alive(_pid: u32) -> Option<bool> {
+    None
+}
+
+/// Returns None when a legacy/stale/ambiguous record needs the canonical CLI
+/// fallback. Fast path never starts Node, relies on unverified binaries, or
+/// modifies a stale runtime record.
+pub(crate) fn native_console_status(operation: &str) -> Result<Option<serde_json::Value>, String> {
+    let root = read_only_payload()?;
+    native_console_status_for(&root, operation)
+}
+
+fn native_console_status_for(root: &Payload, operation: &str)
+    -> Result<Option<serde_json::Value>, String> {
+    if !matches!(operation, "status" | "health") {
+        return Err("빠른 상태 조회는 status/health만 지원합니다.".into());
+    }
+    let path = state_record(root);
+    let bytes = match fs::symlink_metadata(&path) {
+        Ok(meta) if meta.is_file() && !meta.file_type().is_symlink() &&
+            meta.len() <= 128 * 1024 => Some(
+            fs::read(&path).map_err(|_| "인스턴스 상태 기록을 읽지 못했습니다.")?),
+        Ok(_) => return Err("인스턴스 상태 기록이 올바른 파일이 아닙니다.".into()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(_) => return Err("인스턴스 상태 기록을 확인하지 못했습니다.".into()),
+    };
+    let record: Option<serde_json::Value> = bytes.as_ref()
+        .map(|bytes| serde_json::from_slice(bytes)
+            .map_err(|_| "인스턴스 상태 기록을 해석하지 못했습니다.".to_string()))
+        .transpose()?;
+    let Some(mut record) = record else {
+        return Ok(Some(if operation == "status" {
+            serde_json::json!({"name": INSTANCE, "alive": false, "healthy": false})
+        } else {
+            serde_json::json!({
+                "instance": INSTANCE, "alive": false, "healthy": false,
+                "tunnelAlive": null, "publicHealthy": null, "endpoint": null
+            })
+        }));
+    };
+    // Normal current Tauri records match the fixed workspace. Only those
+    // can avoid the old CLI-powered repository lookup; compatibility cases
+    // fall back to the original, fully hash-verified CLI code path.
+    let expected_workspace = fs::canonicalize(&root.workspace).ok();
+    let recorded_workspace = record["workspace"].as_str()
+        .and_then(|s| fs::canonicalize(s).ok());
+    if expected_workspace.is_none() || expected_workspace != recorded_workspace {
+        return Ok(None);
+    }
+    if !expected_record(root, &record) {
+        return Err("인스턴스 기록이 앱 소유로 검증되지 않아 상태 조회를 중단했습니다.".into());
+    }
+    // Public health intentionally retains the canonical CLI's remote
+    // HTTPS probe. The local-only fast path performs no external network I/O.
+    if operation == "health" && record["tunnelMode"] == "cloudflare" {
+        return Ok(None);
+    }
+    let pid = record["pid"].as_u64().and_then(|v| u32::try_from(v).ok());
+    let Some(alive) = pid.and_then(native_pid_alive) else { return Ok(None); };
+    if !alive {
+        // The Node CLI may safely clean up a genuinely stale record. A
+        // native read-only observation must not silently change that rule.
+        return Ok(None);
+    }
+    let port = record["port"].as_u64().and_then(|v| u16::try_from(v).ok())
+        .ok_or("인스턴스 포트가 올바르지 않습니다.")?;
+    let healthy = crate::native_local_c2c_health(port);
+    let tunnel_alive = if record["tunnelPid"].is_null() {
+        None
+    } else {
+        let Some(pid) = record["tunnelPid"].as_u64().and_then(|v| u32::try_from(v).ok())
+            else { return Ok(None); };
+        let Some(running) = native_pid_alive(pid) else { return Ok(None); };
+        Some(running)
+    };
+    if operation == "health" {
+        return Ok(Some(serde_json::json!({
+            "instance": INSTANCE, "alive": alive, "healthy": healthy,
+            "tunnelAlive": tunnel_alive, "publicHealthy": null,
+            "endpoint": record["publicUrl"].as_str().map(|url| format!("{url}/healthz"))
+        })));
+    }
+    let map = record.as_object_mut().ok_or("인스턴스 기록의 필드 형식이 올바르지 않습니다.")?;
+    map.insert("alive".into(), alive.into());
+    map.insert("healthy".into(), healthy.into());
+    map.insert("tunnelAlive".into(),
+        tunnel_alive.map(serde_json::Value::Bool).unwrap_or(serde_json::Value::Null));
+    Ok(Some(record))
+}
+
 fn state_record(root: &Payload) -> PathBuf {
     root.home.join(".local").join("share").join("chatgpt2codex")
         .join("runtime").join(format!("{INSTANCE}.json"))
@@ -200,13 +350,16 @@ fn expected_record(root: &Payload, record: &serde_json::Value) -> bool {
     // all newly started preview servers use only the fixed owned workspace.
     // Both candidates are resolved by Rust/isolated CLI, never from WebView.
     let owned_workspace = fs::canonicalize(&root.workspace).ok();
-    let previous_workspace = selected_workspace(root).ok().flatten()
-        .and_then(|(_, path)| fs::canonicalize(path).ok());
     let observed_workspace = record["workspace"].as_str()
         .and_then(|s| fs::canonicalize(s).ok());
+    // Fast path for every current Tauri-managed runtime: avoid querying the
+    // Node CLI's selected repository on every status/health/ownership read.
+    // The historical workspace compatibility check is only necessary for
+    // records that do not point at the fixed, app-owned workspace.
     let workspace_owned = observed_workspace.as_ref().is_some_and(|observed| {
         owned_workspace.as_ref() == Some(observed) ||
-            previous_workspace.as_ref() == Some(observed)
+            selected_workspace(root).ok().flatten()
+                .and_then(|(_, path)| fs::canonicalize(path).ok()).as_ref() == Some(observed)
     });
     let active_port = record["port"].as_u64().and_then(|n| u16::try_from(n).ok()).unwrap_or(0);
     let expected_port = configured_port(root).ok();
@@ -970,6 +1123,61 @@ pub async fn register_owned_owner_token(candidate: String) -> Result<bool, Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn native_status_uses_owned_record_without_running_node_or_modifying_files() {
+        let base = std::env::temp_dir().join(format!(
+            "c2c-native-status-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let root = Payload {
+            node: base.join("not-a-runnable-node.exe"),
+            cli: base.join("dist").join("cli.js"),
+            home: base.join("home"),
+            workspace: base.join("workspace"),
+            cloudflared: None,
+        };
+        fs::create_dir_all(root.cli.parent().unwrap()).unwrap();
+        fs::create_dir_all(&root.workspace).unwrap();
+        fs::create_dir_all(state_record(&root).parent().unwrap()).unwrap();
+        fs::write(&root.cli, b"this is deliberately not a Node script").unwrap();
+        assert_eq!(native_pid_alive(std::process::id()), Some(true));
+        let offline = native_console_status_for(&root, "status").unwrap().unwrap();
+        assert_eq!(offline["alive"], false);
+        assert_eq!(offline["healthy"], false);
+        let record = serde_json::json!({
+            "name": INSTANCE, "pid": std::process::id(),
+            "entrypoint": root.cli.to_string_lossy(),
+            "workspace": root.workspace.to_string_lossy(),
+            "port": 7979, "host": "127.0.0.1", "tunnelMode": "none",
+            "tunnelPid": null, "publicUrl": "http://127.0.0.1:7979"
+        });
+        let original = serde_json::to_vec(&record).unwrap();
+        fs::write(state_record(&root), &original).unwrap();
+        let start = Instant::now();
+        let result = native_console_status_for(&root, "status").unwrap().unwrap();
+        let elapsed = start.elapsed();
+        assert_eq!(result["name"], INSTANCE);
+        assert_eq!(result["alive"], true);
+        assert!(result["healthy"].is_boolean());
+        assert_eq!(result["tunnelAlive"], serde_json::Value::Null);
+        assert_eq!(fs::read(state_record(&root)).unwrap(), original);
+        let health = native_console_status_for(&root, "health").unwrap().unwrap();
+        assert_eq!(health["instance"], INSTANCE);
+        assert_eq!(health["alive"], true);
+        assert_eq!(health["publicHealthy"], serde_json::Value::Null);
+        println!("native read-only status fixture: {elapsed:?} (no Node executable)");
+        // A foreign workspace cannot use the native fast path; ownership
+        // remains subject to the old, hash-verified CLI fallback.
+        let mut foreign = record;
+        foreign["workspace"] = serde_json::json!(base.join("other").to_string_lossy());
+        fs::write(state_record(&root), serde_json::to_vec(&foreign).unwrap()).unwrap();
+        assert!(native_console_status_for(&root, "status").unwrap().is_none());
+        fs::remove_dir_all(base).unwrap();
+    }
 
     #[test]
     fn saved_port_defaults_to_7979_and_rejects_invalid_config() {
