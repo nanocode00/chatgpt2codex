@@ -198,6 +198,8 @@ export interface OwnedCliParityResponse {
   bridgeMs?: number;
   /** Milliseconds in the CLI command handler (excludes Node startup). CI only. */
   cliMs?: number;
+  bundleVerifyMs?: number;
+  childProcessMs?: number;
 }
 export async function runOwnedCliParity(request: OwnedCliParityRequest): Promise<OwnedCliParityResponse> {
   if (!isNativeApp()) throw new Error("CLI 작업은 Windows Tauri 프리뷰에서만 지원합니다.");

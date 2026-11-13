@@ -12,6 +12,8 @@ pub struct CiPerfSample {
     gui_ms: f64,
     bridge_ms: f64,
     cli_ms: f64,
+    bundle_verify_ms: f64,
+    child_process_ms: f64,
 }
 
 #[derive(Serialize)]
@@ -53,8 +55,11 @@ pub fn ci_perf_submit(samples: Vec<CiPerfSample>, error: Option<String>) -> Resu
         }
         if samples.iter().any(|s| {
             !s.gui_ms.is_finite() || !s.bridge_ms.is_finite() || !s.cli_ms.is_finite()
+                || !s.bundle_verify_ms.is_finite() || !s.child_process_ms.is_finite()
                 || s.gui_ms < 0.0 || s.bridge_ms < 0.0 || s.cli_ms < 0.0
+                || s.bundle_verify_ms < 0.0 || s.child_process_ms < 0.0
                 || s.gui_ms > 120_000.0 || s.bridge_ms > 120_000.0 || s.cli_ms > 120_000.0
+                || s.bundle_verify_ms > 120_000.0 || s.child_process_ms > 120_000.0
         }) {
             return Err("성능 시간 값이 올바르지 않습니다.".into());
         }
@@ -68,7 +73,7 @@ pub fn ci_perf_submit(samples: Vec<CiPerfSample>, error: Option<String>) -> Resu
     }
     let report = CiPerfReport {
         schema_version: 1,
-        note: "GUI=WebView invoke round-trip; bridge=Rust request/CLI/parse; CLI=command handler excluding Node startup",
+        note: "GUI=WebView invoke round-trip; bridge=Rust total; bundleVerify=SHA once plus locked cache; childProcess=Node spawn through exit; CLI=handler excluding Node startup",
         samples,
         error,
     };

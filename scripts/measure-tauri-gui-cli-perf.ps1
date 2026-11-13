@@ -34,8 +34,8 @@ try {
         "",
         "Five runs per read-only command. p50 and p95 in milliseconds.",
         "",
-        "| Command | GUI total p50 / p95 | Rust bridge p50 / p95 | CLI handler p50 / p95 |",
-        "| --- | ---: | ---: | ---: |"
+        "| Command | GUI p50 / p95 | Bridge p50 / p95 | Bundle verification p50 / p95 | Node process p50 / p95 | CLI handler p50 / p95 |",
+        "| --- | ---: | ---: | ---: | ---: | ---: |"
     )
     foreach ($command in @("c2c status", "c2c repository list", "c2c profile list")) {
         $rows = @($report.samples | Where-Object { $_.command -eq $command })
@@ -43,10 +43,12 @@ try {
         $gui = [double[]]@($rows | ForEach-Object { $_.guiMs })
         $bridge = [double[]]@($rows | ForEach-Object { $_.bridgeMs })
         $cli = [double[]]@($rows | ForEach-Object { $_.cliMs })
-        $lines += "| $command | $(Percentile $gui 0.5) / $(Percentile $gui 0.95) ms | $(Percentile $bridge 0.5) / $(Percentile $bridge 0.95) ms | $(Percentile $cli 0.5) / $(Percentile $cli 0.95) ms |"
+        $verify = [double[]]@($rows | ForEach-Object { $_.bundleVerifyMs })
+        $process = [double[]]@($rows | ForEach-Object { $_.childProcessMs })
+        $lines += "| $command | $(Percentile $gui 0.5) / $(Percentile $gui 0.95) ms | $(Percentile $bridge 0.5) / $(Percentile $bridge 0.95) ms | $(Percentile $verify 0.5) / $(Percentile $verify 0.95) ms | $(Percentile $process 0.5) / $(Percentile $process 0.95) ms | $(Percentile $cli 0.5) / $(Percentile $cli 0.95) ms |"
     }
     $lines += ""
-    $lines += "GUI = WebView invoke to response; bridge = Rust request/CLI/parse; CLI = command handler (Node startup excluded). Bridge minus CLI includes Node startup, SHA validation, and parsing—not solely IPC."
+    $lines += "GUI = WebView invoke to response; bridge = Rust request/CLI/parse; bundle verification = hash initial load or locked-handle cache reuse; Node process = spawn through child exit; CLI = command handler (Node startup excluded)."
     $markdown = $lines -join [Environment]::NewLine
     Write-Host $markdown
     if ($env:GITHUB_STEP_SUMMARY) { Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $markdown }
