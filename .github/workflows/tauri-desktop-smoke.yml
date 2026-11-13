@@ -61,6 +61,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "CLI Typecheck failed" }
       - name: Test Windows named-pipe reload protocol and owner checks
         run: npm exec -- vitest run src/runtime/windows-reload.test.ts src/runtime/live-reload.test.ts
+      - name: Verify startup prewarm and GUI latency measurement contracts
+        run: npm exec -- vitest run src/tauri-ci-gui-cli-latency.test.ts
       - name: Test native Windows no-tunnel CLI start stop restart and PID ownership
         shell: pwsh
         run: ./scripts/test-windows-cli-lifecycle-isolated.ps1

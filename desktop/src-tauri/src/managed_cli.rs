@@ -1280,7 +1280,17 @@ mod tests {
             "cliSha256": sha256_file(&cli).unwrap()
         }).to_string()).unwrap();
         let cache = Mutex::new(None);
-        let initial = verified_manifest_cached_with(&dir, &cache).unwrap();
+        // Startup prewarm and the first GUI command may arrive concurrently.
+        // All callers must share one verified, write-denying cache.
+        let parallel = std::thread::scope(|scope| {
+            let workers = (0..4).map(|_| scope.spawn(|| {
+                verified_manifest_cached_with(&dir, &cache)
+            })).collect::<Vec<_>>();
+            workers.into_iter().map(|worker| worker.join().unwrap().unwrap())
+                .collect::<Vec<_>>()
+        });
+        let initial = parallel[0].clone();
+        assert!(parallel.iter().all(|value| value == &initial));
         let second = verified_manifest_cached_with(&dir, &cache).unwrap();
         assert_eq!(initial, second);
         for target in [&node, &cli, &manifest] {
@@ -1292,6 +1302,13 @@ mod tests {
         drop(cache);
         fs::write(&node, b"tampered").unwrap();
         assert!(verify_manifest(&dir).is_err());
+        // A rejected startup prewarm must not poison the cache. After the
+        // operator restores a valid bundle, a later request can verify it.
+        let retry_cache = Mutex::new(None);
+        assert!(verified_manifest_cached_with(&dir, &retry_cache).is_err());
+        fs::write(&node, b"test-node").unwrap();
+        assert!(verified_manifest_cached_with(&dir, &retry_cache).is_ok());
+        drop(retry_cache);
         fs::remove_dir_all(dir).unwrap();
     }
 

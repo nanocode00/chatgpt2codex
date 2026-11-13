@@ -10,6 +10,7 @@ const cli = read("src/cli.ts");
 const workflow = read(".github/workflows/tauri-desktop-smoke.yml");
 const script = read("scripts/measure-tauri-gui-cli-perf.ps1");
 const main = read("desktop/src/main.tsx");
+const nativeBootstrap = read("desktop/src-tauri/src/lib.rs");
 
 describe("CI measures real GUI, Rust bridge and CLI handler separately", () => {
   it("starts from the actual GUI WebView only under explicit CI flags", () => {
@@ -19,6 +20,22 @@ describe("CI measures real GUI, Rust bridge and CLI handler separately", () => {
     expect(rustSink).toContain('cfg!(all(debug_assertions, target_os = "windows"))');
     expect(rustSink).toContain('std::env::var("C2C_CI_PERF_RUN")');
     expect(rustSink).toContain('std::env::var_os("C2C_CI_PERF_OUTPUT")');
+  });
+
+  it("warms and seals the bundle at native process startup, not on first GUI request", () => {
+    expect(nativeBootstrap).toContain("tauri::async_runtime::spawn_blocking(|| {");
+    expect(nativeBootstrap).toContain("managed_cli::verify_preview_bundle().is_ok()");
+    expect(nativeBootstrap).toContain("ci_perf::record_bundle_prewarm(");
+    expect(nativeBootstrap).toContain("ci_perf::ci_perf_prewarm");
+    expect(gui).toContain('invoke<PrewarmResult | null>("ci_perf_prewarm")');
+    expect(gui).toContain("await requireStartupBundlePrewarm()");
+    expect(rustSink).toContain("PREWARM_RESULT");
+    expect(rustSink).toContain("schema_version: 2");
+    expect(rustSink).toContain("s.bundle_verify_ms > 1_000.0");
+    expect(runtimeBridge).toContain("Startup prewarm and the first GUI command may arrive concurrently");
+    expect(runtimeBridge).toContain("A rejected startup prewarm must not poison the cache");
+    expect(script).toContain("$report.schemaVersion -ne 2");
+    expect(script).toContain("Native startup bundle prewarm:");
   });
 
   it("collects five runs for three harmless read-only operations with no CLI outputs", () => {
