@@ -17,6 +17,7 @@ on:
       - "scripts/test-tauri-nsis-isolated.ps1"
       - "scripts/test-tauri-nsis-upgrade-isolated.ps1"
       - "scripts/test-windows-cli-lifecycle-isolated.ps1"
+      - "scripts/measure-tauri-gui-cli-perf.ps1"
       - "scripts/windows-cli-commands.ps1"
       - "scripts/test-windows-cli-commands-isolated.ps1"
       - "scripts/test-windows-cli-lifecycle-isolated.ps1"
@@ -46,6 +47,8 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci --prefix desktop --no-audit --no-fund
       - name: Typecheck and build React UI
+        env:
+          VITE_C2C_CI_PERF: "1"
         run: npm run desktop:build
       - name: Install and build audited C2C Node CLI
         shell: pwsh
@@ -128,7 +131,23 @@ jobs:
           C2C_F4C2_E2E: "true"
         run: cargo test --manifest-path desktop/src-tauri/Cargo.toml --lib cutover_file_fixture -- --nocapture
       - name: Build unsigned Windows desktop preview (no installation)
+        env:
+          VITE_C2C_CI_PERF: "1"
         run: npm --prefix desktop run tauri:build -- --debug --no-bundle
+      - name: Benchmark actual Windows GUI / bridge / CLI times
+        shell: pwsh
+        env:
+          C2C_CI_PERF_RUN: "1"
+          C2C_CI_PERF_OUTPUT: ${{ runner.temp }}\c2c-gui-cli-benchmark.json
+        run: ./scripts/measure-tauri-gui-cli-perf.ps1
+      - name: Upload per-run GUI / bridge / CLI timing JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: c2c-gui-cli-latency-results
+          path: ${{ runner.temp }}/c2c-gui-cli-benchmark.json
+          if-no-files-found: warn
+          retention-days: 7
       - name: Verify Windows GUI subsystem (no console window)
         shell: pwsh
         run: |

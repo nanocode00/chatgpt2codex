@@ -34,6 +34,10 @@ pub struct CliParityResponse {
     json: Option<Value>,
     text: Option<String>,
     note: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bridge_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cli_ms: Option<u64>,
 }
 
 struct CommandPlan {
@@ -291,6 +295,7 @@ fn execute(request: CliParityRequest) -> Result<CliParityResponse, String> {
     let started = Instant::now();
     let p = plan(&request)?;
     let raw = managed_cli::parity_cli(&p.args, p.mutating, p.require_record, p.text, p.allow_nonzero)?;
+    let cli_ms = managed_cli::take_ci_cli_handler_ms();
     let (json, text) = if p.text {
         (None, Some(redacted_text(&raw)))
     } else {
@@ -306,6 +311,8 @@ fn execute(request: CliParityRequest) -> Result<CliParityResponse, String> {
         operation: request.operation, command: format!("c2c {args_preview}"), json, text,
         note: format!("검증된 C2C CLI 호출 · 브리지 포함 {}ms · 앱 전용 HOME",
             started.elapsed().as_millis()),
+        bridge_ms: Some(started.elapsed().as_secs_f64() * 1000.0),
+        cli_ms,
     })
 }
 
@@ -468,6 +475,7 @@ pub async fn run_owned_cli_console(input: String, confirmed: bool) -> Result<Cli
             operation: "help".into(), command: check.command,
             json: None, text: Some(CONSOLE_HELP.into()),
             note: "로컬 문법 안내 · CLI 프로세스 실행 없음".into(),
+            bridge_ms: None, cli_ms: None,
         }),
         ConsoleAction::Managed(action) => {
             // Keep all start/stop/restart ownership checks on the existing
@@ -479,6 +487,7 @@ pub async fn run_owned_cli_console(input: String, confirmed: bool) -> Result<Cli
                 operation: check.operation, command: check.command,
                 json: Some(redact_json(json, 0)), text: None,
                 note: "소유권 검사된 Tauri MCP 관리 작업".into(),
+                bridge_ms: None, cli_ms: None,
             })
         }
         ConsoleAction::Parity(request) =>
