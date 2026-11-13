@@ -198,7 +198,7 @@
 - [x] 5. 연결·보안 — 사용자 Windows 검수 완료(2026-11-11): 실제 MCP 시작·중지, 토큰 재발급 후 복사, 3개 고정 버튼/재발급 확인창/접힘 보안 안내 피드백 반영. 화면 동결 (PR #99는 스택 Draft 유지)
 - [ ] 6. 진단·복구 — Draft PR #100 구현, 자동 CI 및 Windows Preview 수동 검수 대기
 - [ ] 7. 설정 — Tauri 전용 UI 구현 완료(브랜치 `feat/tauri-unified-settings-screen`), 기존 WinForms 전환/백업/Dry-run 화면 제거, CI·Windows 수동 검수 대기
-- [ ] 8. 고급 기능
+- [ ] 8. 고급 기능 — 기존 CLI 대응표 화면을 명령 입력·검사·실행·결과·세션 기록 중심 CLI 콘솔로 교체(브랜치 `feat/tauri-cli-console`), Windows 빌드/수동 검수 대기. 네이티브 허용 명령만 실행하고 임의 셸 명령은 제외
 - [ ] 전체 WinForms → Tauri 데이터/설치 이관 및 운영 전환 검증
 
 이 문서의 체크박스는 실제 완료 근거(해당 화면 PR·테스트·사용자 확인) 없이는 완료로 바꾸지 않는다.

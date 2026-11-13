@@ -201,29 +201,6 @@ button:focus-visible,input:focus-visible{outline:2px solid #999;outline-offset:2
 .legacy-token-notice strong{font-size:12px;color:#eee}
 .legacy-token-notice p{font-size:11px;line-height:1.8;color:#d3bcad;margin:8px 0 13px}
 
-/* F5-E: typed isolated CLI parity panels. */
-.cli-parity-panel{display:flex;flex-direction:column;gap:18px;min-width:0}
-.cli-parity-tabs{display:flex;gap:8px;margin:14px 0 22px;flex-wrap:wrap}
-.cli-parity-tab{display:flex;flex-direction:column;gap:6px;text-align:left;border:1px solid #414141;background:#242424;color:#c8c8c8;border-radius:9px;padding:12px 15px;min-width:155px;flex:1}
-.cli-parity-tab.selected{background:#343635;color:#f5f5f5;border-color:#687a6c}
-.cli-parity-tab strong{font-size:12px}
-.cli-parity-tab small{font-size:10px;color:#9d9d9d}
-.cli-parity-section{display:flex;flex-direction:column;gap:13px;margin-top:7px;min-width:0}
-.cli-parity-section .legacy-actions{flex-wrap:wrap;gap:8px}
-.cli-profile-list{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:9px}
-.cli-profile-list li{display:flex;align-items:center;gap:9px;padding:5px 12px;background:#262626;border:1px solid #3c3c3c;border-radius:9px}
-.cli-profile-list small{color:#aaa;font-size:10px}
-.cli-parity-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:13px}
-.cli-parity-fields label{font-size:11px;color:#bcbcbc;display:flex;flex-direction:column;gap:7px;min-width:0}
-.cli-parity-fields .legacy-field{width:100%}
-.cli-parity-output{padding:14px 15px;border-radius:9px;background:#1b1c1b;border:1px solid #424242;min-width:0}
-.cli-parity-output strong{font-size:12px;color:#c4e7d0;overflow-wrap:anywhere}
-.cli-parity-output pre{margin:9px 0 0;max-height:380px;overflow:auto;color:#d0d0d0;font-size:11px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}
-.cli-parity-matrix{display:grid;grid-template-columns:repeat(auto-fit,minmax(225px,1fr));gap:9px}
-.cli-parity-matrix span{display:flex;flex-direction:column;gap:7px;padding:11px 13px;background:#242524;border:1px solid #393b39;border-radius:8px;min-width:0}
-.cli-parity-matrix strong{font-size:11px;line-height:1.5;overflow-wrap:anywhere}
-.cli-parity-matrix small{font-size:10px;color:#999;line-height:1.5}
-
 /* Unified dashboard only: neutralize the legacy mint online indicators. Other screens are rebuilt later. */
 .shell:has(.dashboard-root) .tiny-led.glow,
 .shell:has(.dashboard-root) .host-dot.connected {

@@ -311,3 +311,18 @@ backup/restore rehearsal and cutover dry-run controls have been removed from
 Settings. Their historical design notes remain in `docs/` for reference only;
 they are not available as actions in this UI. Existing legacy WinForms/default
 state is neither modified nor removed by the new Settings screen.
+
+## CLI console
+
+The CLI screen provides a single-line C2C command editor, native syntax
+validation, execution results, and in-memory history (up to 25 commands).
+`c2c help` lists supported syntax. Read-only commands are displayed without
+confirmation; actions that change server/settings/job state require explicit
+approval.
+
+This is intentionally **not** a CMD, PowerShell, or arbitrary command
+execution bridge. Only known C2C CLI grammar can select an existing native
+audited operation; unsupported commands, other instances, shell operators,
+secret edits, and high-risk process/lock operations are rejected. Port
+changes remain in Settings. See
+[CLI console Windows review](../docs/TAURI_CLI_CONSOLE_WINDOWS_REVIEW.md).
