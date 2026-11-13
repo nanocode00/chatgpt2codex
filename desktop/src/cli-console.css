@@ -1,0 +1,54 @@
+.cli-console{display:flex;flex-direction:column;gap:16px;min-width:0;max-width:1250px}
+.cli-console .panel{min-width:0;background:#202020;border:1px solid #353535;border-radius:14px}
+.cli-console-editor{padding:23px}
+.cli-console-title{display:flex;align-items:center;gap:11px;margin-bottom:21px}
+.cli-console-title svg{color:#bcbcbc}
+.cli-console-title h2,.cli-console-section-head h2{font-size:14px;margin:0;font-weight:650;color:#eee}
+.cli-console-title>span{font-size:10px;color:#aaa;border:1px solid #484848;padding:4px 8px;border-radius:6px;margin-left:auto}
+.cli-console-editor>label{font-size:11px;font-weight:600;color:#ccc}
+.cli-console-input-row{display:flex;align-items:center;gap:12px;background:#151515;border:1px solid #505050;border-radius:10px;padding:0 14px;margin-top:9px}
+.cli-console-input-row:focus-within{border-color:#929292}
+.cli-console-input-row>span{font-family:ui-monospace,Consolas,monospace;color:#aaa;font-size:17px}
+.cli-console-input-row>input{flex:1;width:100%;min-width:0;color:#f0f0f0;background:transparent;border:0;outline:0;padding:15px 0;font-size:13px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+.cli-console-status{display:flex;align-items:center;min-height:29px;margin-top:9px;font-size:11px;color:#a9a9a9;line-height:1.5;overflow-wrap:anywhere}
+.cli-console-status span{display:flex;align-items:flex-start;gap:6px}
+.cli-console-status svg{flex:0 0 auto;margin-top:1px}
+.cli-console-valid{color:#91bda0}
+.cli-console-invalid{color:#e1a19d}
+.cli-console-normalized{margin:1px 0 9px;color:#a9a9a9;font-size:11px;overflow-wrap:anywhere}
+.cli-console-normalized code{color:#dedede;font-size:11px}
+.cli-console-buttons{display:flex;align-items:center;gap:9px;margin-top:7px;flex-wrap:wrap}
+.cli-console-buttons .secondary-btn{min-height:39px}
+.cli-console-run{background:#414141!important;color:#fff!important;border-color:#595959!important;display:inline-flex;align-items:center;gap:7px}
+.cli-console-buttons>span{margin-left:auto;font-size:10px;color:#8d8d8d}
+.cli-console-examples{border-top:1px solid #363636;margin-top:20px;padding-top:17px}
+.cli-console-examples strong{display:block;color:#c9c9c9;font-size:11px;margin-bottom:11px}
+.cli-console-examples>div{display:flex;gap:7px;flex-wrap:wrap}
+.cli-console-example{border:1px solid #454545;background:#2d2d2d;color:#d1d1d1;border-radius:8px;font-size:11px;padding:7px 11px;cursor:pointer}
+.cli-console-example:hover:not(:disabled){background:#393939}
+.cli-console-example:disabled{opacity:.5;cursor:not-allowed}
+.cli-console-workspace{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(230px,1fr);gap:16px;align-items:start}
+.cli-console-result,.cli-console-history{min-height:280px;overflow:hidden}
+.cli-console-section-head{display:flex;justify-content:space-between;gap:10px;align-items:center;min-height:65px;padding:13px 20px;border-bottom:1px solid #343434}
+.cli-console-section-head>span{font-size:10px;color:#888}
+.cli-console-section-head .secondary-btn{display:flex;align-items:center;gap:7px}
+.cli-console-empty{color:#8d8d8d;font-size:12px;padding:24px 20px}
+.cli-console-result-meta{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:15px 19px 8px}
+.cli-console-result-meta code{color:#e0e0e0;font-size:12px;overflow-wrap:anywhere;flex:1;min-width:110px}
+.cli-console-result-meta>span{font-size:10px;color:#aaa}
+.cli-console-result-meta .cli-console-succeeded{color:#92bba0}
+.cli-console-result-meta .cli-console-failed{color:#d9a09b}
+.cli-console-output{font-size:12px;line-height:1.6;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;overflow:auto;max-height:450px;min-height:130px;background:#171717;margin:8px 18px 16px;padding:16px;border:1px solid #353535;border-radius:9px;color:#dedede}
+.cli-console-note{font-size:10px;color:#8c8c8c;padding:0 19px 17px}
+.cli-console-history-items{max-height:490px;overflow:auto;padding:8px}
+.cli-console-history-item{width:100%;min-width:0;display:flex;gap:8px;align-items:center;text-align:left;border:1px solid transparent;border-radius:8px;background:transparent;color:#c7c7c7;padding:11px 9px;cursor:pointer}
+.cli-console-history-item:hover{background:#292929}
+.cli-console-history-item.selected{background:#323232;border-color:#454545}
+.cli-console-history-item>svg{flex:none;color:#93ae9b}
+.cli-console-history-item:has(svg.lucide-circle-x)>svg{color:#c29e99}
+.cli-console-history-item>span{font-family:ui-monospace,Consolas,monospace;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}
+.cli-console-history-item>small{font-size:9px;color:#888;display:flex;align-items:center;gap:4px;white-space:nowrap}
+.cli-console-footnote{font-size:11px;color:#909090;line-height:1.8;padding:0 2px}
+.cli-console-footnote code{color:#c8c8c8}
+@media(max-width:980px){.cli-console-workspace{grid-template-columns:1fr}.cli-console-history{min-height:150px}.cli-console-history-items{max-height:200px}}
+@media(max-width:620px){.cli-console-editor{padding:17px}.cli-console-buttons>span{width:100%;margin-left:0}.cli-console-section-head{padding:12px 15px}.cli-console-output{margin:8px 12px 14px}}

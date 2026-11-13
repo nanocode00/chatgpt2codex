@@ -10,7 +10,7 @@ import { SettingsScreen } from "./SettingsScreen";
 import { DiagnosticsScreen } from "./DiagnosticsScreen";
 import { ConnectionsSecurityScreen } from "./ConnectionsSecurityScreen";
 import { OwnerTokenRotationDialog } from "./OwnerTokenRotationDialog";
-import { CliParityPanel } from "./CliParityPanel";
+import { CliConsole } from "./CliConsole";
 import { Dashboard } from "./Dashboard";
 import { ProjectsScreen } from "./ProjectsScreen";
 import { ProfilesScreen } from "./ProfilesScreen";
@@ -579,8 +579,11 @@ function App() {
         />}
 
         {screen === "cli" && <>
-          <div className="page-heading"><div><div className="eyebrow">CLI PARITY</div><h1>고급 CLI</h1><p>실행 환경은 전용 화면에서 관리합니다. 이곳에서는 설정·진단·고급 조회만 제공합니다.</p></div></div>
-          <CliParityPanel />
+          <div className="page-heading"><div><h1>CLI 콘솔</h1><p>명령을 입력해 문법을 확인하고 실행 결과를 살펴보세요.</p></div></div>
+          <CliConsole onNotify={notify} onRuntimeChanged={() => {
+            void runOwnedAction("status");
+            void refreshCatalog();
+          }}/>
         </>}
 
         {screen === "connections" && <ConnectionsSecurityScreen

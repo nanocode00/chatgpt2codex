@@ -199,6 +199,7 @@ fn plan(r: &CliParityRequest) -> Result<CommandPlan, String> {
         "repository-show" => {
             args.extend(["repository".into(), "show".into(), target(&r.target)?.into()]);
         }
+        "repository-list" => args.extend(["repository".into(), "list".into()]),
         "secret-list" => {
             // Names only. No secret fetch/read command exists in the CLI.
             args.extend(["secret".into(), "list".into()]);
@@ -311,9 +312,230 @@ pub async fn run_owned_cli_parity(request: CliParityRequest) -> Result<CliParity
         .await.map_err(|_| "Tauri CLI 작업이 실패했습니다.".to_string())?
 }
 
+// A direct command editor can only select existing, audited native operations.
+// It never forwards raw arguments to a shell or a generic Node CLI executor.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CliConsoleCheck {
+    pub command: String,
+    pub operation: String,
+    pub mutating: bool,
+    pub note: String,
+}
+
+enum ConsoleAction {
+    Parity(CliParityRequest),
+    Managed(&'static str),
+    Help,
+}
+
+fn console_request(operation: &str) -> CliParityRequest {
+    CliParityRequest {
+        operation: operation.into(), alias: None, target: None, value: None,
+        key: None, compose_file: None, project_name: None, services: None,
+        control_services: None,
+    }
+}
+
+const CONSOLE_HELP: &str = "지원 명령:
+c2c status | health | doctor | ps
+c2c start | start --tunnel cloudflare | stop | restart | reload
+c2c logs --component server|tunnel
+c2c repository list | repository show <project-id>
+c2c profile list | profile show|test <alias>
+c2c job list | job status|logs|resume|cancel <loop-id>
+c2c config show|export | config set <host|tunnel> <value> | config unset <host|tunnel>
+c2c secret list | lock list | control list | control auto status
+c2c help
+
+인스턴스는 tauri-preview-v1로 고정됩니다. 포트는 설정 화면에서 변경합니다.
+그 외 위험 명령과 임의 셸 명령은 실행하지 않습니다.";
+
+fn parse_console_line(line: &str) -> Result<ConsoleAction, String> {
+    let input = line.trim();
+    if input.is_empty() { return Err("명령을 입력하세요. 예: c2c status".into()); }
+    if line.len() > 512 || line.chars().any(|c| c.is_control()) {
+        return Err("CLI 명령은 한 줄, 최대 512바이트여야 합니다.".into());
+    }
+    // No shell grammar (pipes, redirections, substitutions, chaining).
+    if input.chars().any(|c| matches!(c, ';' | '|' | '&' | '>' | '<' | '`' | '$' | '\\' | '\"' | '\'')) {
+        return Err("셸 연산자, 따옴표 및 이스케이프는 지원하지 않습니다. C2C 명령만 입력하세요.".into());
+    }
+    let mut words: Vec<&str> = input.split_whitespace().collect();
+    if words.first() == Some(&"c2c") { words.remove(0); }
+    // The UI always targets its own exact instance. Explicit mentions of any
+    // different instance are rejected instead of silently retargeting.
+    if let Some(index) = words.iter().position(|arg| *arg == "--instance") {
+        if words.get(index + 1) != Some(&INSTANCE)
+            || words.iter().filter(|arg| **arg == "--instance").count() != 1 {
+            return Err("--instance는 tauri-preview-v1만 지정할 수 있습니다.".into());
+        }
+        words.drain(index..index + 2);
+    }
+    if words.is_empty() { return Err("명령 동사가 없습니다. c2c help를 입력하세요.".into()); }
+    if matches!(words.as_slice(), ["help"] | ["--help"]) { return Ok(ConsoleAction::Help); }
+    let request = match words.as_slice() {
+        ["start"] => return Ok(ConsoleAction::Managed("start")),
+        ["start", "--tunnel", "cloudflare"] => return Ok(ConsoleAction::Managed("start-public")),
+        ["stop"] => return Ok(ConsoleAction::Managed("stop")),
+        ["restart"] => return Ok(ConsoleAction::Managed("restart")),
+        ["status"] | ["ps"] => console_request("status"),
+        ["health"] => console_request("health"),
+        ["doctor"] => console_request("doctor"),
+        ["reload"] => console_request("reload"),
+        ["logs", "--component", "server"] | ["logs", "--component", "server", "--lines", "80"] =>
+            console_request("logs-server"),
+        ["logs", "--component", "tunnel"] | ["logs", "--component", "tunnel", "--lines", "80"] =>
+            console_request("logs-tunnel"),
+        ["repository", "list"] => console_request("repository-list"),
+        ["repository", "show", _] => {
+            let mut r = console_request("repository-show");
+            r.target = Some(words[2].into()); r
+        }
+        ["profile", "list"] => console_request("profile-list"),
+        ["profile", "show" | "test", _] => {
+            let mut r = console_request(if words[1] == "show" { "profile-show" } else { "profile-test" });
+            r.alias = Some(words[2].into()); r
+        }
+        ["job", "list"] => console_request("job-list"),
+        ["job", "status" | "logs" | "resume" | "cancel", _] |
+        ["job", "logs", _, "--limit", "10"] => {
+            let mut r = console_request(&format!("job-{}", words[1]));
+            r.target = Some(words[2].into()); r
+        }
+        ["config", "show"] => console_request("config-show"),
+        ["config", "export"] => console_request("config-export"),
+        ["config", "set", _, _] => {
+            let mut r = console_request("config-set");
+            r.key = Some(words[2].into()); r.value = Some(words[3].into()); r
+        }
+        ["config", "unset", _] => {
+            let mut r = console_request("config-unset"); r.key = Some(words[2].into()); r
+        }
+        ["secret", "list"] => console_request("secret-list"),
+        ["lock", "list"] => console_request("lock-list"),
+        ["control", "list"] => console_request("control-list"),
+        ["control", "auto", "status"] => console_request("control-auto-status"),
+        _ => return Err("지원하지 않는 명령 또는 인자입니다. c2c help에서 사용 가능한 문법을 확인하세요.".into()),
+    };
+    // Require the exact same native field validation as the button-driven UI.
+    plan(&request)?;
+    Ok(ConsoleAction::Parity(request))
+}
+
+fn check_console_action(action: &ConsoleAction) -> Result<CliConsoleCheck, String> {
+    match action {
+        ConsoleAction::Help => Ok(CliConsoleCheck {
+            command: "c2c help".into(), operation: "help".into(),
+            mutating: false, note: "지원 명령 목록 표시".into(),
+        }),
+        ConsoleAction::Managed(action) => Ok(CliConsoleCheck {
+            command: if *action == "start-public" { "c2c start --tunnel cloudflare" } else {
+                match *action { "start" => "c2c start", "stop" => "c2c stop", _ => "c2c restart" }
+            }.into(),
+            operation: (*action).into(), mutating: true,
+            note: "실행 전 확인 필요 · 서버 상태 변경".into(),
+        }),
+        ConsoleAction::Parity(request) => {
+            let command = plan(request)?;
+            Ok(CliConsoleCheck {
+                command: format!("c2c {}", command.args.join(" ")),
+                operation: request.operation.clone(), mutating: command.mutating,
+                note: if command.mutating { "실행 전 확인 필요 · 설정 또는 상태 변경" }
+                    else { "읽기 전용 명령" }.into(),
+            })
+        }
+    }
+}
+
+#[tauri::command]
+pub fn check_owned_cli_console(input: String) -> Result<CliConsoleCheck, String> {
+    check_console_action(&parse_console_line(&input)?)
+}
+
+#[tauri::command]
+pub async fn run_owned_cli_console(input: String, confirmed: bool) -> Result<CliParityResponse, String> {
+    let action = parse_console_line(&input)?;
+    let check = check_console_action(&action)?;
+    if check.mutating && !confirmed {
+        return Err("서버·설정 변경 명령은 실행 전 확인이 필요합니다.".into());
+    }
+    match action {
+        ConsoleAction::Help => Ok(CliParityResponse {
+            operation: "help".into(), command: check.command,
+            json: None, text: Some(CONSOLE_HELP.into()),
+            note: "로컬 문법 안내 · CLI 프로세스 실행 없음".into(),
+        }),
+        ConsoleAction::Managed(action) => {
+            // Keep all start/stop/restart ownership checks on the existing
+            // dedicated management path. Never forward raw argv.
+            let result = managed_cli::manage_owned_cli(action.into()).await?;
+            let json = serde_json::to_value(result)
+                .map_err(|_| "서버 상태를 출력할 수 없습니다.".to_string())?;
+            Ok(CliParityResponse {
+                operation: check.operation, command: check.command,
+                json: Some(redact_json(json, 0)), text: None,
+                note: "소유권 검사된 Tauri MCP 관리 작업".into(),
+            })
+        }
+        ConsoleAction::Parity(request) =>
+            tauri::async_runtime::spawn_blocking(move || execute(request))
+                .await.map_err(|_| "CLI 콘솔 실행을 완료하지 못했습니다.".to_string())?,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cli_console_accepts_known_syntax_and_preserves_owned_instance() {
+        for (input, operation, mutating) in [
+            ("c2c status", "status", false),
+            ("status --instance tauri-preview-v1", "status", false),
+            ("c2c ps", "status", false),
+            ("c2c repository list", "repository-list", false),
+            ("c2c repository show demo", "repository-show", false),
+            ("c2c profile show local", "profile-show", false),
+            ("c2c job logs loop-safe.1 --limit 10", "job-logs", false),
+            ("c2c logs --component server", "logs-server", false),
+            ("c2c logs --instance tauri-preview-v1 --component tunnel --lines 80", "logs-tunnel", false),
+            ("c2c control auto status", "control-auto-status", false),
+            ("c2c reload", "reload", true),
+            ("c2c config set tunnel none", "config-set", true),
+            ("c2c job cancel loop-safe.1", "job-cancel", true),
+            ("c2c start", "start", true),
+            ("c2c start --tunnel cloudflare", "start-public", true),
+            ("c2c stop", "stop", true),
+            ("c2c restart", "restart", true),
+            ("c2c help", "help", false),
+        ] {
+            let checked = check_owned_cli_console(input.into()).unwrap();
+            assert_eq!(checked.operation, operation, "{input}");
+            assert_eq!(checked.mutating, mutating, "{input}");
+            assert!(checked.command.starts_with("c2c "));
+        }
+    }
+
+    #[test]
+    fn cli_console_rejects_shell_syntax_foreign_instances_and_high_risk_commands() {
+        for input in [
+            "", "c2c", "ls", "dir", "c2c status && whoami",
+            "c2c status | powershell", "c2c status > output.txt",
+            "c2c status; c2c stop", "c2c status\necho hello",
+            "c2c status --instance default",
+            "c2c status --instance tauri-preview-v1 --instance tauri-preview-v1",
+            "c2c serve --http", "c2c init",
+            "c2c config set port 31337", "c2c secret set token value",
+            "c2c control kill 123", "c2c lock release 123",
+            "c2c job resume project-id", "c2c job logs loop-abc --limit 9999",
+            "c2c logs --component server --lines 1000000",
+            "c2c repository show ../../secret",
+            "c2c profile show --help",
+        ] {
+            assert!(check_owned_cli_console(input.into()).is_err(), "input: {input}");
+        }
+    }
 
     fn request(operation: &str) -> CliParityRequest {
         CliParityRequest {

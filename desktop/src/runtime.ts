@@ -199,3 +199,22 @@ export async function runOwnedCliParity(request: OwnedCliParityRequest): Promise
   if (!isNativeApp()) throw new Error("CLI 작업은 Windows Tauri 프리뷰에서만 지원합니다.");
   return invoke<OwnedCliParityResponse>("run_owned_cli_parity", { request });
 }
+
+export interface CliConsoleCheck {
+  command: string;
+  operation: string;
+  mutating: boolean;
+  note: string;
+}
+
+/** Validate a single C2C command using the exact native allowlist. Does not execute it. */
+export async function checkOwnedCliConsole(input: string): Promise<CliConsoleCheck> {
+  if (!isNativeApp()) throw new Error("CLI 문법 검사는 Windows Tauri 앱에서만 지원합니다.");
+  return invoke<CliConsoleCheck>("check_owned_cli_console", { input });
+}
+
+/** Runs only the CLI grammar validated by the native parser; never a shell. */
+export async function runOwnedCliConsole(input: string, confirmed: boolean): Promise<OwnedCliParityResponse> {
+  if (!isNativeApp()) throw new Error("CLI 명령은 Windows Tauri 앱에서만 실행할 수 있습니다.");
+  return invoke<OwnedCliParityResponse>("run_owned_cli_console", { input, confirmed });
+}
