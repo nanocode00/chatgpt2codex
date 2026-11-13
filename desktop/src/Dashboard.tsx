@@ -58,7 +58,7 @@ export function Dashboard({
   // Off: persisted choice for the next start. On: truthful live Cloudflare state.
   const publicEnabled = running ? owned?.tunnelRunning === true : publicPreferred;
   const readyToStart = native && !ownedBusy && owned?.available === true && owned.ready && !running;
-  const localEndpoint = "http://127.0.0.1:18797/mcp";
+  const localEndpoint = "http://127.0.0.1:" + (owned?.port ?? 7979) + "/mcp";
   const canCopyPublic = running && owned?.tunnelRunning === true && !!owned.publicConnector;
   const hasProjects = catalog?.available === true;
   const canToggle = native && !ownedBusy && owned?.available === true && owned.tunnelCapable;
@@ -97,7 +97,7 @@ export function Dashboard({
         <div className="dash-runtime-name">
           <p>Tauri 전용 런타임</p>
           <h2 id="dash-runtime-title">ChatGPT To Codex MCP</h2>
-          <span>tauri-preview-v1 · 127.0.0.1:18797</span>
+          <span>tauri-preview-v1 · 127.0.0.1:{owned?.port ?? 7979}</span>
         </div>
         <span className={"dash-state dash-state-" + runtimeState} role="status">
           <span className="dash-led" />{runtimeLabel.label}
@@ -122,7 +122,7 @@ export function Dashboard({
           상세 관리 <ArrowRight size={15}/>
         </button>
       </div>
-      <div className="dash-boundary"><ShieldCheck size={15}/> 현재 화면은 Tauri 전용 서버만 조작합니다. 기존 WinForms default:7979는 변경하지 않습니다.</div>
+      <div className="dash-boundary"><ShieldCheck size={15}/> 서버 제어는 현재 앱이 소유한 MCP 인스턴스에만 적용됩니다.</div>
     </section>
 
     <div className="dash-status-grid">

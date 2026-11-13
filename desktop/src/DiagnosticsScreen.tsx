@@ -73,7 +73,7 @@ export function DiagnosticsScreen({
     } finally { setBusy(null); }
   }
 
-  // This screen is mounted only while selected. Never query legacy/default:7979.
+  // This screen is mounted only while selected. Only query the owned CLI instance.
   useEffect(() => {
     if (!native) return;
     let active = true;
@@ -180,7 +180,7 @@ export function DiagnosticsScreen({
     </header>
 
     <div className="diag-summary" aria-label="진단 요약">
-      <div><HeartPulse size={19}/><strong>{localLabel}</strong><span>로컬 MCP · 127.0.0.1:18797</span></div>
+      <div><HeartPulse size={19}/><strong>{localLabel}</strong><span>로컬 MCP · 127.0.0.1:{owned?.port ?? 7979}</span></div>
       <div><Cloud size={19}/><strong>{publicLabel}</strong><span>Quick Tunnel · HTTPS (OAuth 별도)</span></div>
       <div><LockKeyhole size={19}/><strong>{lockLabel}</strong><span>Tauri 격리 HOME · 수동 잠금 조회</span></div>
     </div>
@@ -190,7 +190,7 @@ export function DiagnosticsScreen({
       <div><strong>일부 상태를 확인하지 못했습니다.</strong>
         <p>{snapshotError || ownedError}</p>
         {ownedError && snapshotError && <p>{ownedError.slice(0, 340)}</p>}
-        <p>소유권 검사를 우회하거나 기존 WinForms 인스턴스를 종료하지 않습니다.</p>
+        <p>서버 소유권을 확인하지 못하면 조작하지 않습니다.</p>
       </div>
     </div>}
 
@@ -231,7 +231,7 @@ export function DiagnosticsScreen({
         <div className="diag-output">
           <pre>{doctor ?? (busy === "doctor" ? "Doctor 실행 중..." : "진단 실행을 누르면 결과가 표시됩니다.")}</pre>
         </div>
-        <p className="diag-note">Doctor의 일반 CLI 기본값(7979)은 Tauri MCP 실제 포트가 아니므로 결과에서 제외합니다.</p>
+        <p className="diag-note">서버 실제 수신 포트는 설정 화면에서 확인하고 변경할 수 있습니다.</p>
       </section>
 
       <section className="diag-panel" aria-labelledby="diag-logs">
@@ -322,7 +322,7 @@ export function DiagnosticsScreen({
     </div>}
 
     <div className="diag-footer"><ShieldCheck size={16}/>
-      이 화면은 Tauri 전용 격리 HOME만 진단합니다. 기존 WinForms/default:7979와 인증정보는 변경하지 않습니다.
+      이 화면은 앱이 소유한 MCP만 진단합니다. 상태 조회는 인증정보를 변경하지 않습니다.
     </div>
   </div>;
 }

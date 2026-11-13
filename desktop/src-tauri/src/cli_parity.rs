@@ -170,17 +170,17 @@ fn plan(r: &CliParityRequest) -> Result<CommandPlan, String> {
             // audited launcher. Do not offer a generic config editor that can
             // move this server or activate a named/tunnel-token mode.
             let key = field(&r.key, "설정 키")?;
-            if !matches!(key, "host" | "port" | "tunnel") {
-                return Err("고정 프리뷰에서 변경할 수 있는 키는 host, port, tunnel뿐입니다. 나머지는 전용 CLI에서 관리하세요.".into());
+            if !matches!(key, "host" | "tunnel") {
+                return Err("서버 포트는 설정 화면에서 변경하세요. 고급 CLI에서는 host와 tunnel만 지원합니다.".into());
             }
             args.extend(["config".into(), if r.operation == "config-set" { "set" } else { "unset" }.into(), key.into()]);
             if r.operation == "config-set" {
                 let v = field(&r.value, "설정 값")?;
                 let valid = matches!((key, v),
-                    ("host", "127.0.0.1") | ("port", "18797") |
+                    ("host", "127.0.0.1") |
                     ("tunnel", "none") | ("tunnel", "cloudflare"));
                 if !valid {
-                    return Err("고정 Tauri 인스턴스의 호스트/포트는 변경할 수 없고, 터널은 none/cloudflare만 가능합니다.".into());
+                    return Err("Tauri 인스턴스의 호스트는 변경할 수 없고, 터널은 none/cloudflare만 가능합니다.".into());
                 }
                 args.push(v.into());
             }
@@ -301,7 +301,7 @@ fn execute(request: CliParityRequest) -> Result<CliParityResponse, String> {
     }).collect::<Vec<_>>().join(" ");
     Ok(CliParityResponse {
         operation: request.operation, command: format!("c2c {args_preview}"), json, text,
-        note: "SHA 검증된 번들 CLI · tauri-preview-v1 · 격리 HOME (기존 WinForms와 분리)".into(),
+        note: "SHA 검증된 번들 CLI · tauri-preview-v1 · 앱 전용 HOME".into(),
     })
 }
 
@@ -378,7 +378,7 @@ mod tests {
         r.value = Some("7979".into());
         assert!(plan(&r).is_err());
         r.value = Some("18797".into());
-        assert!(plan(&r).is_ok());
+        assert!(plan(&r).is_err());
         r.key = Some("tunnel".into());
         r.value = Some("evil".into());
         assert!(plan(&r).is_err());

@@ -10,7 +10,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const INSTANCE: &str = "tauri-preview-v1";
-const PORT: u16 = 18797;
+const DEFAULT_PORT: u16 = 7979;
+// An earlier Tauri-owned process can still have this port until restarted.
+const PREVIOUS_PORT: u16 = 18797;
 const MANIFEST_KIND: &str = "c2c-tauri-isolated-owned-cli-v1";
 const MAX_OUTPUT: usize = 128 * 1024;
 static MUTATION_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -57,9 +59,42 @@ struct Payload {
     cloudflared: Option<PathBuf>,
 }
 
+fn port_file(root: &Payload) -> PathBuf {
+    root.home.join(".config").join("desktop-port.txt")
+}
+
+fn configured_port(root: &Payload) -> Result<u16, String> {
+    let file = port_file(root);
+    match fs::symlink_metadata(&file) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(DEFAULT_PORT),
+        Err(_) => return Err("서버 포트 설정을 확인할 수 없습니다.".into()),
+        Ok(meta) if !meta.is_file() || meta.file_type().is_symlink() || meta.len() > 5 => {
+            return Err("저장된 서버 포트 설정이 유효하지 않습니다.".into());
+        }
+        Ok(_) => {}
+    }
+    let raw = fs::read_to_string(file).map_err(|_| "서버 포트 설정을 읽지 못했습니다.")?;
+    if raw.is_empty() || raw.starts_with('0') || !raw.bytes().all(|c| c.is_ascii_digit()) {
+        return Err("저장된 서버 포트는 1~65535 범위여야 합니다.".into());
+    }
+    let port = raw.parse::<u16>().map_err(|_| "저장된 서버 포트가 범위를 벗어납니다.")?;
+    if port == 0 { return Err("서버 포트는 1~65535 범위여야 합니다.".into()); }
+    Ok(port)
+}
+
+fn persist_port(root: &Payload, port: u16) -> Result<(), String> {
+    if port == 0 { return Err("서버 포트는 1~65535 범위여야 합니다.".into()); }
+    let file = port_file(root);
+    if fs::symlink_metadata(&file).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        return Err("서버 포트 설정 경로가 심볼릭 링크여서 저장하지 않습니다.".into());
+    }
+    fs::write(file, port.to_string())
+        .map_err(|_| "서버 포트 설정을 저장하지 못했습니다.".into())
+}
+
 fn response(available: bool, ready: bool, running: bool, details: impl Into<String>) -> ManagedResult {
     ManagedResult {
-        available, ready, running, instance: INSTANCE, port: PORT,
+        available, ready, running, instance: INSTANCE, port: DEFAULT_PORT,
         details: details.into(), one_time_owner_token: None,
         tunnel_capable: false, tunnel_running: false, token_copy_available: false, public_connector: None,
     }
@@ -171,9 +206,12 @@ fn expected_record(root: &Payload, record: &serde_json::Value) -> bool {
         owned_workspace.as_ref() == Some(observed) ||
             previous_workspace.as_ref() == Some(observed)
     });
+    let active_port = record["port"].as_u64().and_then(|n| u16::try_from(n).ok()).unwrap_or(0);
+    let expected_port = configured_port(root).ok();
+    let port_owned = active_port != 0 && (Some(active_port) == expected_port || active_port == PREVIOUS_PORT);
     let no_tunnel = record["tunnelMode"] == "none" &&
         record["tunnelPid"].is_null() &&
-        record["publicUrl"] == format!("http://127.0.0.1:{PORT}");
+        record["publicUrl"] == format!("http://127.0.0.1:{active_port}");
     let quick_tunnel = root.cloudflared.is_some() && record["tunnelMode"] == "cloudflare" &&
         record["tunnelPid"].as_u64().is_some_and(|pid| pid > 0) &&
         record["publicUrl"].as_str().is_some_and(|origin| {
@@ -187,7 +225,7 @@ fn expected_record(root: &Payload, record: &serde_json::Value) -> bool {
         });
     expected_cli.is_some() && expected_cli == observed_cli &&
         workspace_owned &&
-        record["name"] == INSTANCE && record["port"] == PORT &&
+        record["name"] == INSTANCE && port_owned &&
         record["host"] == "127.0.0.1" && (no_tunnel || quick_tunnel)
 }
 
@@ -201,7 +239,9 @@ fn record_if_any(root: &Payload) -> Result<Option<serde_json::Value>, String> {
                 // record before 'c2c start' merges tunnel ownership metadata.
                 // Never accept that partial record as authority to stop, rotate
                 // or control a process: merely provide actionable diagnostics.
-                if v["name"] == INSTANCE && v["port"] == PORT &&
+                if v["name"] == INSTANCE &&
+                    (v["port"].as_u64() == Some(u64::from(configured_port(root)?)) ||
+                     v["port"].as_u64() == Some(u64::from(PREVIOUS_PORT))) &&
                     v.get("tunnelMode").is_none() {
                     return Err("전용 MCP 시작 기록이 미완성입니다(tunnelMode 누락). 인스턴스 PID, 로컬 Health, Cloudflare 프로세스를 확인하세요. 안전한 소유권 확인 전 기록을 수정·삭제하거나 프로세스를 종료하지 않습니다.".into());
                 }
@@ -304,7 +344,7 @@ pub(crate) fn parity_cli(args: &[String], mutating: bool, needs_owned_runtime: b
     if needs_owned_runtime && owned_record.is_none() {
         return Err("Tauri 전용 MCP가 실행 중이 아닙니다. 재로드는 실행 중인 전용 서버에만 허용됩니다.".into());
     }
-    if mutating && port_occupied() && owned_record.is_none() {
+    if mutating && port_occupied(configured_port(&root)?) && owned_record.is_none() {
         return Err("전용 포트를 외부 프로세스가 사용 중입니다. CLI 설정 변경을 거부합니다.".into());
     }
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -420,7 +460,7 @@ pub(crate) fn register_picked_repository(folder: &Path, id: &str, name: &str) ->
     ensure_workspace(&root)?;
     // The canonical CLI 'repository add' can live-reload its own catalogs;
     // forbid running/stale owned runtime records so registration is inert.
-    if record_if_any(&root)?.is_some() || port_occupied() {
+    if record_if_any(&root)?.is_some() || port_occupied(configured_port(&root)?) {
         return Err("전용 서버가 실행 중이거나 인스턴스 기록이 있습니다. 정상 종료 후 다시 시도하세요.".into());
     }
 
@@ -505,8 +545,8 @@ fn unregister_repository(root: &Payload, id: &str) -> Result<(), String> {
     ensure_workspace(root)?;
     // Even a stale runtime record must block deletion. We never stop or
     // restart a process, and never touch default:7979 or its config files.
-    if record_if_any(root)?.is_some() || port_occupied() {
-        return Err("전용 인스턴스 기록 또는 18797 포트 사용이 감지됐습니다. 정상 종료한 뒤 목록 제거를 진행하세요.".into());
+    if record_if_any(root)?.is_some() || port_occupied(configured_port(root)?) {
+        return Err("서버 포트가 사용 중이거나 인스턴스 기록이 남아 있습니다. 정상 종료한 뒤 목록 제거를 진행하세요.".into());
     }
     let catalog = cli_command(root, &["repository", "list"], Duration::from_secs(12))?;
     let repositories = catalog["repositories"].as_array()
@@ -576,9 +616,9 @@ fn owner_configured(root: &Payload) -> Result<bool, String> {
     value["configured"].as_bool().ok_or("토큰 설정 상태를 읽지 못했습니다.".into())
 }
 
-fn port_occupied() -> bool {
+fn port_occupied(port: u16) -> bool {
     TcpStream::connect_timeout(
-        &SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), PORT),
+        &SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port),
         Duration::from_millis(250),
     ).is_ok()
 }
@@ -617,8 +657,10 @@ fn status(root: &Payload) -> Result<ManagedResult, String> {
     } else if !ready {
         "독립된 Tauri 인스턴스를 사용하려면 먼저 준비 버튼을 눌러 토큰을 생성하세요."
     } else {
-        "전용 인스턴스가 중지돼 있습니다. WinForms 서버는 별도로 유지됩니다."
+        "MCP 서버가 중지돼 있습니다."
     });
+    result.port = record.as_ref().and_then(|r| r["port"].as_u64())
+        .and_then(|n| u16::try_from(n).ok()).unwrap_or(configured_port(root)?);
     result.tunnel_capable = root.cloudflared.is_some();
     result.token_copy_available = ready && crate::owner_token_vault::available(&root.home);
     result.tunnel_running = tunnel_running;
@@ -638,6 +680,103 @@ pub(crate) fn owned_public_connector() -> Result<Option<String>, String> {
     }
 }
 
+fn start_owned_at_port(root: &Payload, port: u16, public_start: bool) -> Result<(), String> {
+    if port_occupied(port) {
+        return Err(format!("포트 {port}이(가) 이미 사용 중입니다. 다른 프로세스는 종료하지 않습니다."));
+    }
+    if public_start && root.cloudflared.is_none() {
+        return Err("검증된 Cloudflare Quick Tunnel 번들이 없습니다.".into());
+    }
+    clear_startup_repository_preference(root)?;
+    let tunnel_mode = if public_start { "cloudflare" } else { "none" };
+    let port_text = port.to_string();
+    let args = ["start", "--instance", INSTANCE,
+        "--workspace", root.workspace.to_str().ok_or("유효하지 않은 경로입니다.")?,
+        "--host", "127.0.0.1", "--port", port_text.as_str(), "--tunnel", tunnel_mode];
+    let started = cli_command(root, &args,
+        Duration::from_secs(if public_start { 100 } else { 35 }))?;
+    if started["started"] != true || started["healthy"] != true ||
+        started["port"].as_u64() != Some(u64::from(port)) {
+        return Err("CLI의 시작 및 Health 확인에 실패했습니다.".into());
+    }
+    if record_if_any(root)?.as_ref()
+        .and_then(|r| r["port"].as_u64()) != Some(u64::from(port)) {
+        return Err("시작됐지만 요청한 포트의 인스턴스 소유권 기록을 확인하지 못했습니다.".into());
+    }
+    Ok(())
+}
+
+fn configure_owned_port(next: u16) -> Result<ManagedResult, String> {
+    if next == 0 { return Err("포트는 1~65535 사이의 정수여야 합니다.".into()); }
+    let root = payload()?;
+    ensure_workspace(&root)?;
+    let lock = MUTATION_LOCK.get_or_init(|| Mutex::new(()));
+    let _guard = lock.lock().map_err(|_| "서버 포트 변경 잠금을 획득하지 못했습니다.")?;
+    let previous_setting = configured_port(&root)?;
+    let record = record_if_any(&root)?;
+    let previous_runtime_port = record.as_ref()
+        .and_then(|r| r["port"].as_u64()).and_then(|n| u16::try_from(n).ok())
+        .unwrap_or(previous_setting);
+    if previous_setting == next && previous_runtime_port == next { return status(&root); }
+    if port_occupied(next) && next != previous_runtime_port {
+        return Err(format!("포트 {next}이(가) 이미 사용 중입니다. 다른 서비스는 종료하지 않습니다."));
+    }
+    let public_start = record.as_ref().is_some_and(|r| r["tunnelMode"] == "cloudflare");
+    if record.is_some() {
+        let current = cli_command(&root, &["status", "--instance", INSTANCE], Duration::from_secs(10))?;
+        if current["alive"] != true || current["healthy"] != true {
+            return Err("서버 기록이 있지만 정상 실행 중으로 확인되지 않아 포트를 변경하지 않습니다.".into());
+        }
+        let stopped = cli_command(&root, &["stop", "--instance", INSTANCE], Duration::from_secs(30))?;
+        if stopped["stopped"] != true || stopped["instance"] != INSTANCE {
+            return Err("기존 서버의 정상 중지를 확인하지 못해 포트를 변경하지 않았습니다.".into());
+        }
+        if record_if_any(&root)?.is_some() {
+            return Err("이전 서버의 인스턴스 기록이 남아 있어 포트를 변경하지 않았습니다.".into());
+        }
+    }
+    if let Err(error) = persist_port(&root, next) {
+        if record.is_some() {
+            let _ = start_owned_at_port(&root, previous_runtime_port, public_start);
+        }
+        return Err(error);
+    }
+    if record.is_some() {
+        if let Err(error) = start_owned_at_port(&root, next, public_start) {
+            // The CLI may have started a process before reporting an error.
+            // Never attempt to launch the old port while a new listener or
+            // even a partial ownership record could remain alive.
+            let residual = match record_if_any(&root) {
+                Ok(Some(_)) => true,
+                Ok(None) => port_occupied(next),
+                Err(_) => true,
+            };
+            if residual {
+                return Err(format!(
+                    "새 포트 {next}의 시작 확인에 실패했고 실행 기록이나 포트 점유가 남아 있습니다: {error}. +                     안전을 위해 설정을 유지했으니 서버 상태를 점검하세요."
+                ));
+            }
+            let rollback_config = persist_port(&root, previous_setting);
+            let rollback_start = if rollback_config.is_ok() {
+                start_owned_at_port(&root, previous_runtime_port, public_start)
+            } else {
+                Err("이전 포트 설정을 복원하지 못했습니다.".into())
+            };
+            return match rollback_start {
+                Ok(()) => Err(format!("포트 변경에 실패하여 이전 서버를 복구했습니다: {error}")),
+                Err(recovery) => Err(format!("포트 변경 실패: {error}; 이전 서버 복구에도 실패했습니다: {recovery}")),
+            };
+        }
+    }
+    status(&root)
+}
+
+#[tauri::command]
+pub async fn set_owned_port(port: u16) -> Result<ManagedResult, String> {
+    tauri::async_runtime::spawn_blocking(move || configure_owned_port(port))
+        .await.map_err(|_| "포트 변경 작업을 완료하지 못했습니다.".to_string())?
+}
+
 fn operate(root: Payload, action: &str) -> Result<ManagedResult, String> {
     ensure_workspace(&root)?;
     let lock = MUTATION_LOCK.get_or_init(|| Mutex::new(()));
@@ -653,6 +792,7 @@ fn operate(root: Payload, action: &str) -> Result<ManagedResult, String> {
                 .ok_or("CLI가 새 토큰을 반환하지 않았습니다.")?;
             let mut value = response(true, true, false,
                 "전용 Owner Token을 생성했습니다. 한 번만 보여주므로 안전하게 보관하세요.");
+            value.port = configured_port(&root)?;
             // The canonical CLI persists only SHA-256; the optional DPAPI vault
             // allows safe later copying without reissuing a token.
             value.token_copy_available = crate::owner_token_vault::store(&root.home, token).is_ok();
@@ -667,7 +807,7 @@ fn operate(root: Payload, action: &str) -> Result<ManagedResult, String> {
             if !owner_configured(&root)? {
                 return Err("기존 Owner Token이 없습니다. 전용 인스턴스 준비를 사용하세요.".into());
             }
-            rotation_preflight(record_if_any(&root)?.is_some(), port_occupied())?;
+            rotation_preflight(record_if_any(&root)?.is_some(), port_occupied(configured_port(&root)?))?;
             // Only the isolated preview HOME. The CLI never returns the
             // previous token; --rotate stores the new hash and invalidates
             // previously approved OAuth clients. No process is restarted.
@@ -681,6 +821,7 @@ fn operate(root: Payload, action: &str) -> Result<ManagedResult, String> {
             }
             let mut value = response(true, true, false,
                 "Tauri 전용 Owner Token을 재발급했습니다. 기존 OAuth 승인은 무효화됐으며 ChatGPT를 다시 연결해야 합니다.");
+            value.port = configured_port(&root)?;
             // The canonical CLI persists only SHA-256; the optional DPAPI vault
             // allows safe later copying without reissuing a token.
             value.token_copy_available = crate::owner_token_vault::store(&root.home, token).is_ok();
@@ -724,31 +865,10 @@ fn operate(root: Payload, action: &str) -> Result<ManagedResult, String> {
                 }
             }
             if action == "start" || action == "start-public" || action == "restart" {
-                if port_occupied() {
-                    return Err("Tauri 전용 포트 18797이 사용 중입니다. 다른 프로세스는 종료하지 않습니다.".into());
-                }
-                // Start always in a fixed, owned workspace. Registered projects
-                // are independently loaded by the CLI catalog and addressed
-                // through projectId, without a GUI "default project".
-                clear_startup_repository_preference(&root)?;
                 let was_public = action == "restart" && record.as_ref().is_some_and(|v|
                     v["tunnelMode"] == "cloudflare");
-                let public_start = action == "start-public" || was_public;
-                if public_start && root.cloudflared.is_none() {
-                    return Err("검증된 Cloudflare Quick Tunnel 번들이 없습니다.".into());
-                }
-                let tunnel_mode = if public_start { "cloudflare" } else { "none" };
-                let args = ["start", "--instance", INSTANCE,
-                    "--workspace", root.workspace.to_str().ok_or("유효하지 않은 경로입니다.")?,
-                    "--host", "127.0.0.1", "--port", "18797", "--tunnel", tunnel_mode];
-                let started = cli_command(&root, &args,
-                    Duration::from_secs(if public_start { 100 } else { 35 }))?;
-                if started["started"] != true || started["healthy"] != true {
-                    return Err("CLI의 시작 및 Health 확인에 실패했습니다.".into());
-                }
-                if record_if_any(&root)?.is_none() {
-                    return Err("시작됐지만 인스턴스 소유권 기록을 확인하지 못했습니다.".into());
-                }
+                start_owned_at_port(&root, configured_port(&root)?,
+                    action == "start-public" || was_public)?;
             }
             status(&root)
         }
@@ -760,7 +880,7 @@ fn operate(root: Payload, action: &str) -> Result<ManagedResult, String> {
 /// process listening on the preview port belongs to this application.
 fn exit_without_record_preflight(port_busy: bool) -> Result<(), &'static str> {
     if port_busy {
-        Err("Tauri 전용 포트 18797에 다른 프로세스가 남아 있습니다. 소유권 기록이 없어 자동 종료하지 않습니다.")
+        Err("서버 포트에 다른 프로세스가 남아 있습니다. 소유권 기록이 없어 자동 종료하지 않습니다.")
     } else {
         Ok(())
     }
@@ -774,8 +894,11 @@ pub(crate) fn stop_owned_for_complete_exit() -> Result<(), String> {
     ensure_workspace(&root)?;
     let lock = MUTATION_LOCK.get_or_init(|| Mutex::new(()));
     let _guard = lock.lock().map_err(|_| "CLI 제어 잠금에 실패했습니다.")?;
-    if record_if_any(&root)?.is_none() {
-        return exit_without_record_preflight(port_occupied()).map_err(str::to_owned);
+    let record = record_if_any(&root)?;
+    let active_port = record.as_ref().and_then(|r| r["port"].as_u64())
+        .and_then(|n| u16::try_from(n).ok()).unwrap_or(configured_port(&root)?);
+    if record.is_none() {
+        return exit_without_record_preflight(port_occupied(active_port)).map_err(str::to_owned);
     }
     let result = cli_command(
         &root, &["stop", "--instance", INSTANCE], Duration::from_secs(30)
@@ -789,10 +912,10 @@ pub(crate) fn stop_owned_for_complete_exit() -> Result<(), String> {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let record_exists = record_if_any(&root)?.is_some();
-        let busy = port_occupied();
+        let busy = port_occupied(active_port);
         if !record_exists && !busy { return Ok(()); }
         if Instant::now() >= deadline {
-            return Err("전용 MCP 종료 후에도 18797 포트나 인스턴스 기록이 남았습니다. 앱을 유지하고 상태를 확인하세요.".into());
+            return Err(format!("MCP 종료 후에도 포트 {active_port} 또는 인스턴스 기록이 남았습니다. 앱을 유지하고 상태를 확인하세요."));
         }
         thread::sleep(Duration::from_millis(100));
     }
@@ -847,6 +970,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn saved_port_defaults_to_7979_and_rejects_invalid_config() {
+        let base = std::env::temp_dir().join(format!(
+            "c2c-owned-port-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let root = Payload {
+            node: base.join("node.exe"), cli: base.join("cli.js"),
+            home: base.join("home"), workspace: base.join("workspace"), cloudflared: None,
+        };
+        fs::create_dir_all(root.home.join(".config")).unwrap();
+        assert_eq!(configured_port(&root).unwrap(), 7979);
+        persist_port(&root, 18181).unwrap();
+        assert_eq!(configured_port(&root).unwrap(), 18181);
+        assert!(persist_port(&root, 0).is_err());
+        fs::write(port_file(&root), "65536").unwrap();
+        assert!(configured_port(&root).is_err());
+        fs::write(port_file(&root), "abc").unwrap();
+        assert!(configured_port(&root).is_err());
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
     fn complete_exit_never_claims_unknown_process_on_preview_port() {
         assert!(exit_without_record_preflight(false).is_ok());
         assert!(exit_without_record_preflight(true).is_err());
@@ -884,7 +1031,7 @@ mod tests {
         let mut record = serde_json::json!({
             "entrypoint": cli.to_string_lossy().to_string(),
             "workspace": workspace.to_string_lossy().to_string(),
-            "name": INSTANCE, "port": PORT, "host": "127.0.0.1",
+            "name": INSTANCE, "port": DEFAULT_PORT, "host": "127.0.0.1",
             "tunnelMode": "cloudflare", "tunnelPid": 123456,
             "publicUrl": "https://safety-test.trycloudflare.com",
             "tunnelLogPath": tunnel_log.to_string_lossy().to_string()
@@ -920,8 +1067,8 @@ mod tests {
     }
 
     #[test]
-    fn preview_uses_a_port_separate_from_winforms() {
-        assert_ne!(PORT, 7979);
+    fn default_port_is_7979_without_claiming_unknown_processes() {
+        assert_eq!(DEFAULT_PORT, 7979);
         assert_eq!(INSTANCE, "tauri-preview-v1");
     }
 

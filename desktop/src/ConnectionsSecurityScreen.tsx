@@ -50,7 +50,7 @@ export function ConnectionsSecurityScreen({
   const [tokenBusy, setTokenBusy] = useState(false);
   const [tokenError, setTokenError] = useState("");
   const [securityExpanded, setSecurityExpanded] = useState(false);
-  const endpoint = "http://127.0.0.1:" + (owned?.port ?? 18797) + "/mcp";
+  const endpoint = "http://127.0.0.1:" + (owned?.port ?? 7979) + "/mcp";
   const publicValue = exposed ? owned?.publicConnector ?? "" : "";
   const publicStatus =
     exposed ? publicChecking || publicState === "unchecked" ? "외부 HTTPS 확인 중" :
@@ -273,8 +273,7 @@ export function ConnectionsSecurityScreen({
           {securityExpanded && <div id="connections-security-details" className="connections-guidance-details">
             <p>토큰 재발급은 <strong>기존 Tauri 전용 OAuth 승인</strong>을 무효화합니다.
               변경 전 MCP를 중지하고, 재발급 후 ChatGPT에서 다시 연결해야 합니다.</p>
-            <p>복사 기능은 이 Windows 사용자 계정에 묶인 DPAPI 암호화 보관소만 사용합니다.
-              기존 WinForms/default:7979의 토큰을 조회하거나 수정하지 않습니다.</p>
+            <p>복사 기능은 현재 Windows 사용자 계정에 묶인 DPAPI 암호화 보관소만 사용합니다.</p>
             <p>토큰을 클립보드에 복사하면 다른 앱에서 붙여넣을 수 있으므로 사용 후 클립보드를 정리하세요.</p>
           </div>}
         </div>
@@ -300,8 +299,7 @@ export function ConnectionsSecurityScreen({
       </section>
     </div>
     <div className="connections-boundary">
-      <ShieldCheck size={16}/> 이 화면은 Tauri 전용 MCP·토큰·Quick Tunnel만 조작합니다.
-      과거 WinForms/default:7979 상태는 별도 이관 검증 전까지 변경하지 않습니다.
+      <ShieldCheck size={16}/> 이 화면은 현재 앱의 MCP·토큰·Quick Tunnel 연결만 관리합니다.
     </div>
   </div>;
 }

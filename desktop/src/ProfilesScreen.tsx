@@ -475,8 +475,7 @@ export function ProfilesScreen({
       </div>
     </div>
     <div className="profiles-boundary"><ShieldCheck size={16}/>
-      Python·Docker 프로필은 독립적으로 관리합니다. 이 화면은 Tauri 전용 CLI만 사용하며,
-      기존 WinForms/7979 설정과 실제 개발 환경은 변경하지 않습니다.
+      Python·Docker 프로필은 독립적으로 관리합니다. 실제 Python 및 Docker 설치 환경을 제거하지 않습니다.
     </div>
   </div>;
 }

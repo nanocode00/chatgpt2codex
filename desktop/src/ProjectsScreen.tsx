@@ -267,7 +267,7 @@ export function ProjectsScreen({
       </section>
     </div>
     <footer className="projects-boundary"><ShieldCheck size={15}/>
-      Tauri 전용 프로젝트 목록입니다. WinForms default:7979의 프로젝트 및 인증정보는 변경하지 않습니다.
+      등록 해제는 목록에서만 제거하며 로컬 프로젝트 폴더와 인증정보는 삭제하지 않습니다.
     </footer>
   </div>;
 }
