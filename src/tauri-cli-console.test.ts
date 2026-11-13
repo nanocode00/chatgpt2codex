@@ -22,6 +22,14 @@ describe("Tauri CLI console: native syntax guard and interactive UI", () => {
     expect(screen).toContain("sessionHistory = next");
     expect(screen).not.toContain("localStorage.setItem");
     expect(screen).toContain('event.key === "ArrowUp"');
+    expect(screen).toContain('event.key === "ArrowDown"');
+    expect(screen).toContain('historyCursor.current = Math.min(historyCursor.current + 1, history.length - 1)');
+    expect(screen).toContain('historyCursor.current -= 1');
+    expect(screen).toContain('historyDraft.current');
+    const css = readFileSync("desktop/src/cli-console.css", "utf8");
+    expect(css).toContain(".cli-console-workspace{display:flex;flex-direction:column");
+    expect(css).toContain("max-height:246px;overflow-y:auto");
+    expect(css).toContain(".cli-console-history-item{height:46px");
     expect(existsSync("desktop/src/CliParityPanel.tsx")).toBe(false);
   });
 
@@ -42,7 +50,13 @@ describe("Tauri CLI console: native syntax guard and interactive UI", () => {
 
   it("requires explicit confirmation for mutating commands, masks output and preserves refusal errors", () => {
     expect(native).toContain("if check.mutating && !confirmed");
-    expect(screen).toContain("checked.mutating && !window.confirm");
+    expect(screen).toContain("if (checked.mutating)");
+    expect(screen).toContain("setPending({ command, checked })");
+    expect(screen).toContain('role="dialog" aria-modal="true"');
+    expect(screen).toContain("onClick={() => setPending(null)}");
+    expect(screen).toContain('event.key === "Escape"');
+    expect(screen).toContain("void runChecked(action.command, action.checked)");
+    expect(screen).not.toContain("window.confirm");
     expect(screen).toContain("runOwnedCliConsole(command, checked.mutating)");
     expect(native).toContain("redact_json(json, 0)");
     expect(native).toContain("redacted_text(&raw)");
@@ -51,5 +65,19 @@ describe("Tauri CLI console: native syntax guard and interactive UI", () => {
     expect(screen).toContain("await navigator.clipboard.writeText");
     expect(native).toContain('c2c status && whoami');
     expect(native).toContain('c2c status --instance default');
+  });
+
+  it("offers a responsive running indicator and a fixed-path fast log reader", () => {
+    const managed = readFileSync("desktop/src-tauri/src/managed_cli.rs", "utf8");
+    expect(screen).toContain("CLI 실행 중 · {(elapsedMs / 1000).toFixed(1)}초");
+    expect(screen).toContain("window.setInterval");
+    expect(native).toContain('"tauri-preview-v1.server.log"');
+    expect(native).toContain('"tauri-preview-v1.cloudflared.log"');
+    expect(native).toContain("fn local_log_tail(log_directory: &Path, component: &str)");
+    expect(native).toContain("fast_console_logs(");
+    expect(native).toContain("redacted_text(tail)");
+    expect(managed).toContain("Sha256::new()");
+    expect(managed).toContain("256 * 1024");
+    expect(managed).toContain("Duration::from_millis(20)");
   });
 });

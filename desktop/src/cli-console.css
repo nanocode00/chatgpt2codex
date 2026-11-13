@@ -13,6 +13,9 @@
 .cli-console-status{display:flex;align-items:center;min-height:29px;margin-top:9px;font-size:11px;color:#a9a9a9;line-height:1.5;overflow-wrap:anywhere}
 .cli-console-status span{display:flex;align-items:flex-start;gap:6px}
 .cli-console-status svg{flex:0 0 auto;margin-top:1px}
+.cli-console-running{color:#c6c6c6}
+.cli-console-running svg{animation:cli-console-spin 1s linear infinite}
+@keyframes cli-console-spin{to{transform:rotate(360deg)}}
 .cli-console-valid{color:#91bda0}
 .cli-console-invalid{color:#e1a19d}
 .cli-console-normalized{margin:1px 0 9px;color:#a9a9a9;font-size:11px;overflow-wrap:anywhere}
@@ -27,8 +30,9 @@
 .cli-console-example{border:1px solid #454545;background:#2d2d2d;color:#d1d1d1;border-radius:8px;font-size:11px;padding:7px 11px;cursor:pointer}
 .cli-console-example:hover:not(:disabled){background:#393939}
 .cli-console-example:disabled{opacity:.5;cursor:not-allowed}
-.cli-console-workspace{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(230px,1fr);gap:16px;align-items:start}
-.cli-console-result,.cli-console-history{min-height:280px;overflow:hidden}
+.cli-console-workspace{display:flex;flex-direction:column;gap:16px;min-width:0}
+.cli-console-result,.cli-console-history{min-width:0;overflow:hidden}
+.cli-console-result{min-height:250px}
 .cli-console-section-head{display:flex;justify-content:space-between;gap:10px;align-items:center;min-height:65px;padding:13px 20px;border-bottom:1px solid #343434}
 .cli-console-section-head>span{font-size:10px;color:#888}
 .cli-console-section-head .secondary-btn{display:flex;align-items:center;gap:7px}
@@ -40,8 +44,8 @@
 .cli-console-result-meta .cli-console-failed{color:#d9a09b}
 .cli-console-output{font-size:12px;line-height:1.6;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;overflow:auto;max-height:450px;min-height:130px;background:#171717;margin:8px 18px 16px;padding:16px;border:1px solid #353535;border-radius:9px;color:#dedede}
 .cli-console-note{font-size:10px;color:#8c8c8c;padding:0 19px 17px}
-.cli-console-history-items{max-height:490px;overflow:auto;padding:8px}
-.cli-console-history-item{width:100%;min-width:0;display:flex;gap:8px;align-items:center;text-align:left;border:1px solid transparent;border-radius:8px;background:transparent;color:#c7c7c7;padding:11px 9px;cursor:pointer}
+.cli-console-history-items{max-height:246px;overflow-y:auto;overflow-x:hidden;padding:8px}
+.cli-console-history-item{height:46px;width:100%;min-width:0;display:flex;gap:8px;align-items:center;text-align:left;border:1px solid transparent;border-radius:8px;background:transparent;color:#c7c7c7;padding:10px 9px;cursor:pointer}
 .cli-console-history-item:hover{background:#292929}
 .cli-console-history-item.selected{background:#323232;border-color:#454545}
 .cli-console-history-item>svg{flex:none;color:#93ae9b}
@@ -50,5 +54,11 @@
 .cli-console-history-item>small{font-size:9px;color:#888;display:flex;align-items:center;gap:4px;white-space:nowrap}
 .cli-console-footnote{font-size:11px;color:#909090;line-height:1.8;padding:0 2px}
 .cli-console-footnote code{color:#c8c8c8}
-@media(max-width:980px){.cli-console-workspace{grid-template-columns:1fr}.cli-console-history{min-height:150px}.cli-console-history-items{max-height:200px}}
+.cli-console-confirm-backdrop{position:fixed;inset:0;z-index:110;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.68);padding:20px}
+.cli-console-confirm{background:#262626;border:1px solid #505050;border-radius:14px;padding:23px;box-shadow:0 18px 48px rgba(0,0,0,.4);width:min(100%,440px);display:flex;flex-direction:column;gap:15px}
+.cli-console-confirm h2{font-size:16px;font-weight:650;color:#f0f0f0;margin:0}
+.cli-console-confirm p{font-size:12px;line-height:1.6;color:#c4c4c4;margin:0}
+.cli-console-confirm>code{display:block;padding:13px;background:#191919;border:1px solid #414141;border-radius:8px;color:#e7e7e7;overflow-wrap:anywhere;font-size:12px}
+.cli-console-confirm-actions{display:flex;justify-content:flex-end;gap:10px}
+.cli-console-confirm-actions .secondary-btn{min-width:84px;min-height:38px}
 @media(max-width:620px){.cli-console-editor{padding:17px}.cli-console-buttons>span{width:100%;margin-left:0}.cli-console-section-head{padding:12px 15px}.cli-console-output{margin:8px 12px 14px}}

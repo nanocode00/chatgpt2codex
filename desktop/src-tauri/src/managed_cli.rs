@@ -103,7 +103,9 @@ fn response(available: bool, ready: bool, running: bool, details: impl Into<Stri
 fn sha256_file(path: &Path) -> Result<String, String> {
     let mut file = fs::File::open(path).map_err(|_| "런타임 실행 파일을 열 수 없습니다.")?;
     let mut digest = Sha256::new();
-    let mut buffer = [0; 64 * 1024];
+    // Large verified binaries benefit from fewer read syscalls, especially
+    // on Windows; the SHA-256 integrity check remains identical.
+    let mut buffer = [0; 256 * 1024];
     loop {
         let len = file.read(&mut buffer).map_err(|_| "런타임 체크섬 검사에 실패했습니다.")?;
         if len == 0 { break; }
@@ -299,7 +301,7 @@ fn cli_output(root: &Payload, args: &[&str], timeout: Duration, allow_nonzero: b
     let status = loop {
         match child.try_wait() {
             Ok(Some(s)) => break Some(s),
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(80)),
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
             _ => break None,
         }
     };

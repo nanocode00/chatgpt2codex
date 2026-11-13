@@ -4,6 +4,8 @@
 //! Advanced destructive CLI commands deliberately remain CLI-only. Bounded job status transitions are separately validated.
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::fs;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Component, Path};
 
 use crate::managed_cli;
@@ -257,6 +259,54 @@ fn redacted_text(raw: &str) -> String {
     clean.chars().rev().take(16_384).collect::<String>().chars().rev().collect()
 }
 
+/// A fast, read-only equivalent of the canonical CLI log-tail command.
+/// Fixed filenames in the app's isolated HOME avoid launching another Node
+/// process and hashing the full runtime bundle just to display existing logs.
+fn local_log_tail(log_directory: &Path, component: &str) -> Result<String, String> {
+    let filename = match component {
+        "server" => "tauri-preview-v1.server.log",
+        "tunnel" => "tauri-preview-v1.cloudflared.log",
+        _ => return Err("서버 또는 터널 로그만 조회할 수 있습니다.".into()),
+    };
+    let path = log_directory.join(filename);
+    let meta = match fs::symlink_metadata(&path) {
+        Ok(meta) => meta,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(String::new()),
+        Err(_) => return Err("CLI 로그 파일을 확인할 수 없습니다.".into()),
+    };
+    if !meta.is_file() || meta.file_type().is_symlink() {
+        return Err("정상적인 로컬 로그 파일이 아닙니다.".into());
+    }
+    let mut file = fs::File::open(path).map_err(|_| "CLI 로그 파일을 읽을 수 없습니다.")?;
+    let length = file.metadata().map_err(|_| "CLI 로그 파일 크기를 확인할 수 없습니다.")?.len();
+    let start = length.saturating_sub(64 * 1024);
+    file.seek(SeekFrom::Start(start)).map_err(|_| "CLI 로그 위치를 찾지 못했습니다.")?;
+    let mut bytes = Vec::new();
+    file.take(64 * 1024).read_to_end(&mut bytes)
+        .map_err(|_| "CLI 로그 내용을 읽지 못했습니다.")?;
+    let decoded = String::from_utf8_lossy(&bytes);
+    let tail = if start > 0 {
+        decoded.split_once('\n').map(|(_, rest)| rest).unwrap_or("")
+    } else {
+        decoded.as_ref()
+    };
+    Ok(redacted_text(tail))
+}
+
+fn fast_console_logs(component: &str, check: CliConsoleCheck) -> Result<CliParityResponse, String> {
+    let local = std::env::var_os("LOCALAPPDATA")
+        .ok_or("Windows 로컬 데이터 경로를 확인할 수 없습니다.")?;
+    let directory = Path::new(&local).join("ChatGPTToCodex-Tauri-Preview")
+        .join("isolated-home").join(".local").join("share")
+        .join("chatgpt2codex").join("logs");
+    let output = local_log_tail(&directory, component)?;
+    Ok(CliParityResponse {
+        operation: check.operation, command: check.command,
+        json: None, text: Some(output),
+        note: "로컬 CLI 로그 · 고정 경로에서 최근 80줄 조회".into(),
+    })
+}
+
 // Keep structured CLI metadata bounded when showing it in the local WebView.
 // Some job/control records may carry user-provided text in nested fields.
 fn redact_json(value: Value, depth: usize) -> Value {
@@ -478,6 +528,13 @@ pub async fn run_owned_cli_console(input: String, confirmed: bool) -> Result<Cli
                 note: "소유권 검사된 Tauri MCP 관리 작업".into(),
             })
         }
+        ConsoleAction::Parity(request) if matches!(request.operation.as_str(), "logs-server" | "logs-tunnel") => {
+            // Logs are persistent even after stop removes the instance record.
+            // The CLI also reads this exact fixed file; avoid a Node cold start.
+            tauri::async_runtime::spawn_blocking(move || {
+                fast_console_logs(if request.operation == "logs-server" { "server" } else { "tunnel" }, check)
+            }).await.map_err(|_| "로그 조회를 완료하지 못했습니다.".to_string())?
+        }
         ConsoleAction::Parity(request) =>
             tauri::async_runtime::spawn_blocking(move || execute(request))
                 .await.map_err(|_| "CLI 콘솔 실행을 완료하지 못했습니다.".to_string())?,
@@ -487,6 +544,30 @@ pub async fn run_owned_cli_console(input: String, confirmed: bool) -> Result<Cli
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fast_log_tail_is_bounded_and_does_not_expose_secret_lines() {
+        let base = std::env::temp_dir().join(format!(
+            "c2c-console-logs-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        fs::create_dir_all(&base).unwrap();
+        assert_eq!(local_log_tail(&base, "server").unwrap(), "");
+        assert_eq!(local_log_tail(&base, "tunnel").unwrap(), "");
+        assert!(local_log_tail(&base, "other").is_err());
+        let mut lines = (0..100).map(|i| format!("line-{i}")).collect::<Vec<_>>();
+        lines.push("Authorization: Bearer secret123".into());
+        lines.push("done".into());
+        fs::write(base.join("tauri-preview-v1.server.log"), lines.join("\n")).unwrap();
+        let output = local_log_tail(&base, "server").unwrap();
+        assert!(!output.contains("line-0"));
+        assert!(output.contains("line-99"));
+        assert!(!output.contains("secret123"));
+        assert!(output.contains("done"));
+        fs::remove_dir_all(base).unwrap();
+    }
 
     #[test]
     fn cli_console_accepts_known_syntax_and_preserves_owned_instance() {

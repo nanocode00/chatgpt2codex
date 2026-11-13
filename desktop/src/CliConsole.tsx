@@ -26,6 +26,11 @@ interface HistoryEntry {
   error: string | null;
 }
 
+interface PendingCommand {
+  command: string;
+  checked: CliConsoleCheck;
+}
+
 // In-memory only: preserve console history when navigating between screens,
 // but never write commands or potentially sensitive output to disk.
 let sessionHistory: HistoryEntry[] = [];
@@ -52,14 +57,43 @@ export function CliConsole({ onNotify, onRuntimeChanged }: {
   const [validationError, setValidationError] = useState("");
   const [checking, setChecking] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [pending, setPending] = useState<PendingCommand | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>(() => sessionHistory);
   const [selectedId, setSelectedId] = useState<number | null>(() => sessionHistory[0]?.id ?? null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const historyCursor = useRef(-1);
+  const historyDraft = useRef(sessionDraft);
+  const runningSince = useRef(0);
   const selected = history.find(item => item.id === selectedId) ?? history[0] ?? null;
-  const updateInput = (command: string) => {
+  const updateInput = (command: string, browsingHistory = false) => {
+    if (!browsingHistory) {
+      historyCursor.current = -1;
+      historyDraft.current = command;
+    }
     sessionDraft = command;
     setInput(command);
   };
+
+  useEffect(() => {
+    if (!busy) return;
+    const ticker = window.setInterval(() => {
+      setElapsedMs(Math.round(performance.now() - runningSince.current));
+    }, 100);
+    return () => window.clearInterval(ticker);
+  }, [busy]);
+
+  useEffect(() => {
+    if (!pending) return;
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setPending(null);
+      }
+    };
+    window.addEventListener("keydown", onEscape);
+    return () => window.removeEventListener("keydown", onEscape);
+  }, [pending]);
 
   useEffect(() => {
     const current = input.trim();
@@ -101,7 +135,7 @@ export function CliConsole({ onNotify, onRuntimeChanged }: {
   }
 
   async function execute() {
-    if (!native || busy || !input.trim()) return;
+    if (!native || busy || pending || !input.trim()) return;
     const command = input.trim();
     let checked: CliConsoleCheck;
     try {
@@ -113,12 +147,18 @@ export function CliConsole({ onNotify, onRuntimeChanged }: {
       setValidationError(errorText(error));
       return;
     }
-    if (checked.mutating && !window.confirm(
-      `다음 CLI 명령을 실행할까요?\n\n${checked.command}\n\n서버 또는 설정 상태가 변경될 수 있습니다.`
-    )) return;
+    if (checked.mutating) {
+      setPending({ command, checked });
+      return;
+    }
+    await runChecked(command, checked);
+  }
 
+  async function runChecked(command: string, checked: CliConsoleCheck) {
     setBusy(true);
+    setElapsedMs(0);
     const started = performance.now();
+    runningSince.current = started;
     let result: OwnedCliParityResponse | null = null;
     let error: string | null = null;
     try {
@@ -141,6 +181,21 @@ export function CliConsole({ onNotify, onRuntimeChanged }: {
       setSelectedId(id);
       setBusy(false);
     }
+  }
+
+  function navigateHistory(direction: "up" | "down") {
+    if (history.length === 0 || busy || pending) return;
+    if (direction === "up") {
+      if (historyCursor.current === -1) historyDraft.current = input;
+      historyCursor.current = Math.min(historyCursor.current + 1, history.length - 1);
+    } else {
+      if (historyCursor.current === -1) return;
+      historyCursor.current -= 1;
+    }
+    const command = historyCursor.current === -1
+      ? historyDraft.current
+      : history[historyCursor.current].input;
+    updateInput(command, true);
   }
 
   function pickCommand(command: string) {
@@ -166,17 +221,19 @@ export function CliConsole({ onNotify, onRuntimeChanged }: {
         <span aria-hidden="true">$</span>
         <input id="cli-command-input" ref={inputRef} value={input} maxLength={512}
           autoComplete="off" spellCheck={false} placeholder="c2c status"
+          disabled={busy || pending !== null}
           onChange={event => updateInput(event.target.value)}
           onKeyDown={event => {
             if (event.key === "Enter" && !event.nativeEvent.isComposing) {
               event.preventDefault(); void execute();
-            } else if (event.key === "ArrowUp" && history.length > 0) {
-              event.preventDefault(); pickCommand(history[0].input);
+            } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+              event.preventDefault(); navigateHistory(event.key === "ArrowUp" ? "up" : "down");
             }
           }}/>
       </div>
       <div className="cli-console-status" aria-live="polite">
         {!native ? <span className="cli-console-invalid"><XCircle size={14}/> Windows 앱에서만 실행할 수 있습니다.</span> :
+        busy ? <span className="cli-console-running"><RefreshCcw size={14}/> CLI 실행 중 · {(elapsedMs / 1000).toFixed(1)}초</span> :
         !input.trim() ? <span>명령을 입력하세요.</span> :
         checking && !validation && !validationError ? <span><RefreshCcw size={14}/> 문법 검사 중…</span> :
         validation ? <span className="cli-console-valid"><CheckCircle2 size={14}/> 문법 확인 · {validation.note}</span> :
@@ -186,18 +243,18 @@ export function CliConsole({ onNotify, onRuntimeChanged }: {
         실제 실행: <code>{validation.command}</code>
       </p>}
       <div className="cli-console-buttons">
-        <button type="button" className="secondary-btn" disabled={!native || busy || checking || !input.trim()} onClick={() => { void checkNow(); }}>
+        <button type="button" className="secondary-btn" disabled={!native || busy || pending !== null || checking || !input.trim()} onClick={() => { void checkNow(); }}>
           문법 검사
         </button>
-        <button type="button" className="secondary-btn cli-console-run" disabled={!native || busy || !input.trim()} onClick={() => { void execute(); }}>
+        <button type="button" className="secondary-btn cli-console-run" disabled={!native || busy || pending !== null || !input.trim()} onClick={() => { void execute(); }}>
           <Play size={14}/> {busy ? "실행 중…" : "실행"}
         </button>
-        <span>Enter 실행 · ↑ 이전 명령</span>
+        <span>Enter 실행 · ↑/↓ 기록 탐색</span>
       </div>
       <div className="cli-console-examples">
         <strong>빠른 입력</strong>
         <div>{EXAMPLES.map(example => <button key={example.command} className="cli-console-example"
-          type="button" disabled={busy} title={example.command}
+          type="button" disabled={busy || pending !== null} title={example.command}
           onClick={() => pickCommand(example.command)}>{example.label}</button>)}</div>
       </div>
     </section>
@@ -244,5 +301,23 @@ export function CliConsole({ onNotify, onRuntimeChanged }: {
       검증된 C2C 명령만 실행합니다. 셸 연결·파일 리다이렉션 및 고위험 명령은 지원하지 않습니다.
       전체 지원 문법은 <code>c2c help</code>로 확인하세요.
     </p>
+    {pending && <div className="cli-console-confirm-backdrop">
+      <div className="cli-console-confirm" role="dialog" aria-modal="true"
+        aria-labelledby="cli-console-confirm-title" aria-describedby="cli-console-confirm-description">
+        <h2 id="cli-console-confirm-title">CLI 명령 실행 확인</h2>
+        <p id="cli-console-confirm-description">이 명령은 서버 또는 저장된 상태를 변경할 수 있습니다.</p>
+        <code>{pending.checked.command}</code>
+        <div className="cli-console-confirm-actions">
+          <button type="button" className="secondary-btn" autoFocus
+            onClick={() => setPending(null)}>취소</button>
+          <button type="button" className="secondary-btn cli-console-run"
+            onClick={() => {
+              const action = pending;
+              setPending(null);
+              void runChecked(action.command, action.checked);
+            }}>실행 확인</button>
+        </div>
+      </div>
+    </div>}
   </div>;
 }
