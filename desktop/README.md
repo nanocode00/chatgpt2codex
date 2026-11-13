@@ -211,8 +211,8 @@ diagnosis instead of risking a second process.
 
 - Native **Minimize** keeps the window in the taskbar.
 - The window **X** hides it to the tray and keeps the MCP/tunnel running.
-- Tray right-click **숨기기** leaves the app resident and MCP running;
-  double-click the tray icon to restore the window.
+- Tray right-click **창 열기** restores and focuses the window, without
+  interrupting the MCP. Double-clicking the tray icon also restores it.
 - Tray right-click **종료** and Settings **종료** both request an audited stop
   of the exact app-owned MCP and Quick Tunnel before removing the tray icon.
   A failed ownership/stop check keeps the app available for diagnosis.

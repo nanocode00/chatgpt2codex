@@ -11,7 +11,7 @@ describe("Tauri Settings screen isolation and user intent", () => {
     expect(app).not.toContain("<LegacySettingsControls");
     expect(screen).toContain("Windows 자동 시작");
     expect(screen).toContain("서버 포트 설정");
-    expect(screen).toContain("앱·트레이·종료");
+    expect(screen).toContain("창 및 종료");
     expect(css).toContain("grid-template-columns:repeat(2,minmax(0,1fr))");
     expect(css).toContain("grid-template-columns:1fr");
   });
@@ -19,7 +19,7 @@ describe("Tauri Settings screen isolation and user intent", () => {
   it("applies the actual owned MCP port, restarting the server when necessary", () => {
     const native = readFileSync("desktop/src-tauri/src/managed_cli.rs", "utf8");
     const runtime = readFileSync("desktop/src/runtime.ts", "utf8");
-    expect(screen).toContain("실제 MCP 서버의 수신 포트와 상태 확인 포트를 함께 변경합니다.");
+    expect(screen).toContain("MCP 수신 포트");
     expect(screen).toContain("포트 적용");
     expect(app).toContain("await setOwnedPort(next)");
     expect(app).not.toContain('localStorage.setItem("c2c.desktop.health-port"');
@@ -39,12 +39,24 @@ describe("Tauri Settings screen isolation and user intent", () => {
     expect(screen).not.toContain("onExitApp");
     expect(app).toContain("await closePreviewWithOwnedMcp()");
     expect(app).not.toContain("closePreviewWindow");
-    expect(tray).toContain('MENU_HIDE, "숨기기"');
+    expect(tray).toContain('MENU_SHOW, "창 열기"');
+    expect(tray).toContain("MENU_SHOW => restore_main(app)");
     expect(tray).toContain('MENU_QUIT, "종료"');
     expect(tray).toContain("close_preview_with_owned_mcp(handle.clone())");
     expect(tray).not.toContain("WindowEvent::Resized(");
     expect(tray).toContain("WindowEvent::CloseRequested { api, .. }");
     expect(screen).not.toContain("WinForms");
+  });
+
+  it("keeps the Settings page concise and shows successful port changes in a toast", () => {
+    expect(screen).not.toContain("settingsNotice");
+    expect(screen).not.toContain('className="form-ok"');
+    expect(screen).not.toContain("settings-bottom-note");
+    expect(screen).not.toContain("조회 결과:");
+    expect(screen).not.toContain("APP PREFERENCES");
+    expect(screen).toContain("휴대용 ZIP에서는 변경할 수 없습니다.");
+    expect(app).not.toContain("setSettingsNotice");
+    expect(app).toContain('notify(`MCP 서버 포트 변경 완료 · ${result.port}`)');
   });
 
   it("does not expose obsolete WinForms migration, backups, or cutover test controls", () => {

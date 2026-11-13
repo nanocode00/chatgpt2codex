@@ -74,7 +74,8 @@ describe("Tauri-owned connection and security screen", () => {
     expect(app).toContain('onNavigate={to => setScreen(to === "manage" ? "connections" : to)}');
     expect(app).toContain('onManageRuntime={() => setScreen("connections")}');
     const settings = readFileSync("desktop/src/SettingsScreen.tsx", "utf8");
-    expect(settings).toContain("종료 (완전 종료)");
+    expect(settings).toContain("창 및 종료");
+    expect(settings).toContain("MCP 서버·터널 종료");
     expect(settings).toContain("트레이로 숨기기");
   });
 

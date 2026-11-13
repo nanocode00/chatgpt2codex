@@ -86,7 +86,6 @@ function App() {
   const [unregisterError, setUnregisterError] = useState("");
   const [unregisterNotice, setUnregisterNotice] = useState("");
   const [settingError, setSettingError] = useState("");
-  const [settingsNotice, setSettingsNotice] = useState("");
   const [portBusy, setPortBusy] = useState(false);
   const [previewStartup, setPreviewStartup] = useState<PreviewStartupInspection | null>(null);
   const [startupBusy, setStartupBusy] = useState(false);
@@ -448,12 +447,11 @@ function App() {
     const next = parseUiPort(draftPort);
     if (next === null) {
       setSettingError("포트는 1부터 65535까지의 정수여야 합니다.");
-      setSettingsNotice("");
       return;
     }
     if (next === port) {
       setSettingError("");
-      setSettingsNotice("이미 적용된 서버 포트입니다.");
+      notify("이미 적용된 서버 포트입니다.");
       return;
     }
     if (owned?.running && !window.confirm(
@@ -462,14 +460,12 @@ function App() {
     setPortBusy(true);
     setOwnedBusy(true);
     setSettingError("");
-    setSettingsNotice("");
     try {
       const result = await setOwnedPort(next);
       setOwned(result);
       setOwnedPublicHealth(null);
       setPort(result.port);
       setDraftPort(String(result.port));
-      setSettingsNotice(`MCP 서버 포트를 ${result.port}(으)로 적용했습니다.`);
       notify(`MCP 서버 포트 변경 완료 · ${result.port}`);
     } catch (error) {
       setSettingError(nativeFailureMessage(error, "MCP 서버 포트 변경에 실패했습니다."));
@@ -619,11 +615,11 @@ function App() {
         {screen === "settings" && <SettingsScreen
           native={native} port={port} draftPort={draftPort} onDraftPort={setDraftPort}
           onSavePort={saveSettings} autoRefresh={autoRefresh} onAutoRefresh={toggleAutoRefresh}
-          monitorStatus={status} settingError={settingError} settingsNotice={settingsNotice}
+          settingError={settingError}
           previewStartup={previewStartup} startupBusy={startupBusy} startupError={startupError}
           onRefreshStartup={() => { void refreshPreviewStartup(); }}
           onToggleStartup={enable => { void togglePreviewStartup(enable); }}
-          portBusy={portBusy} ownedRunning={owned?.running === true}
+          portBusy={portBusy}
           exitBusy={exitBusy} ownedBusy={ownedBusy} exitError={exitError} trayError={trayError}
           onHide={() => { void hideToTray(); }}
           onExitAll={() => { void exitPreview(); }}

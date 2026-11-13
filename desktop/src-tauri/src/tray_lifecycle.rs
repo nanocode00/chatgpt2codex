@@ -7,7 +7,7 @@ use tauri::{
 };
 
 const MAIN_WINDOW: &str = "main";
-const MENU_HIDE: &str = "app-hide";
+const MENU_SHOW: &str = "app-show";
 const MENU_QUIT: &str = "app-quit";
 
 pub(crate) fn restore_main(app: &AppHandle) {
@@ -25,9 +25,9 @@ pub(crate) fn hide_main(app: &AppHandle) -> Result<(), String> {
 }
 
 pub(crate) fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
-    let hide = MenuItem::with_id(app, MENU_HIDE, "숨기기", true, None::<&str>)?;
+    let show = MenuItem::with_id(app, MENU_SHOW, "창 열기", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, MENU_QUIT, "종료", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&hide, &quit])?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
     let icon = app.default_window_icon().cloned()
         .ok_or_else(|| std::io::Error::other("missing Tauri preview tray icon"))?;
 
@@ -37,7 +37,7 @@ pub(crate) fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
-            MENU_HIDE => { let _ = hide_main(app); }
+            MENU_SHOW => restore_main(app),
             MENU_QUIT => {
                 let handle = app.clone();
                 tauri::async_runtime::spawn(async move {
@@ -80,8 +80,8 @@ mod tests {
 
     #[test]
     fn tray_action_ids_are_distinct_from_runtime_management() {
-        assert_ne!(MENU_HIDE, MENU_QUIT);
-        assert!(!MENU_HIDE.contains("stop"));
+        assert_ne!(MENU_SHOW, MENU_QUIT);
+        assert!(!MENU_SHOW.contains("stop"));
         assert!(!MENU_QUIT.contains("server"));
         assert_eq!(MAIN_WINDOW, "main");
     }
