@@ -8,6 +8,7 @@ on:
       - "src/runtime/public-start-health-policy.ts"
       - "src/runtime/public-start-health-policy.test.ts"
       - "src/tauri-public-start-performance.test.ts"
+      - "src/tauri-refresh-completion.test.ts"
       - "src/runtime/live-reload.ts"
       - "src/runtime/live-reload.test.ts"
       - "src/runtime/windows-reload.ts"
@@ -68,6 +69,8 @@ jobs:
         run: npm exec -- vitest run src/tauri-ci-gui-cli-latency.test.ts
       - name: Verify Tauri-only deferred public HTTPS startup policy
         run: npm exec -- vitest run src/runtime/public-start-health-policy.test.ts src/tauri-public-start-performance.test.ts
+      - name: Verify awaited per-screen topbar refresh and read-only safety
+        run: npm exec -- vitest run src/tauri-refresh-completion.test.ts src/tauri-unified-diagnostics.test.ts src/tauri-cli-console.test.ts src/tauri-cli-status-perf.test.ts
       - name: Test native Windows no-tunnel CLI start stop restart and PID ownership
         shell: pwsh
         run: ./scripts/test-windows-cli-lifecycle-isolated.ps1

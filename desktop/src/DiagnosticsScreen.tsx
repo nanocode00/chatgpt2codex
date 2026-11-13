@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import {
   Activity, AlertTriangle, ArrowRight, CheckCircle2, ClipboardList,
   Cloud, FileText, HeartPulse, LockKeyhole, RefreshCcw,
@@ -7,6 +7,7 @@ import {
 import { runOwnedCliParity, type ManagedResult, type OwnedCliParityOperation, type PublicTunnelHealth } from "./runtime";
 import { displayCliText, parseHealth, parseLocks, parseRuntimeStatus,
   type HealthDiagnostic, type LockDiagnostic, type RuntimeDiagnostic } from "./diagnostics-model";
+import type { ScreenRefreshHandle } from "./screen-refresh";
 import "./diagnostics.css";
 
 interface DiagnosticsScreenProps {
@@ -16,7 +17,6 @@ interface DiagnosticsScreenProps {
   ownedError: string;
   publicHealth: PublicTunnelHealth | null;
   publicChecking: boolean;
-  refreshKey: number;
   onConnections: () => void;
   onNotify: (message: string, tone?: "info" | "error") => void;
 }
@@ -29,10 +29,10 @@ const labelTime = () => new Intl.DateTimeFormat("ko-KR", {
   hour: "2-digit", minute: "2-digit", second: "2-digit"
 }).format(new Date());
 
-export function DiagnosticsScreen({
-  native, owned, ownedBusy, ownedError, publicHealth, publicChecking, refreshKey,
+export const DiagnosticsScreen = forwardRef<ScreenRefreshHandle, DiagnosticsScreenProps>(function DiagnosticsScreen({
+  native, owned, ownedBusy, ownedError, publicHealth, publicChecking,
   onConnections, onNotify
-}: DiagnosticsScreenProps) {
+}, ref) {
   const [runtime, setRuntime] = useState<RuntimeDiagnostic | null>(null);
   const [health, setHealth] = useState<HealthDiagnostic | null>(null);
   const [locks, setLocks] = useState<LockDiagnostic[] | null>(null);
@@ -49,19 +49,27 @@ export function DiagnosticsScreen({
   const [reloadError, setReloadError] = useState("");
   const [lockExpanded, setLockExpanded] = useState(false);
   const [lockError, setLockError] = useState("");
+  const overviewRequest = useRef<Promise<void> | null>(null);
+  const mounted = useRef(false);
 
-  // This screen is mounted only while selected. Only query the owned CLI instance.
+  // This screen is mounted only while selected. Never apply results after
+  // leaving the screen; two refresh requests share the same CLI snapshot.
   useEffect(() => {
-    if (!native) return;
-    let active = true;
-    const init = async () => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+
+  const refreshOverview = useCallback((): Promise<void> => {
+    if (!native) return Promise.resolve();
+    if (overviewRequest.current) return overviewRequest.current;
+    const request = (async () => {
       setBusy("overview");
       try {
         const result = await Promise.allSettled([
           runOwnedCliParity({ operation: "status" }),
           runOwnedCliParity({ operation: "health" })
         ]);
-        if (!active) return;
+        if (!mounted.current) return;
         const [s, h] = result;
         const rs = s.status === "fulfilled" ? parseRuntimeStatus(s.value.json) : null;
         const rh = h.status === "fulfilled" ? parseHealth(h.value.json) : null;
@@ -70,11 +78,17 @@ export function DiagnosticsScreen({
           s.status === "rejected" ? "상태: " + failure(s.reason) : !rs ? "상태: 응답 형식 확인 필요" : "",
           h.status === "rejected" ? "Health: " + failure(h.reason) : !rh ? "Health: 응답 형식 확인 필요" : ""
         ].filter(Boolean).join(" · ").slice(0, 650));
-      } finally { if (active) setBusy(null); }
-    };
-    void init();
-    return () => { active = false; };
-  }, [native, refreshKey]);
+      } finally { if (mounted.current) setBusy(null); }
+    })();
+    overviewRequest.current = request;
+    void request.finally(() => {
+      if (overviewRequest.current === request) overviewRequest.current = null;
+    });
+    return request;
+  }, [native]);
+
+  useImperativeHandle(ref, () => ({ refresh: refreshOverview }), [refreshOverview]);
+  useEffect(() => { void refreshOverview(); }, [refreshOverview]);
 
   async function checkDoctor() {
     if (busy || !native) return;
@@ -290,4 +304,4 @@ export function DiagnosticsScreen({
       이 화면은 앱이 소유한 MCP만 진단합니다. 상태 조회는 인증정보를 변경하지 않습니다.
     </div>
   </div>;
-}
+});

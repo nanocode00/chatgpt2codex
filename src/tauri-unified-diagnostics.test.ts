@@ -51,8 +51,8 @@ describe("Tauri isolated diagnostics data models", () => {
     const app = readFileSync("desktop/src/App.tsx", "utf8");
     const screen = readFileSync("desktop/src/DiagnosticsScreen.tsx", "utf8");
     expect(app).toContain('screen === "diagnostics" && <DiagnosticsScreen');
-    expect(app).toContain('refreshKey={diagnosticsRefreshKey}');
-    expect(app).toContain('setDiagnosticsRefreshKey(value => value + 1)');
+    expect(app).toContain('DiagnosticsScreen ref={diagnosticsScreenRef}');
+    expect(app).toContain('diagnosticsScreenRef.current?.refresh()');
     expect(app).not.toContain("LegacyDiagnosticsControls");
     expect(app).not.toContain('inspectPublicTunnel("default")');
     expect(app).not.toContain("inspectInstalledCliLogs(");

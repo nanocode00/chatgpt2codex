@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import {
   Activity, AlertCircle, ArrowRight, Ban, CheckCircle2, ChevronRight, CirclePause,
   ClipboardCopy, Clock3, FileText, History, Layers, LoaderCircle,
@@ -10,12 +10,12 @@ import {
   permittedJobAction, safeTurnPreview, type JobDetail, type JobFilter, type JobLogs
 } from "./job-model";
 import type { JobListItem } from "./job-list";
+import type { ScreenRefreshHandle } from "./screen-refresh";
 import "./jobs.css";
 
 interface JobsScreenProps {
   onNotify: (message: string, tone?: "info" | "error") => void;
   onProjects: () => void;
-  refreshKey: number;
 }
 function errorText(error: unknown): string {
   return (typeof error === "string" ? error : error instanceof Error ? error.message : "작업 조회에 실패했습니다.").slice(0, 460);
@@ -31,11 +31,11 @@ const filterItems: { id: JobFilter; label: string; symbol: "layers" | "active" |
   { id: "attention", label: "대기·차단", symbol: "attention" },
   { id: "history", label: "완료·취소", symbol: "history" }
 ];
-export function JobsScreen({ onNotify, onProjects, refreshKey }: JobsScreenProps) {
+export const JobsScreen = forwardRef<ScreenRefreshHandle, JobsScreenProps>(function JobsScreen({ onNotify, onProjects }, ref) {
   const native = isNativeApp();
   const [items, setItems] = useState<JobListItem[] | null>(null);
   const [listBusy, setListBusy] = useState(false);
-  const listLock = useRef(false);
+  const listRequest = useRef<Promise<void> | null>(null);
   const [listError, setListError] = useState("");
   const [filter, setFilter] = useState<JobFilter>("all");
   const [query, setQuery] = useState("");
@@ -58,25 +58,35 @@ export function JobsScreen({ onNotify, onProjects, refreshKey }: JobsScreenProps
   const counts: Record<string, number> = { all: count, active: activeCount, attention: attentionCount, history: historyCount };
   const busy = listBusy || detailsBusy || logsBusy || actionBusy;
 
-  const reloadList = useCallback(async (quiet = false) => {
-    if (!native || listLock.current) return;
-    listLock.current = true;
-    setListBusy(true);
-    try {
-      const response = await runOwnedCliParity({ operation: "job-list" });
-      const parsed = parseJobList(response.json);
-      if (!parsed) throw new Error("작업 목록의 응답 형식이 올바르지 않습니다.");
-      setItems(parsed);
-      setListError("");
-    } catch (err) {
-      const message = errorText(err);
-      setListError(message);
-      if (!quiet) onNotify(message, "error");
-    } finally {
-      listLock.current = false;
-      setListBusy(false);
-    }
+  const reloadList = useCallback((quiet = false): Promise<void> => {
+    if (!native) return Promise.resolve();
+    // Manual refresh joins an in-flight focus/periodic request rather than
+    // returning immediately and dismissing the topbar spinner prematurely.
+    if (listRequest.current) return listRequest.current;
+    const request = (async () => {
+      setListBusy(true);
+      try {
+        const response = await runOwnedCliParity({ operation: "job-list" });
+        const parsed = parseJobList(response.json);
+        if (!parsed) throw new Error("작업 목록의 응답 형식이 올바르지 않습니다.");
+        setItems(parsed);
+        setListError("");
+      } catch (err) {
+        const message = errorText(err);
+        setListError(message);
+        if (!quiet) onNotify(message, "error");
+      } finally {
+        setListBusy(false);
+      }
+    })();
+    listRequest.current = request;
+    void request.finally(() => {
+      if (listRequest.current === request) listRequest.current = null;
+    });
+    return request;
   }, [native, onNotify]);
+
+  useImperativeHandle(ref, () => ({ refresh: () => reloadList(true) }), [reloadList]);
 
   useEffect(() => {
     void reloadList(true);
@@ -88,7 +98,7 @@ export function JobsScreen({ onNotify, onProjects, refreshKey }: JobsScreenProps
       window.clearInterval(interval);
       window.removeEventListener("focus", onFocus);
     };
-  }, [native, reloadList, refreshKey]);
+  }, [native, reloadList]);
 
   useEffect(() => {
     if (!native || !selected) {
@@ -318,4 +328,4 @@ export function JobsScreen({ onNotify, onProjects, refreshKey }: JobsScreenProps
       </div>
     </div>
   </div>;
-}
+});
