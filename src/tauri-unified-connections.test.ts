@@ -73,8 +73,9 @@ describe("Tauri-owned connection and security screen", () => {
     expect(app).not.toContain('screen === "manage" && <>');
     expect(app).toContain('onNavigate={to => setScreen(to === "manage" ? "connections" : to)}');
     expect(app).toContain('onManageRuntime={() => setScreen("connections")}');
-    expect(app).toContain("앱·전용 MCP 완전 종료");
-    expect(app).toContain("트레이로 숨기기");
+    const settings = readFileSync("desktop/src/SettingsScreen.tsx", "utf8");
+    expect(settings).toContain("종료 (완전 종료)");
+    expect(settings).toContain("트레이로 숨기기");
   });
 
   it("provides native-only repeated Owner Token copy without exposing the secret to React", () => {

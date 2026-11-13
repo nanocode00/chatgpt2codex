@@ -240,7 +240,8 @@ fn record_if_any(root: &Payload) -> Result<Option<serde_json::Value>, String> {
                 // Never accept that partial record as authority to stop, rotate
                 // or control a process: merely provide actionable diagnostics.
                 if v["name"] == INSTANCE &&
-                    (v["port"] == configured_port(root)? || v["port"] == PREVIOUS_PORT) &&
+                    (v["port"].as_u64() == Some(u64::from(configured_port(root)?)) ||
+                     v["port"].as_u64() == Some(u64::from(PREVIOUS_PORT))) &&
                     v.get("tunnelMode").is_none() {
                     return Err("전용 MCP 시작 기록이 미완성입니다(tunnelMode 누락). 인스턴스 PID, 로컬 Health, Cloudflare 프로세스를 확인하세요. 안전한 소유권 확인 전 기록을 수정·삭제하거나 프로세스를 종료하지 않습니다.".into());
                 }
@@ -694,11 +695,13 @@ fn start_owned_at_port(root: &Payload, port: u16, public_start: bool) -> Result<
         "--host", "127.0.0.1", "--port", port_text.as_str(), "--tunnel", tunnel_mode];
     let started = cli_command(root, &args,
         Duration::from_secs(if public_start { 100 } else { 35 }))?;
-    if started["started"] != true || started["healthy"] != true {
+    if started["started"] != true || started["healthy"] != true ||
+        started["port"].as_u64() != Some(u64::from(port)) {
         return Err("CLI의 시작 및 Health 확인에 실패했습니다.".into());
     }
-    if record_if_any(root)?.is_none() {
-        return Err("시작됐지만 인스턴스 소유권 기록을 확인하지 못했습니다.".into());
+    if record_if_any(root)?.as_ref()
+        .and_then(|r| r["port"].as_u64()) != Some(u64::from(port)) {
+        return Err("시작됐지만 요청한 포트의 인스턴스 소유권 기록을 확인하지 못했습니다.".into());
     }
     Ok(())
 }
