@@ -1,4 +1,5 @@
 # C2C Tauri 통합 앱 — UI/UX 재구성 결정문
+> **실행·검증 책임 및 새로고침의 최신 공통 정책:** [TAURI_CLI_UI_ARCHITECTURE_POLICY.md](./TAURI_CLI_UI_ARCHITECTURE_POLICY.md) (2026-11-13). 이 문서의 초기 구현 방침보다 최신 공통 정책을 우선한다.
 > 2026-11-13 후속 변경: 사용자 요청에 따라 기존 WinForms와 18797 병행을 전제로 한 아래의 초기 정책은 **과거 설계 기록**이다. 현재 Tauri 앱의 기본 MCP 포트는 7979이며 설정에서 실제 수신 포트를 변경한다. Windows 최소화는 작업 표시줄 유지, X는 트레이 숨김, 명시적 종료는 MCP/터널까지 중지한다. 아래 단계별 결정 내용 중 충돌하는 항목에는 이 최신 결정이 우선한다.
 > 확정: 2026-11-10 · 사용자 결정 사항 · 작업 상태: 설계 확정, 화면별 점진 구현
 > 선행 기준: PR #94 (`feat/tauri-f5f-acceptance-batch`), `src/cli.ts`, `docs/TAURI_CLI_PARITY_MATRIX.md`.
