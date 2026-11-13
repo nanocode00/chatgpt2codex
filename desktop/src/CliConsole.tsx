@@ -36,6 +36,7 @@ interface PendingCommand {
 let sessionHistory: HistoryEntry[] = [];
 let sessionSequence = 0;
 let sessionDraft = "c2c status";
+let lastReadOnlyCommand = "c2c status";
 
 function errorText(error: unknown) {
   return (typeof error === "string" ? error : error instanceof Error ? error.message : "CLI 실행에 실패했습니다.").slice(0, 500);
@@ -47,9 +48,10 @@ function outputText(entry: HistoryEntry): string {
   return entry.result.text ?? JSON.stringify(entry.result.json, null, 2) ?? "출력이 없습니다.";
 }
 
-export function CliConsole({ onNotify, onRuntimeChanged }: {
+export function CliConsole({ onNotify, onRuntimeChanged, refreshKey = 0 }: {
   onNotify?: (message: string, tone?: "info" | "error") => void;
   onRuntimeChanged?: () => void;
+  refreshKey?: number;
 }) {
   const native = isNativeApp();
   const [input, setInput] = useState(sessionDraft);
@@ -94,6 +96,17 @@ export function CliConsole({ onNotify, onRuntimeChanged }: {
     window.addEventListener("keydown", onEscape);
     return () => window.removeEventListener("keydown", onEscape);
   }, [pending]);
+
+  useEffect(() => {
+    if (!refreshKey || !native || busy || pending) return;
+    // A global refresh may repeat only a previously validated read-only
+    // command. It must never implicitly replay stop/restart/config mutations.
+    void checkOwnedCliConsole(lastReadOnlyCommand).then(checked => {
+      if (!checked.mutating) void runChecked(lastReadOnlyCommand, checked);
+    }).catch(error => onNotify?.(errorText(error), "error"));
+    // Deliberately keyed only by the top-bar refresh request.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
 
   useEffect(() => {
     const current = input.trim();
@@ -163,6 +176,7 @@ export function CliConsole({ onNotify, onRuntimeChanged }: {
     let error: string | null = null;
     try {
       result = await runOwnedCliConsole(command, checked.mutating);
+      if (!checked.mutating) lastReadOnlyCommand = command;
       if (checked.mutating) onRuntimeChanged?.();
     } catch (reason) {
       error = errorText(reason);

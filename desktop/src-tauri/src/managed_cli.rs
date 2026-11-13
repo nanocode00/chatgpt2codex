@@ -1044,7 +1044,28 @@ fn exit_without_record_preflight(port_busy: bool) -> Result<(), &'static str> {
 /// Opt-in update/complete-exit action. Does not exit the UI on failure.
 /// Always uses the existing audited CLI stop/PID ownership checks, and only
 /// the isolated preview instance. No taskkill or process-by-name termination.
+fn complete_exit_without_record(root: &Payload) -> Result<bool, String> {
+    // An already stopped server needs no bundled Node process, manifest hash,
+    // or owner-token lookup. Refuse to exit if the configured port is owned
+    // by any other process, just as the original audited exit did.
+    match fs::symlink_metadata(state_record(root)) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            exit_without_record_preflight(port_occupied(configured_port(root)?))
+                .map_err(str::to_owned)?;
+            Ok(true)
+        }
+        Ok(_) => Ok(false), // Must use fully verified CLI stop below.
+        Err(_) => Err("서버 실행 기록을 확인할 수 없어 종료하지 않습니다.".into()),
+    }
+}
+
 pub(crate) fn stop_owned_for_complete_exit() -> Result<(), String> {
+    // Most common no-server exit path: no process to stop, avoid costly SHA
+    // of Node/CLI/cloudflared on an already idle application.
+    let read_only = read_only_payload()?;
+    if complete_exit_without_record(&read_only)? { return Ok(()); }
+
+    let started = Instant::now();
     let root = payload()?;
     ensure_workspace(&root)?;
     let lock = MUTATION_LOCK.get_or_init(|| Mutex::new(()));
@@ -1055,12 +1076,14 @@ pub(crate) fn stop_owned_for_complete_exit() -> Result<(), String> {
     if record.is_none() {
         return exit_without_record_preflight(port_occupied(active_port)).map_err(str::to_owned);
     }
+    let before_stop = started.elapsed();
     let result = cli_command(
         &root, &["stop", "--instance", INSTANCE], Duration::from_secs(30)
     )?;
     if result["stopped"] != true || result["instance"] != INSTANCE {
         return Err("전용 MCP 중지가 확인되지 않았습니다. 앱은 종료하지 않습니다.".into());
     }
+    let stop_elapsed = started.elapsed() - before_stop;
     // Wait for the owned record to disappear and the port to be released.
     // If the CLI could not safely release the runtime, keep the UI available
     // for diagnosis and do not claim the installation can be removed.
@@ -1068,11 +1091,18 @@ pub(crate) fn stop_owned_for_complete_exit() -> Result<(), String> {
     loop {
         let record_exists = record_if_any(&root)?.is_some();
         let busy = port_occupied(active_port);
-        if !record_exists && !busy { return Ok(()); }
+        if !record_exists && !busy {
+            // Timing has no secret data. In release builds, this is diagnostic
+            // only and never delays or changes the audited exit outcome.
+            eprintln!("c2c-exit-timing: preflight={}ms cli_stop={}ms verify={}ms",
+                before_stop.as_millis(), stop_elapsed.as_millis(),
+                (started.elapsed() - before_stop - stop_elapsed).as_millis());
+            return Ok(());
+        }
         if Instant::now() >= deadline {
             return Err(format!("MCP 종료 후에도 포트 {active_port} 또는 인스턴스 기록이 남았습니다. 앱을 유지하고 상태를 확인하세요."));
         }
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(25));
     }
 }
 
@@ -1124,6 +1154,28 @@ pub async fn register_owned_owner_token(candidate: String) -> Result<bool, Strin
 mod tests {
     use super::*;
 
+    #[test]
+    fn exit_without_runtime_record_never_needs_node_and_refuses_occupied_port() {
+        use std::net::TcpListener;
+        let base = std::env::temp_dir().join(format!("c2c-fast-exit-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let root = Payload {
+            node: base.join("missing-node.exe"), cli: base.join("missing-cli.js"),
+            home: base.join("home"), workspace: base.join("workspace"), cloudflared: None,
+        };
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        persist_port(&root, port).unwrap();
+        assert!(complete_exit_without_record(&root).is_err());
+        drop(listener);
+        assert_eq!(complete_exit_without_record(&root).unwrap(), true);
+        fs::create_dir_all(state_record(&root).parent().unwrap()).unwrap();
+        fs::write(state_record(&root), "{}").unwrap();
+        assert_eq!(complete_exit_without_record(&root).unwrap(), false);
+        fs::remove_dir_all(base).unwrap();
+    }
     #[cfg(target_os = "windows")]
     #[test]
     fn native_status_uses_owned_record_without_running_node_or_modifying_files() {

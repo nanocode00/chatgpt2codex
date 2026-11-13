@@ -29,10 +29,10 @@ describe("CLI console status fast path", () => {
     expect(rust).toContain("let root = payload()?;");
     expect(rust).toContain("verify_manifest(&resource_root)?");
     expect(cli).toContain("managed_cli::native_console_status(&request.operation)?");
-    expect(cli).toContain("None => {");
+    expect(cli).toContain("fn execute_with_read_only_fast_path(request: CliParityRequest)");
     expect(cli).toContain("execute(request)?");
     expect(cli).toContain("Windows 네이티브 상태 조회");
-    expect(cli).toContain("기존 Node CLI 조회");
+    expect(cli).toContain("검증된 Node CLI 조회");
   });
 
   it("uses read-only Windows process handles and preserves bounded localhost health identity checks", () => {

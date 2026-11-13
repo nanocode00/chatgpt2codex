@@ -1869,16 +1869,16 @@ async function cmdStop(flags: Record<string, string | boolean>): Promise<void> {
     throw new Error("runtime process identity changed before stop: " + instance);
   }
   process.kill(record.pid, "SIGTERM");
-  for (let i = 0; i < 50 && isProcessAlive(record.pid); i += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 100));
+  for (let i = 0; i < 200 && isProcessAlive(record.pid); i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
   }
   if (isProcessAlive(record.pid) && flags.force === true) {
     if (!(await runtimeProcessMatchesRecord(record))) {
       throw new Error("refusing SIGKILL because runtime process identity no longer matches the recorded c2c instance");
     }
     process.kill(record.pid, "SIGKILL");
-    for (let i = 0; i < 20 && isProcessAlive(record.pid); i += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
+    for (let i = 0; i < 80 && isProcessAlive(record.pid); i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
     }
   }
   if (isProcessAlive(record.pid)) throw new Error("instance " + instance + " did not stop cleanly");
@@ -1887,8 +1887,8 @@ async function cmdStop(flags: Record<string, string | boolean>): Promise<void> {
       throw new Error("refusing tunnel stop because process identity changed: " + instance);
     }
     process.kill(record.tunnelPid, "SIGTERM");
-    for (let i = 0; i < 50 && isProcessAlive(record.tunnelPid); i += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
+    for (let i = 0; i < 200 && isProcessAlive(record.tunnelPid); i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
     }
     if (isProcessAlive(record.tunnelPid)) {
       if (flags.force === true) {
@@ -1896,8 +1896,8 @@ async function cmdStop(flags: Record<string, string | boolean>): Promise<void> {
           throw new Error("refusing forced tunnel stop because process identity changed: " + instance);
         }
         process.kill(record.tunnelPid, "SIGKILL");
-        for (let i = 0; i < 20 && isProcessAlive(record.tunnelPid); i += 1) {
-          await new Promise((resolve) => setTimeout(resolve, 100));
+        for (let i = 0; i < 80 && isProcessAlive(record.tunnelPid); i += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 25));
         }
       }
       if (isProcessAlive(record.tunnelPid)) {
