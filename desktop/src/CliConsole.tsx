@@ -26,6 +26,12 @@ interface HistoryEntry {
   error: string | null;
 }
 
+// In-memory only: preserve console history when navigating between screens,
+// but never write commands or potentially sensitive output to disk.
+let sessionHistory: HistoryEntry[] = [];
+let sessionSequence = 0;
+let sessionDraft = "c2c status";
+
 function errorText(error: unknown) {
   return (typeof error === "string" ? error : error instanceof Error ? error.message : "CLI 실행에 실패했습니다.").slice(0, 500);
 }
@@ -41,16 +47,19 @@ export function CliConsole({ onNotify, onRuntimeChanged }: {
   onRuntimeChanged?: () => void;
 }) {
   const native = isNativeApp();
-  const [input, setInput] = useState("c2c status");
+  const [input, setInput] = useState(sessionDraft);
   const [validation, setValidation] = useState<CliConsoleCheck | null>(null);
   const [validationError, setValidationError] = useState("");
   const [checking, setChecking] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [history, setHistory] = useState<HistoryEntry[]>([]);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-  const nextId = useRef(0);
+  const [history, setHistory] = useState<HistoryEntry[]>(() => sessionHistory);
+  const [selectedId, setSelectedId] = useState<number | null>(() => sessionHistory[0]?.id ?? null);
   const inputRef = useRef<HTMLInputElement>(null);
   const selected = history.find(item => item.id === selectedId) ?? history[0] ?? null;
+  const updateInput = (command: string) => {
+    sessionDraft = command;
+    setInput(command);
+  };
 
   useEffect(() => {
     const current = input.trim();
@@ -119,19 +128,23 @@ export function CliConsole({ onNotify, onRuntimeChanged }: {
       error = errorText(reason);
       onNotify?.(error, "error");
     } finally {
-      const id = ++nextId.current;
+      const id = ++sessionSequence;
       const entry: HistoryEntry = {
         id, input: command, at: new Date().toLocaleTimeString("ko-KR", { hour12: false }),
         elapsedMs: Math.round(performance.now() - started), result, error
       };
-      setHistory(previous => [entry, ...previous].slice(0, 25));
+      setHistory(previous => {
+        const next = [entry, ...previous].slice(0, 25);
+        sessionHistory = next;
+        return next;
+      });
       setSelectedId(id);
       setBusy(false);
     }
   }
 
   function pickCommand(command: string) {
-    setInput(command);
+    updateInput(command);
     inputRef.current?.focus();
   }
 
@@ -153,7 +166,7 @@ export function CliConsole({ onNotify, onRuntimeChanged }: {
         <span aria-hidden="true">$</span>
         <input id="cli-command-input" ref={inputRef} value={input} maxLength={512}
           autoComplete="off" spellCheck={false} placeholder="c2c status"
-          onChange={event => setInput(event.target.value)}
+          onChange={event => updateInput(event.target.value)}
           onKeyDown={event => {
             if (event.key === "Enter" && !event.nativeEvent.isComposing) {
               event.preventDefault(); void execute();
