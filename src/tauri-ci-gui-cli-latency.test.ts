@@ -30,6 +30,8 @@ describe("CI measures real GUI, Rust bridge and CLI handler separately", () => {
     expect(gui).toContain("performance.now() - start");
     expect(gui).toContain("response.bridgeMs");
     expect(gui).toContain("response.cliMs");
+    expect(gui).toContain("response.bundleVerifyMs");
+    expect(gui).toContain("response.childProcessMs");
     expect(gui).toContain('invoke<void>("ci_perf_submit"');
     expect(gui).not.toContain("response.json");
     expect(rustSink).toContain("samples.len() != 15");
@@ -43,6 +45,11 @@ describe("CI measures real GUI, Rust bridge and CLI handler separately", () => {
     expect(runtimeBridge).toContain("parse_cli_perf_line(&text)");
     expect(runtimeBridge).toContain("Stdio::piped()");
     expect(runtimeBridge).toContain("thread_local!");
+    expect(runtimeBridge).toContain("verified_manifest_cached_with(root, cache)");
+    expect(runtimeBridge).toContain("share_mode(1)");
+    expect(runtimeBridge).toContain("verified_bundle_cache_reuses_read_locked_files_and_denies_tamper");
+    expect(runtimeBridge).toContain("CI_BUNDLE_VERIFY_MS");
+    expect(runtimeBridge).toContain("CI_CHILD_PROCESS_MS");
     expect(cli).toContain("console.error(`[c2c perf]");
   });
 
@@ -54,6 +61,10 @@ describe("CI measures real GUI, Rust bridge and CLI handler separately", () => {
     expect(script).toContain("Percentile $gui 0.5");
     expect(script).toContain("Percentile $bridge 0.95");
     expect(script).toContain("Percentile $cli 0.95");
+    expect(script).toContain("Percentile $verify 0.95");
+    expect(script).toContain("Percentile $nodeProcessTimes 0.95");
+    expect(script).toContain("$guiProcess = Start-Process -FilePath $exe -PassThru");
+    expect(script).toContain("$guiProcess.Refresh()");
     expect(script).toContain("Node startup excluded");
     expect(script).toContain("GITHUB_STEP_SUMMARY");
   });

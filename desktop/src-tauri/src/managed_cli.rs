@@ -19,10 +19,19 @@ const MAX_OUTPUT: usize = 128 * 1024;
 static MUTATION_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 thread_local! {
     static CI_CLI_HANDLER_MS: Cell<Option<u64>> = const { Cell::new(None) };
+    static CI_BUNDLE_VERIFY_MS: Cell<Option<f64>> = const { Cell::new(None) };
+    static CI_CHILD_PROCESS_MS: Cell<Option<f64>> = const { Cell::new(None) };
 }
 
 pub(crate) fn take_ci_cli_handler_ms() -> Option<u64> {
     CI_CLI_HANDLER_MS.with(|value| value.replace(None))
+}
+
+pub(crate) fn take_ci_execution_stages_ms() -> (Option<f64>, Option<f64>) {
+    (
+        CI_BUNDLE_VERIFY_MS.with(|value| value.replace(None)),
+        CI_CHILD_PROCESS_MS.with(|value| value.replace(None)),
+    )
 }
 
 fn parse_cli_perf_line(stderr: &str) -> Option<u64> {
@@ -174,6 +183,90 @@ fn verify_manifest(root: &Path) -> Result<(PathBuf, PathBuf, Option<PathBuf>), S
     Ok((node_real, cli_real, cloudflared))
 }
 
+// On Windows, keep the exact manifest/Node/CLI/tunnel files open with
+// FILE_SHARE_READ only after the initial full SHA-256 verification. This
+// denies writes, truncation and replacement while this app can launch the
+// bundle. A cached result is never trusted solely on size/mtime.
+#[cfg(windows)]
+struct VerifiedBundle {
+    root: PathBuf,
+    verified: (PathBuf, PathBuf, Option<PathBuf>),
+    sealed_files: Vec<(PathBuf, fs::File)>,
+}
+
+#[cfg(windows)]
+static VERIFIED_BUNDLE: OnceLock<Mutex<Option<VerifiedBundle>>> = OnceLock::new();
+
+#[cfg(windows)]
+fn locked_bundle_file(path: &Path) -> Result<(PathBuf, fs::File), String> {
+    use std::os::windows::fs::OpenOptionsExt;
+    let canonical = fs::canonicalize(path)
+        .map_err(|_| "번들 검증 대상 경로가 유효하지 않습니다.")?;
+    // FILE_SHARE_READ=1. Do not permit FILE_SHARE_WRITE or FILE_SHARE_DELETE.
+    let handle = fs::OpenOptions::new().read(true).share_mode(1).open(&canonical)
+        .map_err(|_| "번들 실행 파일을 변경 방지 상태로 열 수 없습니다.")?;
+    Ok((canonical, handle))
+}
+
+#[cfg(windows)]
+fn verified_manifest_cached_with(
+    root: &Path,
+    cache: &Mutex<Option<VerifiedBundle>>,
+) -> Result<(PathBuf, PathBuf, Option<PathBuf>), String> {
+    let canonical_root = fs::canonicalize(root)
+        .map_err(|_| "번들 런타임 경로가 유효하지 않습니다.")?;
+    let mut guard = cache.lock()
+        .map_err(|_| "번들 검증 캐시 잠금을 얻지 못했습니다.")?;
+    if let Some(saved) = guard.as_ref() {
+        if saved.root != canonical_root {
+            return Err("검증된 번들 경로가 바뀌어 실행을 거부합니다.".into());
+        }
+        // Reject a reparse-point/directory swap even if the old files remain
+        // locked. The handles themselves prevent in-place mutation/rename.
+        for (path, _handle) in &saved.sealed_files {
+            let actual = fs::canonicalize(path)
+                .map_err(|_| "검증된 번들 파일이 사라졌습니다.")?;
+            if &actual != path {
+                return Err("검증된 번들 파일 경로가 바뀌었습니다.".into());
+            }
+        }
+        return Ok(saved.verified.clone());
+    }
+    let payload = canonical_root.join("c2c-runtime");
+    let mut sealed_files = Vec::new();
+    for path in [
+        payload.join("manifest.json"),
+        payload.join("bin").join("node.exe"),
+        payload.join("dist").join("cli.js"),
+    ] {
+        sealed_files.push(locked_bundle_file(&path)?);
+    }
+    let tunnel = payload.join("bin").join("cloudflared.exe");
+    if tunnel.is_file() {
+        sealed_files.push(locked_bundle_file(&tunnel)?);
+    }
+    // The locks are already held before reading/hash-checking the files.
+    // Failure releases all temporary handles and is never cached.
+    let verified = verify_manifest(&canonical_root)?;
+    let trusted = VerifiedBundle {
+        root: canonical_root, verified: verified.clone(), sealed_files,
+    };
+    *guard = Some(trusted);
+    Ok(verified)
+}
+
+fn verified_manifest_for_launch(root: &Path) -> Result<(PathBuf, PathBuf, Option<PathBuf>), String> {
+    #[cfg(windows)]
+    {
+        let cache = VERIFIED_BUNDLE.get_or_init(|| Mutex::new(None));
+        verified_manifest_cached_with(root, cache)
+    }
+    #[cfg(not(windows))]
+    {
+        verify_manifest(root)
+    }
+}
+
 fn payload_for(executable_dir: &Path, local_appdata: &Path) -> Result<Payload, String> {
     // Portable ZIP has <exe>/c2c-runtime; NSIS may place bundle resources
     // under <exe>/resources/c2c-runtime. Both paths are verified against
@@ -183,7 +276,13 @@ fn payload_for(executable_dir: &Path, local_appdata: &Path) -> Result<Payload, S
     } else {
         executable_dir.join("resources")
     };
-    let (node, cli, cloudflared) = verify_manifest(&resource_root)?;
+    let verify_start = Instant::now();
+    let (node, cli, cloudflared) = verified_manifest_for_launch(&resource_root)?;
+    if cfg!(debug_assertions) && std::env::var("C2C_CI_PERF_RUN").as_deref() == Ok("1") {
+        CI_BUNDLE_VERIFY_MS.with(|value| {
+            value.set(Some(verify_start.elapsed().as_secs_f64() * 1000.0))
+        });
+    }
     let base = local_appdata.join("ChatGPTToCodex-Tauri-Preview");
     let home = base.join("isolated-home");
     let workspace = base.join("workspace");
@@ -277,6 +376,7 @@ fn record_if_any(root: &Payload) -> Result<Option<serde_json::Value>, String> {
 
 fn cli_output(root: &Payload, args: &[&str], timeout: Duration, allow_nonzero: bool) -> Result<String, String> {
     let profiling = cfg!(debug_assertions) && std::env::var("C2C_CI_PERF_RUN").as_deref() == Ok("1");
+    let process_started = Instant::now();
     let config = root.home.join(".config");
     // Read-only list commands must work even before the preview workspace
     // has been initialized. Mutating operations always call ensure_workspace.
@@ -351,6 +451,11 @@ fn cli_output(root: &Payload, args: &[&str], timeout: Duration, allow_nonzero: b
         let text = String::from_utf8_lossy(&captured);
         CI_CLI_HANDLER_MS.with(|value| value.set(parse_cli_perf_line(&text)));
     }
+    if profiling {
+        CI_CHILD_PROCESS_MS.with(|value| {
+            value.set(Some(process_started.elapsed().as_secs_f64() * 1000.0))
+        });
+    }
     if status.is_none() {
         return Err("CLI 작업 시간이 초과됐습니다. 관리 상태를 새로 확인하세요.".into());
     }
@@ -375,6 +480,8 @@ fn cli_command(root: &Payload, args: &[&str], timeout: Duration) -> Result<serde
 pub(crate) fn parity_cli(args: &[String], mutating: bool, needs_owned_runtime: bool,
                          output_is_text: bool, allow_nonzero: bool) -> Result<String, String> {
     CI_CLI_HANDLER_MS.with(|value| value.set(None));
+    CI_BUNDLE_VERIFY_MS.with(|value| value.set(None));
+    CI_CHILD_PROCESS_MS.with(|value| value.set(None));
     let root = payload()?;
     // The read-only CLI is authoritative for its own state and errors.
     // Avoid GUI-only workspace creation, PID/Health checks and extra CLI
@@ -1149,6 +1256,43 @@ mod tests {
         fs::write(&manifest_path, legacy.to_string()).unwrap();
         assert!(verify_manifest(&dir).unwrap().2.is_none());
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn verified_bundle_cache_reuses_read_locked_files_and_denies_tamper() {
+        let dir = std::env::temp_dir().join(format!(
+            "c2c-locked-bundle-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+                .unwrap().as_nanos()
+        ));
+        let runtime = dir.join("c2c-runtime");
+        fs::create_dir_all(runtime.join("bin")).unwrap();
+        fs::create_dir_all(runtime.join("dist")).unwrap();
+        let node = runtime.join("bin").join("node.exe");
+        let cli = runtime.join("dist").join("cli.js");
+        let manifest = runtime.join("manifest.json");
+        fs::write(&node, b"test-node").unwrap();
+        fs::write(&cli, b"test-cli").unwrap();
+        fs::write(&manifest, serde_json::json!({
+            "version": 1, "kind": MANIFEST_KIND, "instance": INSTANCE,
+            "tunnel": "none", "nodeSha256": sha256_file(&node).unwrap(),
+            "cliSha256": sha256_file(&cli).unwrap()
+        }).to_string()).unwrap();
+        let cache = Mutex::new(None);
+        let initial = verified_manifest_cached_with(&dir, &cache).unwrap();
+        let second = verified_manifest_cached_with(&dir, &cache).unwrap();
+        assert_eq!(initial, second);
+        for target in [&node, &cli, &manifest] {
+            assert!(fs::write(target, b"tampered").is_err(),
+                "a verified executable/manifest must not be writable while cached");
+            assert!(fs::remove_file(target).is_err(),
+                "a verified executable/manifest must not be replaceable while cached");
+        }
+        drop(cache);
+        fs::write(&node, b"tampered").unwrap();
+        assert!(verify_manifest(&dir).is_err());
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

@@ -7,6 +7,8 @@ interface Sample {
   guiMs: number;
   bridgeMs: number;
   cliMs: number;
+  bundleVerifyMs: number;
+  childProcessMs: number;
 }
 
 const COMMANDS = ["c2c status", "c2c repository list", "c2c profile list"] as const;
@@ -31,14 +33,17 @@ export async function runCiPerfProbe(): Promise<void> {
         const start = performance.now();
         const response = await runOwnedCliConsole(command, false);
         const guiMs = performance.now() - start;
-        if (!Number.isFinite(response.bridgeMs) || !Number.isFinite(response.cliMs)) {
-          throw new Error("Missing bridge or CLI timing for " + command);
+        if (!Number.isFinite(response.bridgeMs) || !Number.isFinite(response.cliMs) ||
+            !Number.isFinite(response.bundleVerifyMs) || !Number.isFinite(response.childProcessMs)) {
+          throw new Error("Missing bridge or CLI execution-stage timing for " + command);
         }
         samples.push({
           command, run,
           guiMs: Math.round(guiMs * 1000) / 1000,
           bridgeMs: response.bridgeMs!,
-          cliMs: response.cliMs!
+          cliMs: response.cliMs!,
+          bundleVerifyMs: response.bundleVerifyMs!,
+          childProcessMs: response.childProcessMs!
         });
       }
     }
