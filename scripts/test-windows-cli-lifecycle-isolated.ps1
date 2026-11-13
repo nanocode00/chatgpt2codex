@@ -8,6 +8,21 @@ if ($env:GITHUB_ACTIONS -ne "true" -or $env:CI -ne "true" -or
     [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
     throw "Windows CLI lifecycle E2E may run only on an isolated GitHub Actions runner"
 }
+$measureLifecycle = $env:C2C_LIFECYCLE_PERF -eq "1"
+$script:lifecyclePerfSamples = [System.Collections.Generic.List[object]]::new()
+if ($measureLifecycle) {
+    if (-not $env:C2C_LIFECYCLE_PERF_OUTPUT) {
+        throw "An isolated runner output path is required for lifecycle timings"
+    }
+    $outputRoot = [IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\') + '\'
+    $outputFile = [IO.Path]::GetFullPath($env:C2C_LIFECYCLE_PERF_OUTPUT)
+    if (-not $outputFile.StartsWith($outputRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Lifecycle measurements may only be written under RUNNER_TEMP"
+    }
+    # CLI stderr contains only phase names and millisecond counts in opt-in
+    # profiling mode. Never persist real command args or their output.
+    $env:C2C_CLI_PERF = "1"
+}
 
 $repo = Resolve-Path (Join-Path $PSScriptRoot "..")
 $cli = Join-Path $repo "dist\cli.js"
@@ -58,8 +73,31 @@ if ($port -eq 7979 -or $port -lt 1024) { throw "Fixture selected unsafe port" }
 
 function Invoke-C2C {
     param([string[]]$CliArgs, [switch]$ExpectFailure)
-    $lines = & $node $cli @CliArgs 2>&1
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    $lines = @(& $node $cli @CliArgs 2>&1)
+    $timer.Stop()
     $code = $LASTEXITCODE
+    if ($measureLifecycle) {
+        $phases = [System.Collections.Generic.List[object]]::new()
+        $clean = [System.Collections.Generic.List[object]]::new()
+        foreach ($line in $lines) {
+            $value = [string]$line
+            if ($value -match '^\[c2c perf\] ([a-z][a-z -]{0,48}): ([0-9]+)ms$') {
+                $phases.Add([pscustomobject]@{ phase = $Matches[1]; ms = [int]$Matches[2] })
+            } else {
+                $clean.Add($line)
+            }
+        }
+        $lines = @($clean.ToArray())
+        if ($CliArgs[0] -in @("start", "stop", "restart", "reload", "repository", "status", "health")) {
+            $script:lifecyclePerfSamples.Add([pscustomobject]@{
+                command = [string]$CliArgs[0]
+                outcome = if ($code -eq 0) { "success" } else { "rejected" }
+                elapsedMs = [Math]::Round($timer.Elapsed.TotalMilliseconds, 1)
+                phases = @($phases.ToArray())
+            })
+        }
+    }
     if ($ExpectFailure) {
         if ($code -eq 0) { throw "Unsafe operation unexpectedly succeeded: $($CliArgs[0])" }
         return $null
@@ -232,6 +270,39 @@ try {
             Stop-Process -Id $fake.Id -Force -ErrorAction SilentlyContinue
         }
         $fake.Dispose()
+    }
+    if ($measureLifecycle) {
+        $report = [ordered]@{
+            schemaVersion = 1
+            environment = "isolated-windows-cli-fixture"
+            note = "Wall time includes Node startup; CLI phase durations exclude startup. Only fixed names/times recorded."
+            samples = @($script:lifecyclePerfSamples.ToArray())
+        }
+        $report | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $outputFile -Encoding utf8
+        $lines = @(
+            "## Isolated Windows CLI lifecycle timings",
+            "",
+            "Bundled CLI, disposable runner instance. Full wall time, including Node startup.",
+            "",
+            "| Operation | Successful runs | Median wall time | Maximum wall time |",
+            "| --- | ---: | ---: | ---: |"
+        )
+        foreach ($operation in @("start", "stop", "restart", "reload", "repository")) {
+            $times = @($script:lifecyclePerfSamples | Where-Object {
+                $_.command -eq $operation -and $_.outcome -eq "success"
+            } | ForEach-Object { [double]$_.elapsedMs } | Sort-Object)
+            if ($times.Count -eq 0) { continue }
+            $median = $times[[Math]::Floor(($times.Count - 1) / 2)]
+            $lines += "| $operation | $($times.Count) | $median ms | $($times[-1]) ms |"
+        }
+        $lines += ""
+        $lines += "Detailed stop ownership, Health, termination-wait and cleanup phase timings are saved in the JSON artifact. Failed ownership checks are counted as rejected, never as successful stops."
+        $summary = $lines -join [Environment]::NewLine
+        Write-Host $summary
+        if ($env:GITHUB_STEP_SUMMARY) {
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $summary
+        }
+        Remove-Item Env:C2C_CLI_PERF -ErrorAction SilentlyContinue
     }
     # Runner workspace and all temporary secrets are discarded after CI.
 }

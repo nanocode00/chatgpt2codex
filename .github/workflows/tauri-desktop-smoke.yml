@@ -110,10 +110,21 @@ jobs:
           ./scripts/package-tauri-cli-preview.ps1
       - name: E2E the actual bundled CLI with its bundled Node executable
         shell: pwsh
+        env:
+          C2C_LIFECYCLE_PERF: "1"
+          C2C_LIFECYCLE_PERF_OUTPUT: ${{ runner.temp }}\c2c-cli-lifecycle-benchmark.json
         run: |
           ./scripts/test-windows-cli-lifecycle-isolated.ps1 `
             -NodeExecutable "desktop/src-tauri/target/debug/c2c-runtime/bin/node.exe" `
             -CliEntrypoint "desktop/src-tauri/target/debug/c2c-runtime/dist/cli.js"
+      - name: Upload isolated CLI start/stop/restart/reload timing report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: c2c-cli-lifecycle-latency-results
+          path: ${{ runner.temp }}/c2c-cli-lifecycle-benchmark.json
+          if-no-files-found: warn
+          retention-days: 7
       - name: Check Rust toolchain
         run: cargo --version
       - name: Unit-test native CLI URL, DPAPI backup and log safety checks

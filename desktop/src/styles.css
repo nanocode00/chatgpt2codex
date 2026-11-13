@@ -99,6 +99,11 @@ h1{font-size:29px;font-weight:600;letter-spacing:-1.2px;line-height:1.3;margin-b
 .setting-control{display:flex;align-items:center;gap:12px;margin-top:16px}
 .setting-control input{width:150px;color:#eee;background:#303030;border:1px solid #454545;border-radius:9px;padding:11px 12px}
 .form-error{color:#f5a9a9!important;margin-top:11px!important}
+.exit-progress-backdrop{position:fixed;inset:0;z-index:1000;background:#111b;display:grid;place-items:center}
+.exit-progress-dialog{background:#222;border:1px solid #454545;border-radius:16px;min-width:310px;max-width:420px;padding:27px 32px;text-align:center;box-shadow:0 20px 65px #0009}
+.exit-progress-spinner{width:27px;height:27px;border:3px solid #555;border-top-color:#eee;border-radius:50%;display:block;margin:0 auto 20px;animation:spin .8s linear infinite}
+.exit-progress-dialog strong{font-size:14px;color:#eee;font-weight:600}
+.exit-progress-dialog p{font-size:11px;color:#aaa;margin-top:12px;line-height:1.7}
 .form-ok{color:#9fcfac!important;margin-top:11px!important}
 .settings-row{display:flex;align-items:center;justify-content:space-between;margin:0 28px;padding:24px 0;border-top:1px solid #333}
 .settings-row strong{display:block;font-size:12px;margin-bottom:8px}

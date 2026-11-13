@@ -1681,6 +1681,7 @@ async function cmdHealth(flags: Record<string, string | boolean>): Promise<void>
 }
 
 async function cmdReload(flags: Record<string, string | boolean>): Promise<void> {
+  const started = performance.now();
   const instance = normalizeInstanceName(flags.instance);
   const record = await readRuntimeInstance(defaultStateDir(), instance);
   if (!record) throw new Error("instance is not running: " + instance);
@@ -1692,6 +1693,7 @@ async function cmdReload(flags: Record<string, string | boolean>): Promise<void>
     scope: ["profiles", "repositories"],
     restartRequiredFor: ["port", "host", "tunnel", "public-hostname"],
   }, null, 2));
+  cliPerf("reload", started);
 }
 
 async function waitForRuntimeHealth(
@@ -1719,6 +1721,7 @@ async function waitForPublicRuntimeHealth(publicUrl: string, attempts = 20): Pro
 }
 
 async function cmdStart(flags: Record<string, string | boolean>): Promise<void> {
+  const started = performance.now();
   const runtimeEnv = await loadRuntimeEnvironment(defaultConfigDir());
   const childEnv = await applyManagedProfiles(defaultConfigDir(), runtimeEnv.env);
   const serverEnv = withoutTunnelCredentials(childEnv);
@@ -1851,6 +1854,7 @@ async function cmdStart(flags: Record<string, string | boolean>): Promise<void> 
     tunnelAlive: tunnelPid ? isProcessAlive(tunnelPid) : null,
     publicHealthy,
   }, null, 2));
+  cliPerf("start", started);
 }
 
 async function cmdLogs(flags: Record<string, string | boolean>): Promise<void> {
@@ -1879,6 +1883,7 @@ async function cmdStop(flags: Record<string, string | boolean>): Promise<void> {
   const record = await readRuntimeInstance(stateDir, instance);
   if (!record) {
     console.log(JSON.stringify({ stopped: false, reason: "not-running", instance }));
+    cliPerf("stop", started);
     return;
   }
   if (!isProcessAlive(record.pid)) {
@@ -1895,12 +1900,14 @@ async function cmdStop(flags: Record<string, string | boolean>): Promise<void> {
     }
     await removeRuntimeInstance(stateDir, instance);
     console.log(JSON.stringify({ stopped: true, stale: true, instance, pid: record.pid }));
+    cliPerf("stop", started);
     return;
   }
   // The health endpoint identifies a service on this port, not the process
   // recorded in our PID file. Check ownership on *all* stop paths, even
   // healthy ones. --force must never override an identity mismatch.
   const tunnelRunning = record.tunnelPid !== undefined && isProcessAlive(record.tunnelPid);
+  const ownershipStarted = performance.now();
   // Independently validate both process identities in parallel. The server
   // is checked again immediately before signalling; no ownership guard is
   // removed. On Windows this overlaps two expensive CIM queries.
@@ -1908,6 +1915,7 @@ async function cmdStop(flags: Record<string, string | boolean>): Promise<void> {
     runtimeProcessMatchesRecord(record),
     tunnelRunning ? runtimeTunnelMatchesRecord(record) : Promise.resolve(true),
   ]);
+  cliPerf("stop ownership preflight", ownershipStarted);
   if (!serverOwned) {
     throw new Error(
       "refusing stop because pid " + record.pid + " could not be verified as instance " + instance,
@@ -1920,17 +1928,23 @@ async function cmdStop(flags: Record<string, string | boolean>): Promise<void> {
       "refusing stop because tunnel pid " + record.tunnelPid + " could not be verified as instance " + instance,
     );
   }
+  const healthStarted = performance.now();
   const healthy = await runtimeHealth(record);
+  cliPerf("stop health check", healthStarted);
   if (!healthy && flags.force !== true) {
     throw new Error(
       "refusing to signal pid " + record.pid + " because its health endpoint is not responding; retry with --force only after verifying instance identity",
     );
   }
   // Recheck immediately before signalling (processes can exit between probes).
-  if (!(await runtimeProcessMatchesRecord(record))) {
+  const finalOwnershipStarted = performance.now();
+  const finalOwned = await runtimeProcessMatchesRecord(record);
+  cliPerf("stop ownership recheck", finalOwnershipStarted);
+  if (!finalOwned) {
     throw new Error("runtime process identity changed before stop: " + instance);
   }
   process.kill(record.pid, "SIGTERM");
+  const serverWaitStarted = performance.now();
   for (let i = 0; i < 50 && isProcessAlive(record.pid); i += 1) {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
@@ -1944,7 +1958,9 @@ async function cmdStop(flags: Record<string, string | boolean>): Promise<void> {
     }
   }
   if (isProcessAlive(record.pid)) throw new Error("instance " + instance + " did not stop cleanly");
+  cliPerf("stop server exit wait", serverWaitStarted);
   if (record.tunnelPid && isProcessAlive(record.tunnelPid)) {
+    const tunnelWaitStarted = performance.now();
     if (!(await runtimeTunnelMatchesRecord(record))) {
       throw new Error("refusing tunnel stop because process identity changed: " + instance);
     }
@@ -1966,15 +1982,20 @@ async function cmdStop(flags: Record<string, string | boolean>): Promise<void> {
         throw new Error("Cloudflare tunnel for instance " + instance + " did not stop cleanly");
       }
     }
+    cliPerf("stop tunnel exit wait", tunnelWaitStarted);
   }
+  const cleanupStarted = performance.now();
   await removeRuntimeInstance(stateDir, instance);
+  cliPerf("stop record cleanup", cleanupStarted);
   console.log(JSON.stringify({ stopped: true, instance, pid: record.pid, tunnelPid: record.tunnelPid ?? null }));
   cliPerf("stop", started);
 }
 
 async function cmdRestart(flags: Record<string, string | boolean>): Promise<void> {
+  const started = performance.now();
   await cmdStop({ ...flags, force: true });
   await cmdStart(flags);
+  cliPerf("restart", started);
 }
 
 async function main(): Promise<void> {
