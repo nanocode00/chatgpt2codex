@@ -53,6 +53,10 @@ describe("CLI is the execution authority; GUI is a thin adapter", () => {
     }
     expect(app).toContain("refreshing.current = true");
     expect(app).toContain("onClick={() => { void refreshVisibleScreen(); }}");
+    expect(app).not.toContain("checkRuntime(port)");
+    expect(app).toContain("void refreshOwnedStatus(); }, 10_000)");
+    expect(app).toContain("statusGeneration.current");
+    expect(app).toContain('if (action === "status" && generation !== statusGeneration.current) return;');
     const screens = ["Dashboard", "ProjectsScreen", "ProfilesScreen", "JobsScreen", "ConnectionsSecurityScreen", "SettingsScreen"];
     for (const screen of screens) {
       expect(readFileSync("desktop/src/" + screen + ".tsx", "utf8"))
@@ -68,5 +72,6 @@ describe("CLI is the execution authority; GUI is a thin adapter", () => {
     expect(cli).toContain('console.error(`[c2c perf]');
     expect(cli).toContain("cliPerf(\"catalog list\", started)");
     expect(cli).toContain("cliPerf(\"stop\", started)");
+    expect(consoleBridge).toContain("브리지 포함 {}ms");
   });
 });

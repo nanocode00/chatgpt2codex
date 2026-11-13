@@ -5,6 +5,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Component, Path};
+use std::time::Instant;
 
 use crate::managed_cli;
 
@@ -287,6 +288,7 @@ fn redact_json(value: Value, depth: usize) -> Value {
 }
 
 fn execute(request: CliParityRequest) -> Result<CliParityResponse, String> {
+    let started = Instant::now();
     let p = plan(&request)?;
     let raw = managed_cli::parity_cli(&p.args, p.mutating, p.require_record, p.text, p.allow_nonzero)?;
     let (json, text) = if p.text {
@@ -302,7 +304,8 @@ fn execute(request: CliParityRequest) -> Result<CliParityResponse, String> {
     }).collect::<Vec<_>>().join(" ");
     Ok(CliParityResponse {
         operation: request.operation, command: format!("c2c {args_preview}"), json, text,
-        note: "SHA 검증된 번들 CLI · tauri-preview-v1 · 앱 전용 HOME".into(),
+        note: format!("검증된 C2C CLI 호출 · 브리지 포함 {}ms · 앱 전용 HOME",
+            started.elapsed().as_millis()),
     })
 }
 

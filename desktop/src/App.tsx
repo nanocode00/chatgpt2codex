@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { checkRuntime, manageOwnedCli, setOwnedPort, copyOwnedOwnerToken, registerOwnedOwnerToken, inspectOwnedPublicTunnelHealth, inspectOwnedCatalog, unregisterOwnedRepository, pickOwnedRepositoryFolder, registerOwnedPickedRepository, cancelOwnedPickedRepository, closePreviewWithOwnedMcp, hidePreviewWindow, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type ManagedAction, type ManagedResult, type CatalogInspection, type PickedRepositoryFolder, type PublicTunnelHealth, type RuntimeHealth } from "./runtime";
+import { manageOwnedCli, setOwnedPort, copyOwnedOwnerToken, registerOwnedOwnerToken, inspectOwnedPublicTunnelHealth, inspectOwnedCatalog, unregisterOwnedRepository, pickOwnedRepositoryFolder, registerOwnedPickedRepository, cancelOwnedPickedRepository, closePreviewWithOwnedMcp, hidePreviewWindow, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type ManagedAction, type ManagedResult, type CatalogInspection, type PickedRepositoryFolder, type PublicTunnelHealth } from "./runtime";
 import { SettingsScreen } from "./SettingsScreen";
 import { DiagnosticsScreen } from "./DiagnosticsScreen";
 import { ConnectionsSecurityScreen } from "./ConnectionsSecurityScreen";
@@ -61,8 +61,6 @@ function App() {
   const [autoRefresh, setAutoRefresh] = useState(loadAutoRefresh);
   const [publicPreferred, setPublicPreferred] = useState(loadPublicPreference);
   const [toast, setToast] = useState<AppToast | null>(null);
-  const [status, setStatus] = useState<RuntimeHealth | null>(null);
-  const [checking, setChecking] = useState(false);
   const [exitError, setExitError] = useState("");
   const [exitBusy, setExitBusy] = useState(false);
   const [trayError, setTrayError] = useState("");
@@ -92,10 +90,10 @@ function App() {
   const [previewStartup, setPreviewStartup] = useState<PreviewStartupInspection | null>(null);
   const [startupBusy, setStartupBusy] = useState(false);
   const [startupError, setStartupError] = useState("");
-  const requestCounter = useRef(0);
   const publicProbeBusy = useRef(false);
   const toastId = useRef(0);
   const statusRequest = useRef<Promise<void> | null>(null);
+  const statusGeneration = useRef(0);
   const catalogRequest = useRef<Promise<void> | null>(null);
   const catalogLastRead = useRef(0);
   const refreshing = useRef(false);
@@ -121,25 +119,6 @@ function App() {
     return () => { active = false; unlisten?.(); };
   }, [native, notify]);
 
-  const runCheck = useCallback(async () => {
-    const current = ++requestCounter.current;
-    setChecking(true);
-    try {
-      const next = await checkRuntime(port);
-      if (current !== requestCounter.current) return;
-      setStatus(next);
-    } catch (error) {
-      if (current !== requestCounter.current) return;
-      const detail = error instanceof Error ? error.message : String(error);
-      setStatus({ online: false, port, service: "ChatGPT To Codex",
-        endpoint: "http://127.0.0.1:" + port + "/mcp",
-        details: "검사 실패: " + detail });
-    } finally {
-      if (current === requestCounter.current) setChecking(false);
-    }
-  }, [port]);
-
-  useEffect(() => { void runCheck(); return () => { requestCounter.current += 1; }; }, [runCheck]);
   useEffect(() => {
     if (!native) return;
     void inspectPreviewAutostart().then(setPreviewStartup).catch(() => {
@@ -171,11 +150,6 @@ function App() {
       setStartupBusy(false);
     }
   };
-  useEffect(() => {
-    if (!autoRefresh || !native) return;
-    const interval = setInterval(() => { void runCheck(); }, 10_000);
-    return () => clearInterval(interval);
-  }, [autoRefresh, native, runCheck]);
 
 
   const runOwnedAction = useCallback(async (action: ManagedAction, confirmedRotation = false) => {
@@ -193,10 +167,14 @@ function App() {
       setOwnedToken(null);
       setOwnedPublicHealth(null);
     }
-    setOwnedBusy(true);
+    // A delayed status result must never overwrite a newer start/stop/port
+    // mutation. It remains a view of the canonical CLI response only.
+    const generation = action === "status" ? statusGeneration.current : ++statusGeneration.current;
+    if (action !== "status") setOwnedBusy(true);
     setOwnedError("");
     try {
       const next = await manageOwnedCli(action);
+      if (action === "status" && generation !== statusGeneration.current) return;
       setOwnedPublicHealth(previous =>
         previous?.endpoint && previous.endpoint === next.publicConnector ? previous : null);
       if (next.oneTimeOwnerToken) {
@@ -217,11 +195,12 @@ function App() {
         notify(labels[action] + " 완료");
       }
     } catch (error) {
+      if (action === "status" && generation !== statusGeneration.current) return;
       const message = nativeFailureMessage(error, "전용 CLI 작업에 실패했습니다.");
       setOwnedError(message);
-      notify(message, "error");
+      if (action !== "status") notify(message, "error");
     } finally {
-      setOwnedBusy(false);
+      if (action !== "status") setOwnedBusy(false);
     }
   }, [notify]);
 
@@ -231,6 +210,15 @@ function App() {
     statusRequest.current = task;
     try { await task; } finally { statusRequest.current = null; }
   }, [runOwnedAction]);
+
+  useEffect(() => {
+    if (!autoRefresh || !native) return;
+    // The previous monitor launched an independent Tauri Health probe every
+    // 10 seconds, even though no screen consumed its result. Share the same
+    // canonical CLI status request used by the visible screens instead.
+    const interval = window.setInterval(() => { void refreshOwnedStatus(); }, 10_000);
+    return () => window.clearInterval(interval);
+  }, [autoRefresh, native, refreshOwnedStatus]);
 
   const refreshCatalog = useCallback(async (force = true) => {
     if (!force && catalogLastRead.current && Date.now() - catalogLastRead.current < 3000) return;
@@ -515,6 +503,7 @@ function App() {
     if (owned?.running && !window.confirm(
       `서버 포트를 ${port}에서 ${next}(으)로 변경할까요?\n\n실행 중인 MCP와 터널을 중지한 뒤 새 포트로 재시작합니다. ChatGPT 연결이 일시적으로 끊길 수 있습니다.`
     )) return;
+    ++statusGeneration.current;
     setPortBusy(true);
     setOwnedBusy(true);
     setSettingError("");
