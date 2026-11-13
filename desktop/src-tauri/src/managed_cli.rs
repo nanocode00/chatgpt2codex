@@ -1167,6 +1167,7 @@ mod tests {
         };
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
+        fs::create_dir_all(root.home.join(".config")).unwrap();
         persist_port(&root, port).unwrap();
         assert!(complete_exit_without_record(&root).is_err());
         drop(listener);

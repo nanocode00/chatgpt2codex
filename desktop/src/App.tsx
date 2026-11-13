@@ -56,6 +56,8 @@ function App() {
   const [diagnosticsRefreshKey, setDiagnosticsRefreshKey] = useState(0);
   const [cliRefreshKey, setCliRefreshKey] = useState(0);
   const [refreshBusy, setRefreshBusy] = useState(false);
+  const [jobsListBusy, setJobsListBusy] = useState(false);
+  const [diagnosticsOverviewBusy, setDiagnosticsOverviewBusy] = useState(false);
   const [port, setPort] = useState(loadPort);
   const [draftPort, setDraftPort] = useState(String(loadPort()));
   const [autoRefresh, setAutoRefresh] = useState(loadAutoRefresh);
@@ -614,10 +616,14 @@ function App() {
           <div className="breadcrumb"><span>ChatGPT To Codex</span><ChevronRight size={15}/><strong>{NAV.find(n => n.name === screen)?.label}</strong></div>
           <div className="header-actions">
             <span className="host-indicator"><span className={"host-dot " + (native ? "connected" : "")} />{native ? "이 컴퓨터" : "웹 미리보기"}</span>
-            <button className={"icon-btn " + (refreshBusy ? "spin-icon" : "")} type="button"
+            <button className={"icon-btn " + (refreshBusy ||
+                (screen === "jobs" && jobsListBusy) ||
+                (screen === "diagnostics" && diagnosticsOverviewBusy) ? "spin-icon" : "")} type="button"
               onClick={() => { void refreshVisibleScreen(); }} aria-label="현재 화면 새로고침"
               title="현재 화면 새로고침" disabled={refreshBusy || checking || ownedBusy ||
-                catalogBusy || exitBusy || folderBusy || unregisterBusy}><RefreshCcw size={17}/></button>
+                catalogBusy || exitBusy || folderBusy || unregisterBusy || portBusy || startupBusy ||
+                (screen === "jobs" && jobsListBusy) ||
+                (screen === "diagnostics" && diagnosticsOverviewBusy)}><RefreshCcw size={17}/></button>
           </div>
         </header>
 
@@ -661,6 +667,7 @@ function App() {
 
         {screen === "jobs" && <JobsScreen onNotify={notify}
           refreshKey={jobsRefreshKey} onProjects={() => setScreen("projects")}
+          onListBusyChange={setJobsListBusy}
         />}
 
         {screen === "cli" && <>
@@ -693,6 +700,7 @@ function App() {
           native={native} owned={owned} ownedBusy={ownedBusy} ownedError={ownedError}
           publicHealth={ownedPublicHealth} publicChecking={ownedPublicChecking}
           refreshKey={diagnosticsRefreshKey}
+          onOverviewBusyChange={setDiagnosticsOverviewBusy}
           onConnections={() => setScreen("connections")}
           onNotify={notify}
         />}

@@ -16,6 +16,7 @@ interface JobsScreenProps {
   onNotify: (message: string, tone?: "info" | "error") => void;
   onProjects: () => void;
   refreshKey: number;
+  onListBusyChange?: (busy: boolean) => void;
 }
 function errorText(error: unknown): string {
   return (typeof error === "string" ? error : error instanceof Error ? error.message : "작업 조회에 실패했습니다.").slice(0, 460);
@@ -31,10 +32,12 @@ const filterItems: { id: JobFilter; label: string; symbol: "layers" | "active" |
   { id: "attention", label: "대기·차단", symbol: "attention" },
   { id: "history", label: "완료·취소", symbol: "history" }
 ];
-export function JobsScreen({ onNotify, onProjects, refreshKey }: JobsScreenProps) {
+export function JobsScreen({ onNotify, onProjects, refreshKey, onListBusyChange }: JobsScreenProps) {
   const native = isNativeApp();
   const [items, setItems] = useState<JobListItem[] | null>(null);
   const [listBusy, setListBusy] = useState(false);
+  useEffect(() => { onListBusyChange?.(listBusy); }, [listBusy, onListBusyChange]);
+  useEffect(() => () => onListBusyChange?.(false), [onListBusyChange]);
   const listLock = useRef(false);
   const [listError, setListError] = useState("");
   const [filter, setFilter] = useState<JobFilter>("all");

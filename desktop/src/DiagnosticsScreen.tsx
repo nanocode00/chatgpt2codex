@@ -17,6 +17,7 @@ interface DiagnosticsScreenProps {
   publicHealth: PublicTunnelHealth | null;
   publicChecking: boolean;
   refreshKey: number;
+  onOverviewBusyChange?: (busy: boolean) => void;
   onConnections: () => void;
   onNotify: (message: string, tone?: "info" | "error") => void;
 }
@@ -31,7 +32,7 @@ const labelTime = () => new Intl.DateTimeFormat("ko-KR", {
 
 export function DiagnosticsScreen({
   native, owned, ownedBusy, ownedError, publicHealth, publicChecking, refreshKey,
-  onConnections, onNotify
+  onConnections, onNotify, onOverviewBusyChange
 }: DiagnosticsScreenProps) {
   const [runtime, setRuntime] = useState<RuntimeDiagnostic | null>(null);
   const [health, setHealth] = useState<HealthDiagnostic | null>(null);
@@ -39,6 +40,8 @@ export function DiagnosticsScreen({
   const [checkedAt, setCheckedAt] = useState("");
   const [snapshotError, setSnapshotError] = useState("");
   const [busy, setBusy] = useState<"overview" | "doctor" | "logs" | "locks" | "reload" | null>(null);
+  useEffect(() => { onOverviewBusyChange?.(busy === "overview"); }, [busy, onOverviewBusyChange]);
+  useEffect(() => () => onOverviewBusyChange?.(false), [onOverviewBusyChange]);
   const [doctor, setDoctor] = useState<string | null>(null);
   const [doctorError, setDoctorError] = useState("");
   const [logTab, setLogTab] = useState<"server" | "tunnel">("server");
