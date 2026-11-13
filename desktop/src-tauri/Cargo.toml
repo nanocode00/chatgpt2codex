@@ -31,3 +31,4 @@ tauri-plugin-single-instance = "=2.3.2"
 # MSRV-compatible native Rust folder picker. No WebView dialog permissions.
 tauri-plugin-dialog = "=2.0.1"
 winreg = "0.52"
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Threading"] }
