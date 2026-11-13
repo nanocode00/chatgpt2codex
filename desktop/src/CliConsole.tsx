@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { CheckCircle2, ClipboardCopy, Clock3, Play, RefreshCcw, TerminalSquare, XCircle } from "lucide-react";
 import {
   checkOwnedCliConsole, isNativeApp, runOwnedCliConsole,
   type CliConsoleCheck, type OwnedCliParityResponse
 } from "./runtime";
+import type { ScreenRefreshHandle } from "./screen-refresh";
 import "./cli-console.css";
 
 const EXAMPLES = [
@@ -48,11 +49,10 @@ function outputText(entry: HistoryEntry): string {
   return entry.result.text ?? JSON.stringify(entry.result.json, null, 2) ?? "출력이 없습니다.";
 }
 
-export function CliConsole({ onNotify, onRuntimeChanged, refreshKey = 0 }: {
+export const CliConsole = forwardRef<ScreenRefreshHandle, {
   onNotify?: (message: string, tone?: "info" | "error") => void;
   onRuntimeChanged?: () => void;
-  refreshKey?: number;
-}) {
+}>(function CliConsole({ onNotify, onRuntimeChanged }, ref) {
   const native = isNativeApp();
   const [input, setInput] = useState(sessionDraft);
   const [validation, setValidation] = useState<CliConsoleCheck | null>(null);
@@ -67,6 +67,7 @@ export function CliConsole({ onNotify, onRuntimeChanged, refreshKey = 0 }: {
   const historyCursor = useRef(-1);
   const historyDraft = useRef(sessionDraft);
   const runningSince = useRef(0);
+  const activeExecution = useRef<Promise<void> | null>(null);
   const selected = history.find(item => item.id === selectedId) ?? history[0] ?? null;
   const updateInput = (command: string, browsingHistory = false) => {
     if (!browsingHistory) {
@@ -121,15 +122,19 @@ export function CliConsole({ onNotify, onRuntimeChanged, refreshKey = 0 }: {
     return () => { active = false; window.clearTimeout(timer); };
   }, [input, native]);
 
-  useEffect(() => {
-    if (!refreshKey || !native || busy || pending) return;
-    // The shared top-bar refresh must never replay a mutating command.
-    void checkOwnedCliConsole(lastReadOnlyCommand).then(checked => {
-      if (!checked.mutating) void runChecked(lastReadOnlyCommand, checked);
-    }).catch(error => onNotify?.(errorText(error), "error"));
-    // Only an explicit top-bar refresh should trigger this request.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshKey]);
+  useImperativeHandle(ref, () => ({ refresh: async () => {
+    if (!native || pending) return;
+    // Never replay a mutation. If another command is in flight, wait for it
+    // before validating and refreshing the last known read-only command.
+    if (activeExecution.current) await activeExecution.current;
+    try {
+      const command = lastReadOnlyCommand;
+      const checked = await checkOwnedCliConsole(command);
+      if (!checked.mutating) await runChecked(command, checked);
+    } catch (error) {
+      onNotify?.(errorText(error), "error");
+    }
+  } }));
 
   async function checkNow() {
     if (!native || busy || !input.trim()) return;
@@ -167,32 +172,40 @@ export function CliConsole({ onNotify, onRuntimeChanged, refreshKey = 0 }: {
   }
 
   async function runChecked(command: string, checked: CliConsoleCheck) {
-    setBusy(true);
-    setElapsedMs(0);
-    const started = performance.now();
-    runningSince.current = started;
-    let result: OwnedCliParityResponse | null = null;
-    let error: string | null = null;
-    try {
-      result = await runOwnedCliConsole(command, checked.mutating);
-      if (!checked.mutating) lastReadOnlyCommand = command;
-      if (checked.mutating) onRuntimeChanged?.();
-    } catch (reason) {
-      error = errorText(reason);
-      onNotify?.(error, "error");
-    } finally {
-      const id = ++sessionSequence;
-      const entry: HistoryEntry = {
-        id, input: command, at: new Date().toLocaleTimeString("ko-KR", { hour12: false }),
-        elapsedMs: Math.round(performance.now() - started), result, error
-      };
-      setHistory(previous => {
-        const next = [entry, ...previous].slice(0, 25);
-        sessionHistory = next;
-        return next;
-      });
-      setSelectedId(id);
-      setBusy(false);
+    if (activeExecution.current) return activeExecution.current;
+    const request = (async () => {
+      setBusy(true);
+      setElapsedMs(0);
+      const started = performance.now();
+      runningSince.current = started;
+      let result: OwnedCliParityResponse | null = null;
+      let error: string | null = null;
+      try {
+        result = await runOwnedCliConsole(command, checked.mutating);
+        if (!checked.mutating) lastReadOnlyCommand = command;
+        if (checked.mutating) onRuntimeChanged?.();
+      } catch (reason) {
+        error = errorText(reason);
+        onNotify?.(error, "error");
+      } finally {
+        const id = ++sessionSequence;
+        const entry: HistoryEntry = {
+          id, input: command, at: new Date().toLocaleTimeString("ko-KR", { hour12: false }),
+          elapsedMs: Math.round(performance.now() - started), result, error
+        };
+        setHistory(previous => {
+          const next = [entry, ...previous].slice(0, 25);
+          sessionHistory = next;
+          return next;
+        });
+        setSelectedId(id);
+        setBusy(false);
+      }
+    })();
+    activeExecution.current = request;
+    try { await request; }
+    finally {
+      if (activeExecution.current === request) activeExecution.current = null;
     }
   }
 
@@ -333,4 +346,4 @@ export function CliConsole({ onNotify, onRuntimeChanged, refreshKey = 0 }: {
       </div>
     </div>}
   </div>;
-}
+});

@@ -15,6 +15,7 @@ import { Dashboard } from "./Dashboard";
 import { ProjectsScreen } from "./ProjectsScreen";
 import { ProfilesScreen } from "./ProfilesScreen";
 import { JobsScreen } from "./JobsScreen";
+import type { ScreenRefreshHandle } from "./screen-refresh";
 import { Toast, type AppToast } from "./Toast";
 import { storedPublicPreference } from "./dashboard-state";
 import { DEFAULT_HEALTH_PORT, parseUiPort, storedAutoRefresh } from "./ui-preferences";
@@ -52,9 +53,6 @@ const NAV: { name: Screen; label: string; icon: typeof LayoutDashboard }[] = [
 function App() {
   const native = isNativeApp();
   const [screen, setScreen] = useState<Screen>("overview");
-  const [jobsRefreshKey, setJobsRefreshKey] = useState(0);
-  const [diagnosticsRefreshKey, setDiagnosticsRefreshKey] = useState(0);
-  const [cliRefreshKey, setCliRefreshKey] = useState(0);
   const [refreshBusy, setRefreshBusy] = useState(false);
   const [port, setPort] = useState(loadPort);
   const [draftPort, setDraftPort] = useState(String(loadPort()));
@@ -90,13 +88,16 @@ function App() {
   const [previewStartup, setPreviewStartup] = useState<PreviewStartupInspection | null>(null);
   const [startupBusy, setStartupBusy] = useState(false);
   const [startupError, setStartupError] = useState("");
-  const publicProbeBusy = useRef(false);
+  const publicProbeRequest = useRef<Promise<void> | null>(null);
   const toastId = useRef(0);
   const statusRequest = useRef<Promise<void> | null>(null);
   const statusGeneration = useRef(0);
   const catalogRequest = useRef<Promise<void> | null>(null);
   const catalogLastRead = useRef(0);
   const refreshing = useRef(false);
+  const jobsScreenRef = useRef<ScreenRefreshHandle | null>(null);
+  const diagnosticsScreenRef = useRef<ScreenRefreshHandle | null>(null);
+  const cliScreenRef = useRef<ScreenRefreshHandle | null>(null);
   const notify = useCallback((message: string, tone: "info" | "error" = "info") => {
     setToast({ id: ++toastId.current, message, tone });
   }, []);
@@ -360,19 +361,26 @@ function App() {
     }
   }
 
-  const checkOwnedPublicHealth = useCallback(async () => {
-    if (publicProbeBusy.current) return;
-    publicProbeBusy.current = true;
-    setOwnedPublicChecking(true);
-    try {
-      setOwnedPublicHealth(await inspectOwnedPublicTunnelHealth());
-    } catch (error) {
-      setOwnedPublicHealth({ state: "unavailable", endpoint: null,
-        details: nativeFailureMessage(error, "Tauri 전용 외부 연결 확인에 실패했습니다.") });
-    } finally {
-      publicProbeBusy.current = false;
-      setOwnedPublicChecking(false);
-    }
+  const checkOwnedPublicHealth = useCallback((): Promise<void> => {
+    // A manual refresh joins the in-flight 30s/focus public HTTPS probe,
+    // so the topbar cannot stop spinning while that native check is pending.
+    if (publicProbeRequest.current) return publicProbeRequest.current;
+    const request = (async () => {
+      setOwnedPublicChecking(true);
+      try {
+        setOwnedPublicHealth(await inspectOwnedPublicTunnelHealth());
+      } catch (error) {
+        setOwnedPublicHealth({ state: "unavailable", endpoint: null,
+          details: nativeFailureMessage(error, "Tauri 전용 외부 연결 확인에 실패했습니다.") });
+      } finally {
+        setOwnedPublicChecking(false);
+      }
+    })();
+    publicProbeRequest.current = request;
+    void request.finally(() => {
+      if (publicProbeRequest.current === request) publicProbeRequest.current = null;
+    });
+    return request;
   }, []);
 
   useEffect(() => {
@@ -479,14 +487,16 @@ function App() {
           if (owned?.tunnelRunning) await checkOwnedPublicHealth();
           break;
         case "diagnostics":
-          setDiagnosticsRefreshKey(value => value + 1);
-          if (owned?.tunnelRunning) await checkOwnedPublicHealth();
+          await Promise.all([
+            diagnosticsScreenRef.current?.refresh(),
+            owned?.tunnelRunning ? checkOwnedPublicHealth() : Promise.resolve()
+          ]);
           break;
         case "jobs":
-          setJobsRefreshKey(value => value + 1);
+          await jobsScreenRef.current?.refresh();
           break;
         case "cli":
-          setCliRefreshKey(value => value + 1);
+          await cliScreenRef.current?.refresh();
           break;
         case "settings":
           await Promise.all([refreshOwnedStatus(), refreshPreviewStartup()]);
@@ -624,13 +634,13 @@ function App() {
           onRefresh={refreshCatalog} onNotify={notify}
         />}
 
-        {screen === "jobs" && <JobsScreen onNotify={notify}
-          refreshKey={jobsRefreshKey} onProjects={() => setScreen("projects")}
+        {screen === "jobs" && <JobsScreen ref={jobsScreenRef} onNotify={notify}
+          onProjects={() => setScreen("projects")}
         />}
 
         {screen === "cli" && <>
           <div className="page-heading"><div><h1>CLI 콘솔</h1><p>명령을 입력해 문법을 확인하고 실행 결과를 살펴보세요.</p></div></div>
-          <CliConsole onNotify={notify} refreshKey={cliRefreshKey} onRuntimeChanged={() => {
+          <CliConsole ref={cliScreenRef} onNotify={notify} onRuntimeChanged={() => {
             void refreshOwnedStatus();
             void refreshCatalog();
           }}/>
@@ -654,10 +664,9 @@ function App() {
           onDiagnostics={() => setScreen("diagnostics")}
         />}
 
-        {screen === "diagnostics" && <DiagnosticsScreen
+        {screen === "diagnostics" && <DiagnosticsScreen ref={diagnosticsScreenRef}
           native={native} owned={owned} ownedBusy={ownedBusy} ownedError={ownedError}
           publicHealth={ownedPublicHealth} publicChecking={ownedPublicChecking}
-          refreshKey={diagnosticsRefreshKey}
           onConnections={() => setScreen("connections")}
           onNotify={notify}
         />}
