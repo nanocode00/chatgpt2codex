@@ -3,6 +3,18 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
+
+// The GUI cannot supply or forge startup verification results. Native code
+// records only success/failure and duration, never file paths or hashes.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CiPrewarmResult {
+    succeeded: bool,
+    elapsed_ms: f64,
+}
+
+static PREWARM_RESULT: OnceLock<Mutex<Option<CiPrewarmResult>>> = OnceLock::new();
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -21,6 +33,7 @@ pub struct CiPerfSample {
 struct CiPerfReport {
     schema_version: u8,
     note: &'static str,
+    prewarm: Option<CiPrewarmResult>,
     samples: Vec<CiPerfSample>,
     error: Option<String>,
 }
@@ -29,6 +42,20 @@ fn enabled() -> bool {
     cfg!(all(debug_assertions, target_os = "windows"))
         && std::env::var("C2C_CI_PERF_RUN").as_deref() == Ok("1")
         && std::env::var_os("C2C_CI_PERF_OUTPUT").is_some()
+}
+
+pub(crate) fn record_bundle_prewarm(elapsed_ms: f64, succeeded: bool) {
+    if !enabled() { return; }
+    let state = PREWARM_RESULT.get_or_init(|| Mutex::new(None));
+    if let Ok(mut result) = state.lock() {
+        *result = Some(CiPrewarmResult { succeeded, elapsed_ms });
+    }
+}
+
+#[tauri::command]
+pub fn ci_perf_prewarm() -> Option<CiPrewarmResult> {
+    if !enabled() { return None; }
+    PREWARM_RESULT.get()?.lock().ok()?.clone()
 }
 
 #[tauri::command]
@@ -41,8 +68,14 @@ pub fn ci_perf_submit(samples: Vec<CiPerfSample>, error: Option<String>) -> Resu
     if !enabled() {
         return Err("CI 전용 성능 기록은 비활성화 상태입니다.".into());
     }
+    let prewarm = ci_perf_prewarm();
     let commands = ["c2c status", "c2c repository list", "c2c profile list"];
     if error.is_none() {
+        if !prewarm.as_ref().is_some_and(|p|
+            p.succeeded && p.elapsed_ms.is_finite() && p.elapsed_ms >= 0.0 && p.elapsed_ms <= 120_000.0
+        ) {
+            return Err("시작 시 번들 검증이 완료되지 않았거나 실패했습니다.".into());
+        }
         if samples.len() != 15 {
             return Err("성능 기록은 각 명령 5회씩 총 15건이어야 합니다.".into());
         }
@@ -63,6 +96,12 @@ pub fn ci_perf_submit(samples: Vec<CiPerfSample>, error: Option<String>) -> Resu
         }) {
             return Err("성능 시간 값이 올바르지 않습니다.".into());
         }
+        // An unexpected full-bundle rehash is thousands of milliseconds on
+        // CI; this loose guard catches the structural regression without
+        // treating noisy runner latency as a production performance SLO.
+        if samples.iter().any(|s| s.bundle_verify_ms > 1_000.0) {
+            return Err("사전 검증 이후 CLI 요청에서 번들 재검증 지연이 발생했습니다.".into());
+        }
     } else if error.as_ref().is_some_and(|e| e.len() > 300) {
         return Err("성능 검사 오류 내용이 너무 깁니다.".into());
     }
@@ -72,8 +111,9 @@ pub fn ci_perf_submit(samples: Vec<CiPerfSample>, error: Option<String>) -> Resu
         return Err("CI 결과는 절대 경로에만 저장할 수 있습니다.".into());
     }
     let report = CiPerfReport {
-        schema_version: 1,
-        note: "GUI=WebView invoke round-trip; bridge=Rust total; bundleVerify=SHA once plus locked cache; childProcess=Node spawn through exit; CLI=handler excluding Node startup",
+        schema_version: 2,
+        note: "prewarm=startup bundle SHA before GUI benchmark; GUI=WebView invoke round-trip; bridge=Rust total; bundleVerify=locked cache reuse; childProcess=Node spawn through exit; CLI=handler excluding Node startup",
+        prewarm,
         samples,
         error,
     };

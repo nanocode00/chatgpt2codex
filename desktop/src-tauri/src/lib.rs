@@ -109,14 +109,28 @@ pub fn run() {
         // legacy WinForms lifecycle actions are registered here.
         .setup(|app| {
             #[cfg(target_os = "windows")]
-            tray_lifecycle::setup(app)?;
+            {
+                tray_lifecycle::setup(app)?;
+                // Start integrity verification as soon as the process starts,
+                // without blocking first paint. The existing Windows cache
+                // serializes concurrent calls and keeps the verified files
+                // write-locked; an early GUI request cannot bypass the check.
+                tauri::async_runtime::spawn_blocking(|| {
+                    let started = std::time::Instant::now();
+                    let succeeded = managed_cli::verify_preview_bundle().is_ok();
+                    ci_perf::record_bundle_prewarm(
+                        started.elapsed().as_secs_f64() * 1000.0,
+                        succeeded,
+                    );
+                });
+            }
             Ok(())
         })
         .on_window_event(|_window, _event| {
             #[cfg(target_os = "windows")]
             tray_lifecycle::on_window_event(_window, _event);
         })
-        .invoke_handler(tauri::generate_handler![runtime_health, cli_operations::close_preview_with_owned_mcp, public_health::inspect_owned_public_tunnel_health, managed_cli::manage_owned_cli, managed_cli::set_owned_port, managed_cli::copy_owned_owner_token, managed_cli::register_owned_owner_token, cli_parity::run_owned_cli_parity, cli_parity::check_owned_cli_console, cli_parity::run_owned_cli_console, ci_perf::ci_perf_enabled, ci_perf::ci_perf_submit, managed_cli::unregister_owned_repository, owned_repository_picker::pick_owned_repository_folder, owned_repository_picker::register_owned_picked_repository, owned_repository_picker::cancel_owned_picked_repository, catalog::inspect_owned_catalog, ui_actions::hide_preview_window, startup::inspect_preview_autostart, startup::set_preview_autostart])
+        .invoke_handler(tauri::generate_handler![runtime_health, cli_operations::close_preview_with_owned_mcp, public_health::inspect_owned_public_tunnel_health, managed_cli::manage_owned_cli, managed_cli::set_owned_port, managed_cli::copy_owned_owner_token, managed_cli::register_owned_owner_token, cli_parity::run_owned_cli_parity, cli_parity::check_owned_cli_console, cli_parity::run_owned_cli_console, ci_perf::ci_perf_enabled, ci_perf::ci_perf_prewarm, ci_perf::ci_perf_submit, managed_cli::unregister_owned_repository, owned_repository_picker::pick_owned_repository_folder, owned_repository_picker::register_owned_picked_repository, owned_repository_picker::cancel_owned_picked_repository, catalog::inspect_owned_catalog, ui_actions::hide_preview_window, startup::inspect_preview_autostart, startup::set_preview_autostart])
         .run(tauri::generate_context!())
         .expect("failed to start ChatGPT To Codex desktop");
 }
