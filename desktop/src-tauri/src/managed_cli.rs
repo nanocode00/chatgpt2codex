@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::cell::Cell;
 use std::fs;
 use std::io::Read;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
@@ -16,6 +17,21 @@ const PREVIOUS_PORT: u16 = 18797;
 const MANIFEST_KIND: &str = "c2c-tauri-isolated-owned-cli-v1";
 const MAX_OUTPUT: usize = 128 * 1024;
 static MUTATION_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+thread_local! {
+    static CI_CLI_HANDLER_MS: Cell<Option<u64>> = const { Cell::new(None) };
+}
+
+pub(crate) fn take_ci_cli_handler_ms() -> Option<u64> {
+    CI_CLI_HANDLER_MS.with(|value| value.replace(None))
+}
+
+fn parse_cli_perf_line(stderr: &str) -> Option<u64> {
+    stderr.lines().filter_map(|line| {
+        let body = line.strip_prefix("[c2c perf] ")?;
+        let (_, value) = body.rsplit_once(": ")?;
+        value.strip_suffix("ms")?.parse::<u64>().ok()
+    }).last()
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -260,6 +276,7 @@ fn record_if_any(root: &Payload) -> Result<Option<serde_json::Value>, String> {
 }
 
 fn cli_output(root: &Payload, args: &[&str], timeout: Duration, allow_nonzero: bool) -> Result<String, String> {
+    let profiling = cfg!(debug_assertions) && std::env::var("C2C_CI_PERF_RUN").as_deref() == Ok("1");
     let config = root.home.join(".config");
     // Read-only list commands must work even before the preview workspace
     // has been initialized. Mutating operations always call ensure_workspace.
@@ -271,7 +288,8 @@ fn cli_output(root: &Payload, args: &[&str], timeout: Duration, allow_nonzero: b
     let mut command = Command::new(&root.node);
     command.arg(&root.cli).args(args)
         .current_dir(workdir)
-        .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+        .stdin(Stdio::null()).stdout(Stdio::piped())
+        .stderr(if profiling { Stdio::piped() } else { Stdio::null() });
     // A strict inherited-env allowlist prevents legacy C2C credentials,
     // Cloudflare tunnel tokens and host config from leaking into a child.
     command.env_clear();
@@ -281,6 +299,7 @@ fn cli_output(root: &Payload, args: &[&str], timeout: Duration, allow_nonzero: b
     command.env("USERPROFILE", &root.home)
         .env("HOME", &root.home)
         .env("XDG_CONFIG_HOME", &config);
+    if profiling { command.env("C2C_CLI_PERF", "1"); }
     // The canonical CLI performs its own audited tunnel process ownership
     // checks. Supply an exact SHA-verified executable path, never PATH lookup.
     if let Some(binary) = &root.cloudflared {
@@ -300,6 +319,16 @@ fn cli_output(root: &Payload, args: &[&str], timeout: Duration, allow_nonzero: b
         }
         bytes
     });
+    let stderr_reader = if profiling {
+        let stderr = child.stderr.take();
+        Some(thread::spawn(move || {
+            let mut bytes = Vec::new();
+            if let Some(pipe) = stderr {
+                let _ = pipe.take(64 * 1024).read_to_end(&mut bytes);
+            }
+            bytes
+        }))
+    } else { None };
     let deadline = Instant::now() + timeout;
     let status = loop {
         match child.try_wait() {
@@ -315,6 +344,13 @@ fn cli_output(root: &Payload, args: &[&str], timeout: Duration, allow_nonzero: b
         let _ = child.wait();
     }
     let bytes = reader.join().unwrap_or_default();
+    if let Some(reader) = stderr_reader {
+        let captured = reader.join().unwrap_or_default();
+        // Only extract the numerical CLI handler duration. Never expose,
+        // persist or print stderr, which may contain sensitive values.
+        let text = String::from_utf8_lossy(&captured);
+        CI_CLI_HANDLER_MS.with(|value| value.set(parse_cli_perf_line(&text)));
+    }
     if status.is_none() {
         return Err("CLI 작업 시간이 초과됐습니다. 관리 상태를 새로 확인하세요.".into());
     }
@@ -338,6 +374,7 @@ fn cli_command(root: &Payload, args: &[&str], timeout: Duration) -> Result<serde
 /// The caller must never pass untrusted argv without validation.
 pub(crate) fn parity_cli(args: &[String], mutating: bool, needs_owned_runtime: bool,
                          output_is_text: bool, allow_nonzero: bool) -> Result<String, String> {
+    CI_CLI_HANDLER_MS.with(|value| value.set(None));
     let root = payload()?;
     // The read-only CLI is authoritative for its own state and errors.
     // Avoid GUI-only workspace creation, PID/Health checks and extra CLI
@@ -946,6 +983,15 @@ pub async fn register_owned_owner_token(candidate: String) -> Result<bool, Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cli_perf_extractor_never_captures_stderr_secrets() {
+        assert_eq!(parse_cli_perf_line("[c2c perf] status: 14ms\n"), Some(14));
+        assert_eq!(parse_cli_perf_line("token=private\n[c2c perf] repository list: 51ms\n"), Some(51));
+        assert_eq!(parse_cli_perf_line("secret=100ms\n"), None);
+        assert_eq!(parse_cli_perf_line("[c2c perf] status: bogusms"), None);
+        assert_eq!(parse_cli_perf_line("[c2c perf] status: -1ms"), None);
+    }
 
     #[test]
     fn saved_port_defaults_to_7979_and_rejects_invalid_config() {

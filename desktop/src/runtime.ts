@@ -194,6 +194,10 @@ export interface OwnedCliParityResponse {
   json: unknown | null;
   text: string | null;
   note: string;
+  /** Milliseconds for Rust plan + verified CLI launch + response parsing. */
+  bridgeMs?: number;
+  /** Milliseconds in the CLI command handler (excludes Node startup). CI only. */
+  cliMs?: number;
 }
 export async function runOwnedCliParity(request: OwnedCliParityRequest): Promise<OwnedCliParityResponse> {
   if (!isNativeApp()) throw new Error("CLI 작업은 Windows Tauri 프리뷰에서만 지원합니다.");
