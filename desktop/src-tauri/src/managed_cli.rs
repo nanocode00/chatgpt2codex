@@ -777,11 +777,13 @@ pub async fn set_owned_port(port: u16) -> Result<ManagedResult, String> {
 }
 
 fn operate(root: Payload, action: &str) -> Result<ManagedResult, String> {
+    // Status is read-only and must be as cheap as the same canonical CLI
+    // command in a terminal. No workspace setup or mutation lock is needed.
+    if action == "status" { return status(&root); }
     ensure_workspace(&root)?;
     let lock = MUTATION_LOCK.get_or_init(|| Mutex::new(()));
     let _guard = lock.lock().map_err(|_| "CLI 제어 잠금에 실패했습니다.")?;
     match action {
-        "status" => status(&root),
         "prepare" => {
             if owner_configured(&root)? {
                 return Err("전용 Owner Token이 이미 설정됐습니다. 토큰을 임의로 재발급하지 않습니다.".into());

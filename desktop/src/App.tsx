@@ -458,7 +458,10 @@ function App() {
     try {
       switch (screen) {
         case "overview":
-          await Promise.all([refreshOwnedStatus(), refreshCatalog()]);
+          await Promise.all([
+            refreshOwnedStatus(), refreshCatalog(),
+            owned?.tunnelRunning ? checkOwnedPublicHealth() : Promise.resolve()
+          ]);
           break;
         case "projects":
         case "profiles":
@@ -470,6 +473,7 @@ function App() {
           break;
         case "diagnostics":
           setDiagnosticsRefreshKey(value => value + 1);
+          if (owned?.tunnelRunning) await checkOwnedPublicHealth();
           break;
         case "jobs":
           setJobsRefreshKey(value => value + 1);
