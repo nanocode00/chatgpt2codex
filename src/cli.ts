@@ -46,6 +46,7 @@ import {
   type RuntimeCatalogReloadSummary,
 } from "./runtime/live-reload.js";
 import { startWindowsReloadControl } from "./runtime/windows-reload.js";
+import { deferPublicHealthOnStart, publicHealthAtStart } from "./runtime/public-start-health-policy.js";
 import { readRuntimeLogTail } from "./runtime/log-tail.js";
 import {
   getRuntimeSecret,
@@ -1730,6 +1731,9 @@ async function cmdStart(flags: Record<string, string | boolean>): Promise<void> 
   serverEnv.CHATGPT2CODEX_DOCKER_PROFILE_LOCKED =
     process.env.CHATGPT2CODEX_DOCKER_PROFILES?.trim() ? "1" : "0";
   const options = await runtimeHttpOptions(flags, runtimeEnv.fileEnv);
+  // This is not a success override: Tauri has a separate trusted native
+  // HTTPS probe. Other CLI callers retain the original blocking check.
+  const deferPublicHealth = deferPublicHealthOnStart(flags, options.instance, options.tunnel);
   if (!options.portExplicit) {
     options.port = await findAvailableLocalPort(options.host);
     if (typeof flags["public-url"] !== "string" && options.tunnel === "none") {
@@ -1755,6 +1759,7 @@ async function cmdStart(flags: Record<string, string | boolean>): Promise<void> 
   let tunnelPid: number | undefined;
   let tunnelLogPath: string | undefined;
   if (options.tunnel === "cloudflare") {
+    const tunnelStarted = performance.now();
     const legacyCredentialKey = ["CLOUDFLARED", "TUNNEL", "TOKEN"].join("_");
     const credential =
       process.env[legacyCredentialKey]?.trim() ||
@@ -1773,8 +1778,10 @@ async function cmdStart(flags: Record<string, string | boolean>): Promise<void> 
     tunnelPid = tunnel.pid;
     tunnelLogPath = tunnel.logPath;
     options.publicUrl = tunnel.publicUrl;
+    cliPerf("start tunnel ready", tunnelStarted);
   }
 
+  const localStarted = performance.now();
   const entrypoint = process.argv[1];
   if (!entrypoint) throw new Error("cannot determine chatgpt2codex CLI entrypoint");
   const args = [
@@ -1843,10 +1850,14 @@ async function cmdStart(flags: Record<string, string | boolean>): Promise<void> 
     publicUrl: options.publicUrl,
   };
   await writeRuntimeInstance(stateDir, mergedRecord);
-  const publicHealthy =
-    options.tunnel === "cloudflare"
-      ? await waitForPublicRuntimeHealth(options.publicUrl)
-      : null;
+  cliPerf("start local ready", localStarted);
+  const publicCheckStarted = performance.now();
+  const publicHealthy = await publicHealthAtStart(
+    options.tunnel, deferPublicHealth, options.publicUrl, waitForPublicRuntimeHealth,
+  );
+  if (options.tunnel === "cloudflare" && !deferPublicHealth) {
+    cliPerf("start public health", publicCheckStarted);
+  }
   console.log(JSON.stringify({
     started: true,
     ...mergedRecord,

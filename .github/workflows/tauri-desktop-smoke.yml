@@ -5,6 +5,9 @@ on:
     paths:
       - "desktop/**"
       - "src/cli.ts"
+      - "src/runtime/public-start-health-policy.ts"
+      - "src/runtime/public-start-health-policy.test.ts"
+      - "src/tauri-public-start-performance.test.ts"
       - "src/runtime/live-reload.ts"
       - "src/runtime/live-reload.test.ts"
       - "src/runtime/windows-reload.ts"
@@ -63,6 +66,8 @@ jobs:
         run: npm exec -- vitest run src/runtime/windows-reload.test.ts src/runtime/live-reload.test.ts
       - name: Verify startup prewarm and GUI latency measurement contracts
         run: npm exec -- vitest run src/tauri-ci-gui-cli-latency.test.ts
+      - name: Verify Tauri-only deferred public HTTPS startup policy
+        run: npm exec -- vitest run src/runtime/public-start-health-policy.test.ts src/tauri-public-start-performance.test.ts
       - name: Test native Windows no-tunnel CLI start stop restart and PID ownership
         shell: pwsh
         run: ./scripts/test-windows-cli-lifecycle-isolated.ps1
