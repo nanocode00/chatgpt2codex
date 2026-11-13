@@ -1,7 +1,7 @@
 import type { FormEvent } from "react";
 import {
   Activity, HardDrive, LockKeyhole, Power,
-  RefreshCcw, ShieldCheck, Square, X
+  RefreshCcw, ShieldCheck, Square
 } from "lucide-react";
 import type { PreviewStartupInspection, RuntimeHealth } from "./runtime";
 import "./settings-screen.css";
@@ -22,12 +22,13 @@ interface SettingsScreenProps {
   startupError: string;
   onRefreshStartup: () => void;
   onToggleStartup: (enabled: boolean) => void;
+  portBusy: boolean;
+  ownedRunning: boolean;
   exitBusy: boolean;
   ownedBusy: boolean;
   exitError: string;
   trayError: string;
   onHide: () => void;
-  onExitApp: () => void;
   onExitAll: () => void;
 }
 
@@ -35,15 +36,14 @@ export function SettingsScreen({
   native, port, draftPort, onDraftPort, onSavePort, autoRefresh,
   onAutoRefresh, monitorStatus, settingError, settingsNotice, previewStartup,
   startupBusy, startupError, onRefreshStartup, onToggleStartup,
-  exitBusy, ownedBusy, exitError, trayError, onHide, onExitApp, onExitAll
+  portBusy, ownedRunning, exitBusy, ownedBusy, exitError, trayError, onHide, onExitAll
 }: SettingsScreenProps) {
-  const targetName = port === 18797 ? "Tauri 전용 MCP" : "사용자 지정";
   const canExit = native && !exitBusy && !ownedBusy;
 
   return <div className="settings-screen">
     <header className="settings-heading">
       <div><p className="eyebrow">APP PREFERENCES</p><h1>설정</h1>
-        <p>Windows 앱의 실행 방식과 상태 조회를 관리합니다. 서버 구성과 인증은 이 화면에서 변경하지 않습니다.</p></div>
+        <p>Windows 자동 시작, MCP 서버 포트와 앱 종료 동작을 관리합니다.</p></div>
     </header>
 
     <div className="settings-grid">
@@ -74,27 +74,29 @@ export function SettingsScreen({
       <section className="panel settings-card" aria-labelledby="settings-monitor">
         <div className="settings-card-heading">
           <span className="icon-tile"><Activity size={18}/></span>
-          <div><h2 id="settings-monitor">상태 모니터링</h2>
-            <p>상태 조회 대상만 변경하며 서버 수신 포트는 바꾸지 않습니다.</p></div>
+          <div><h2 id="settings-monitor">서버 포트 설정</h2>
+            <p>실제 MCP 서버의 수신 포트와 상태 확인 포트를 함께 변경합니다.</p></div>
         </div>
         <form className="settings-monitor-form" onSubmit={onSavePort}>
-          <label htmlFor="settings-monitor-port">조회할 localhost 포트</label>
-          <div className="settings-presets">
-            <button type="button" aria-pressed={draftPort === "18797"}
-              onClick={() => onDraftPort("18797")}>Tauri 전용 · 18797</button>
-          </div>
+          <label htmlFor="settings-monitor-port">MCP 수신 포트 (localhost)</label>
           <div className="settings-port-row">
             <input id="settings-monitor-port" inputMode="numeric" type="number" min="1" max="65535"
-              value={draftPort} onChange={event => onDraftPort(event.target.value)}/>
-            <button className="secondary-btn" type="submit">조회 포트 저장</button>
+              value={draftPort} onChange={event => onDraftPort(event.target.value)}
+              disabled={!native || portBusy || ownedBusy}/>
+            <button className="secondary-btn" type="submit" disabled={!native || portBusy || ownedBusy}>
+              {portBusy ? "변경 중..." : "포트 적용"}
+            </button>
           </div>
-          <p className="settings-support">현재 적용: {targetName} · 127.0.0.1:{port}</p>
+          <p className="settings-support">현재 서버 포트: 127.0.0.1:{port} (기본값 7979)</p>
+          <p className="settings-support">{ownedRunning
+            ? "서버 실행 중 변경하면 서버와 터널을 중지하고 새 포트로 다시 시작합니다."
+            : "서버가 중지된 상태에서는 다음 시작부터 새 포트가 적용됩니다."}</p>
           <p className="settings-support">조회 결과: {monitorStatus?.details ?? "아직 확인하지 않았습니다."}</p>
           {settingError && <p className="form-error" role="alert">{settingError}</p>}
           {settingsNotice && <p className="form-ok" role="status">{settingsNotice}</p>}
         </form>
         <div className="settings-option">
-          <div><strong>자동 상태 확인</strong><p>앱이 열려 있는 동안 10초 간격으로 선택한 포트를 확인합니다.</p></div>
+          <div><strong>자동 상태 확인</strong><p>앱이 열려 있는 동안 10초 간격으로 서버 포트를 확인합니다.</p></div>
           <button type="button" className={"switch " + (autoRefresh ? "enabled" : "")}
             role="switch" aria-label="자동 상태 확인" aria-checked={autoRefresh}
             onClick={() => onAutoRefresh(!autoRefresh)}><span /></button>
@@ -105,23 +107,19 @@ export function SettingsScreen({
         <div className="settings-card-heading">
           <span className="icon-tile"><HardDrive size={18}/></span>
           <div><h2 id="settings-lifecycle">앱·트레이·종료</h2>
-            <p>창 관리와 서버 종료는 다른 동작입니다. MCP 시작·재시작은 연결 화면에서 관리합니다.</p></div>
+            <p>최소화는 작업 표시줄로, X는 트레이로 숨깁니다.</p></div>
         </div>
         <div className="settings-exit-grid">
           <div className="settings-exit-action"><strong>트레이로 숨기기</strong>
             <p>앱을 종료하지 않고 창만 숨깁니다.</p>
             <button type="button" className="secondary-btn" disabled={!native || exitBusy}
               onClick={onHide}><Square size={14}/> 트레이로 숨기기</button></div>
-          <div className="settings-exit-action"><strong>앱만 종료</strong>
-            <p>창은 종료하지만 Tauri 전용 MCP와 터널은 유지합니다.</p>
+          <div className="settings-exit-action"><strong>종료 (완전 종료)</strong>
+            <p>MCP 서버와 터널을 중지하고 트레이에서도 제거합니다. 확인이 필요합니다.</p>
             <button type="button" className="secondary-btn" disabled={!canExit}
-              onClick={onExitApp}><X size={14}/> 앱만 종료</button></div>
-          <div className="settings-exit-action"><strong>앱·전용 MCP 완전 종료</strong>
-            <p>전용 MCP와 터널을 중지한 후 종료합니다. 확인이 필요합니다.</p>
-            <button type="button" className="secondary-btn" disabled={!canExit}
-              onClick={onExitAll}><Power size={14}/> 완전 종료</button></div>
+              onClick={onExitAll}><Power size={14}/> 종료</button></div>
         </div>
-        <p className="settings-safety"><ShieldCheck size={15}/> 모든 종료 동작은 기존 WinForms 7979 서버를 제어하지 않습니다.</p>
+        <p className="settings-safety"><ShieldCheck size={15}/> 트레이로 숨기면 서버를 유지하고, 종료를 선택하면 서버를 안전하게 중지합니다.</p>
         {trayError && <p className="form-error" role="alert">{trayError}</p>}
         {exitError && <p className="form-error" role="alert">{exitError}</p>}
       </section>

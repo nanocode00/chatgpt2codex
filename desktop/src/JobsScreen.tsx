@@ -319,7 +319,7 @@ export function JobsScreen({ onNotify, onProjects, refreshKey }: JobsScreenProps
         </div>
       </div>
       <div className="jobs-boundary"><ShieldCheck size={15}/>
-        격리된 Tauri 전용 작업 기록만 조회·수정합니다. 기존 WinForms/7979와 로컬 프로젝트 파일은 변경하지 않습니다.
+        작업 기록만 조회·수정하며 실제 로컬 프로젝트 파일은 변경하지 않습니다.
       </div>
     </div>
   </div>;

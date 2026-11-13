@@ -28,8 +28,8 @@ export function CliParityPanel() {
   const [result, setResult] = useState<OwnedCliParityResponse | null>(null);
   const [error, setError] = useState("");
   const [target, setTarget] = useState("");
-  const [configKey, setConfigKey] = useState("port");
-  const [configValue, setConfigValue] = useState("18797");
+  const [configKey, setConfigKey] = useState("host");
+  const [configValue, setConfigValue] = useState("127.0.0.1");
 
   async function execute(request: OwnedCliParityRequest, confirmation?: string) {
     if (busy || !native) return;
@@ -63,7 +63,7 @@ export function CliParityPanel() {
       <div className="legacy-body">
         <p className="legacy-explanation"><CircleAlert size={17}/>
           여기의 명령은 SHA-256 검증된 번들 CLI, <code>tauri-preview-v1</code>, 별도 HOME에서 실행합니다.
-          기존 WinForms/7979와 토큰은 유지합니다. 임의 셸 명령은 실행할 수 없습니다.
+          임의 셸 명령은 실행할 수 없습니다. 서버 포트는 설정 화면에서 변경합니다.
         </p>
         <div className="cli-parity-tabs" role="tablist" aria-label="CLI 명령 범주">
           {GROUPS.map(item => <button type="button" role="tab" key={item.key}
@@ -82,13 +82,13 @@ export function CliParityPanel() {
             <button type="button" disabled={!native || busy} className="legacy-action available"
               onClick={() => run("config-export")}><Layers size={15}/>config export (비밀정보 제외)</button>
           </div>
-          <p className="legacy-footnote">안전한 전용 인스턴스를 위해 host/port/workspace는 고정됩니다.
-            다음 키는 CLI가 허용하는 고정 범위에서만 설정할 수 있습니다.</p>
+          <p className="legacy-footnote">서버 포트와 작업 디렉터리는 이 메뉴에서 변경하지 않습니다.
+            다음 키는 CLI가 허용하는 범위에서만 설정할 수 있습니다.</p>
           <div className="cli-parity-fields">
             <label>설정 키<select className="legacy-field" value={configKey} onChange={e => {
               const next = e.target.value; setConfigKey(next);
-              setConfigValue(next === "host" ? "127.0.0.1" : next === "port" ? "18797" : "none");
-            }}><option value="host">host</option><option value="port">port</option><option value="tunnel">tunnel</option></select></label>
+              setConfigValue(next === "host" ? "127.0.0.1" : "none");
+            }}><option value="host">host</option><option value="tunnel">tunnel</option></select></label>
             <label>설정 값<input className="legacy-field" value={configValue} maxLength={80}
               onChange={e => setConfigValue(e.target.value)}/></label>
           </div>

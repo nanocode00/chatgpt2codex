@@ -40,9 +40,9 @@ describe("Tauri isolated diagnostics data models", () => {
     expect(parseLocks({ locks: new Array(129).fill(null) })).toBeNull();
   });
 
-  it("bounds CLI text and removes generic default:7979 guidance", () => {
+  it("bounds CLI text and preserves the actual default endpoint", () => {
     expect(displayCliText("node: v24\nhttp default endpoint: http://127.0.0.1:7979/mcp\nripgrep: found"))
-      .toBe("node: v24\nripgrep: found");
+      .toBe("node: v24\nhttp default endpoint: http://127.0.0.1:7979/mcp\nripgrep: found");
     expect(displayCliText("x".repeat(50000)).length).toBeLessThanOrEqual(512);
     expect(displayCliText(null)).toBe("");
   });

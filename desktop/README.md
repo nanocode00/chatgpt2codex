@@ -195,27 +195,29 @@ avoid probing localhost/private networks through a configurable hostname.
 The UI does not currently claim that it knows the user's ChatGPT plugin
 registration or connector authorization state.
 
-## Isolated CLI manager
+## Tauri-owned MCP server
 
-The Management page can now operate an independently bundled, audited Node C2C instance on port 18797. This requires the complete Windows preview ZIP (including c2c-runtime/) and explicit one-time token preparation. The installed WinForms instance, port 7979 and token remain untouched. See [isolated CLI lifecycle notes](../docs/TAURI_OWNED_CLI_PREVIEW.md).
+The Connections screen manages the bundled, SHA-verified Node C2C server,
+using instance `tauri-preview-v1` and default localhost port **7979**.
+The Settings screen changes the **actual server listening port**, not just
+the frontend monitoring target. Saving while stopped affects the next start;
+saving while running performs a verified stop and restart on the new port.
+A used destination port is rejected without terminating the occupying process.
+If startup fails, the app attempts to restore the prior setting and server;
+if a new instance may still be alive, it stops automatic recovery and requests
+diagnosis instead of risking a second process.
 
-## Safely closing a portable Tauri preview before replacement
+## Windows minimize, tray, and complete exit
 
-**Manage → 앱·트레이** has two distinct exit actions:
-
-- **앱만 종료 (MCP 유지)** closes the Tauri window/tray, but keeps the
-  detached `tauri-preview-v1` Node MCP server and its Cloudflare Quick
-  Tunnel running. The bundle's `node.exe` and `cloudflared.exe` may still
-  be locked, so this action is not appropriate before deleting/replacing the
-  portable preview folder. The tray menu explicitly labels this behavior.
-- **앱·전용 MCP 완전 종료 (업데이트)** requests a normal, audited CLI stop
-  of the *exact Tauri-owned* instance; waits for its runtime record and port
-  `18797` to be released; **only then** exits Tauri. Use this before
-  replacing the preview ZIP. The operation is opt-in and warns that active
-  ChatGPT calls will disconnect. If the runtime record cannot be verified
-  as owned, or another process occupies the port, the command fails closed
-  and **leaves the app visible** for diagnosis. It never force-kills by name.
-- The installed WinForms/default:7979 server, token and tunnel are untouched.
+- Native **Minimize** keeps the window in the taskbar.
+- The window **X** hides it to the tray and keeps the MCP/tunnel running.
+- Tray right-click **숨기기** leaves the app resident and MCP running;
+  double-click the tray icon to restore the window.
+- Tray right-click **종료** and Settings **종료** both request an audited stop
+  of the exact app-owned MCP and Quick Tunnel before removing the tray icon.
+  A failed ownership/stop check keeps the app available for diagnosis.
+- Settings offers only **트레이로 숨기기 / 종료**. There is no app-only exit
+  that leaves a detached server running.
 
 A manually killed or orphaned process can still block Windows file removal.
 The app must not pretend to stop it without strong process ownership proof.
@@ -235,9 +237,8 @@ MCP** and its Quick Tunnel, use **전용 Owner Token 재발급** and type
 `재발급` to confirm. The CLI's scoped `owner-token --rotate` command
 generates a new token in the isolated preview HOME and *revokes all
 previous OAuth approvals for this preview*. Copy the token once, store it
-securely, and reconnect ChatGPT. This never rotates or reveals the installed
-WinForms/default:7979 token. An active/stale Tauri instance record or
-occupied preview port blocks rotation; do not delete runtime records or
+securely, and reconnect ChatGPT. An active/stale Tauri instance record or
+occupied configured server port blocks rotation; do not delete runtime records or
 kill unrelated processes to bypass this check.
 
 ## F5-D3 — external public HTTPS identity (not OAuth)
@@ -253,7 +254,7 @@ A positive result is **not** an OAuth/session/ChatGPT tool-call proof. Copy the
 owned connector URL into the ChatGPT connector setup, approve with this
 preview's **separate** Owner Token, and perform an actual MCP tool call as
 a manual acceptance check. If the Quick Tunnel URL rotates, update the
-connector endpoint. The installed WinForms/default connector is untouched.
+connector endpoint.
 
 ## F5-D2 — explicitly owned Quick Tunnel (preview)
 
@@ -261,8 +262,8 @@ The **Manage** panel can start the Tauri-owned instance in local-only mode,
 or start it *explicitly* with a Cloudflare Quick Tunnel. The public path uses
 only the official version-pinned, SHA-256-verified `cloudflared.exe` shipped
 beside the audited CLI, never an untrusted PATH executable. The runtime and
-Quick Tunnel are scoped to instance `tauri-preview-v1` on local port 18797;
-the installed WinForms `default:7979` remains untouched.
+Quick Tunnel are scoped to instance `tauri-preview-v1` on its configured
+localhost port (default 7979).
 
 The preview displays the recorded `https://*.trycloudflare.com/mcp` URL
 when the CLI reports a live tunnel, but **a recorded address is not proof
@@ -291,18 +292,19 @@ Existing preview installs from F5-C1 may have a saved startup repository.
 The next explicit stopped-instance unregister/start action clears that
 *preview-instance-only* preference and verifies the result. If a prior
 preview server still runs in its selected project, Tauri retains guarded
-recognition of its exact runtime record for safe shutdown; it does not
-take over `default:7979`. Catalog mutations are blocked while an owned
-runtime record is present or port 18797 is occupied.
+recognition of its exact runtime record for safe shutdown. Catalog mutations
+are blocked while an owned runtime record or configured port is occupied.
 
 The higher-level project/lease redesign is deferred to
 [issue #82](https://github.com/nanocode00/chatgpt2codex/issues/82).
 
 ## Tauri-only Settings
 
-The active Settings screen configures the Tauri app's Windows login auto-start,
-frontend-only health monitoring (default `127.0.0.1:18797`) and app/tray/exit
-lifecycle. It does not modify the MCP listener, Owner Token or OAuth state.
+The active Settings screen configures Windows login auto-start, the actual
+MCP listening port (default `127.0.0.1:7979`), automatic health polling,
+and tray/exit behavior. Changing the port can restart an active MCP/tunnel
+and temporarily interrupt ChatGPT connections. It does not rotate Owner
+Tokens or edit OAuth credentials.
 
 The former WinForms migration inventory, settings snapshot, encrypted legacy
 backup/restore rehearsal and cutover dry-run controls have been removed from

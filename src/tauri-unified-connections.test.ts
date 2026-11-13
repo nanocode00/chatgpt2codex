@@ -5,7 +5,7 @@ import type { ManagedResult } from "../desktop/src/runtime";
 
 const owned: ManagedResult = {
   available: true, ready: true, running: false, tunnelCapable: true,
-  tunnelRunning: false, instance: "tauri-preview-v1", port: 18797, details: "ready"
+  tunnelRunning: false, instance: "tauri-preview-v1", port: 7979, details: "ready"
 };
 
 describe("Tauri-owned connection and security screen", () => {

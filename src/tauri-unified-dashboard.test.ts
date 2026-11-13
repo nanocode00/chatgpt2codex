@@ -6,7 +6,7 @@ import type { ManagedResult, PublicTunnelHealth } from "../desktop/src/runtime";
 const stopped: ManagedResult = {
   available: true, ready: true, running: false,
   tunnelCapable: true, tunnelRunning: false,
-  instance: "tauri-preview-v1", port: 18797,
+  instance: "tauri-preview-v1", port: 7979,
   details: "ready"
 };
 const publicRunning: ManagedResult = {
@@ -38,7 +38,7 @@ describe("first unified dashboard: owned runtime only", () => {
     expect(startAction(false)).toBe("start");
     expect(startAction(true)).toBe("start-public");
   });
-  it("does not use the legacy 7979 monitor to decide owned runtime status", () => {
+  it("uses the app-owned status rather than a separate monitoring port", () => {
     expect(runtimeView(false, publicRunning)).toBe("unsupported");
     expect(runtimeView(true, null)).toBe("checking");
     expect(runtimeView(true, { ...stopped, available: false })).toBe("unavailable");

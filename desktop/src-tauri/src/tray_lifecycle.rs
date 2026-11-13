@@ -1,15 +1,14 @@
-//! F4-D2-A: Windows-only Tauri preview window and tray lifecycle.
-//! Deliberately controls this Tauri window only. It never touches WinForms,
-//! the installed default C2C instance, 7979, tokens, or cloudflared.
+//! Tauri window and tray lifecycle. Minimize keeps the taskbar button;
+//! closing the window hides to tray; explicit Quit stops the owned MCP.
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    App, AppHandle, Manager, WindowEvent,
+    App, AppHandle, Emitter, Manager, WindowEvent,
 };
 
 const MAIN_WINDOW: &str = "main";
-const MENU_SHOW: &str = "preview-show";
-const MENU_QUIT: &str = "preview-quit";
+const MENU_HIDE: &str = "app-hide";
+const MENU_QUIT: &str = "app-quit";
 
 pub(crate) fn restore_main(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
@@ -26,9 +25,9 @@ pub(crate) fn hide_main(app: &AppHandle) -> Result<(), String> {
 }
 
 pub(crate) fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
-    let open = MenuItem::with_id(app, MENU_SHOW, "창 열기", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, MENU_QUIT, "앱만 종료 (MCP 유지)", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &quit])?;
+    let hide = MenuItem::with_id(app, MENU_HIDE, "숨기기", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, MENU_QUIT, "종료", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&hide, &quit])?;
     let icon = app.default_window_icon().cloned()
         .ok_or_else(|| std::io::Error::other("missing Tauri preview tray icon"))?;
 
@@ -38,8 +37,16 @@ pub(crate) fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
-            MENU_SHOW => restore_main(app),
-            MENU_QUIT => app.exit(0),
+            MENU_HIDE => { let _ = hide_main(app); }
+            MENU_QUIT => {
+                let handle = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) = crate::cli_operations::close_preview_with_owned_mcp(handle.clone()).await {
+                        restore_main(&handle);
+                        let _ = handle.emit("c2c:tray-exit-error", error);
+                    }
+                });
+            }
             _ => (),
         })
         .on_tray_icon_event(|tray, event| {
@@ -57,19 +64,11 @@ pub(crate) fn on_window_event(window: &tauri::Window, event: &WindowEvent) {
         return;
     }
     match event {
-        // X hides the preview; tray "앱만 종료" and in-app exit are
-        // explicit. Do not block closure if Windows refuses to hide.
+        // X always hides to tray. Even if hiding fails, never exit without
+        // an explicit request to stop the owned MCP.
         WindowEvent::CloseRequested { api, .. } => {
-            if window.hide().is_ok() {
-                api.prevent_close();
-            }
-        }
-        // Native minimize hides to the tray, instead of leaving a
-        // background window visible in the taskbar.
-        WindowEvent::Resized(_) => {
-            if window.is_minimized().unwrap_or(false) {
-                let _ = hide_main(window.app_handle());
-            }
+            let _ = window.hide();
+            api.prevent_close();
         }
         _ => (),
     }
@@ -81,8 +80,8 @@ mod tests {
 
     #[test]
     fn tray_action_ids_are_distinct_from_runtime_management() {
-        assert_ne!(MENU_SHOW, MENU_QUIT);
-        assert!(!MENU_SHOW.contains("stop"));
+        assert_ne!(MENU_HIDE, MENU_QUIT);
+        assert!(!MENU_HIDE.contains("stop"));
         assert!(!MENU_QUIT.contains("server"));
         assert_eq!(MAIN_WINDOW, "main");
     }

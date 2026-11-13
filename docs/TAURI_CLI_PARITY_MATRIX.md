@@ -1,12 +1,12 @@
 # Tauri–CLI 기능 대응표 (F5-E)
 
-기준: `src/cli.ts`의 공개 CLI 명령. Tauri는 `tauri-preview-v1` 인스턴스, 로컬 포트 `18797`, 분리된 HOME 및 SHA 검증된 번들만 사용한다. 기존 WinForms의 `default:7979`는 절대 변경하지 않는다.
+기준: `src/cli.ts`의 공개 CLI 명령. Tauri는 `tauri-preview-v1` 인스턴스, 기본 로컬 포트 `7979`(설정 화면에서 변경 가능), 앱 전용 HOME 및 SHA 검증된 번들만 사용한다. 서버 포트 변경은 소유권 검증 후 중지·재시작하며, 다른 프로세스는 강제 종료하지 않는다.
 
 원칙: **1개 UI 조작 ↔ 1개 검증된 CLI 명령 또는 명확히 표시된 CLI 하위 명령**. 범용 셸/명령줄 입력창을 만들지 않는다. 모든 CLI 기능을 무조건 Tauri에서 제공한다는 의미는 아니며, 미연결 기능을 항상 표시한다.
 
 | CLI 명령 | Tauri UI | 상태/안전 경계 |
 | --- | --- | --- |
-| `owner-token --generate/--rotate` | 관리 → 전용 인스턴스 준비 / Token 재발급 | 연결됨. 기존 WinForms Token 보존, 재발급 시 프리뷰 OAuth 승인 무효화 |
+| `owner-token --generate/--rotate` | 연결 → MCP 준비 / Token 재발급 | 연결됨. 재발급 시 기존 OAuth 승인 무효화 |
 | `start` | 관리 → MCP 시작 / 공개 MCP 시작 | 연결됨. 고정 작업 공간과 검증된 Quick Tunnel |
 | `stop`, `restart` | 관리 → MCP 중지 / MCP 재시작 | 연결됨. 엄격한 소유권 검사 |
 | `status` / `ps` | CLI 탭 → 진단 → status | 연결됨. `ps`는 동일한 CLI 별칭 |

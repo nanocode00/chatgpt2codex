@@ -4,7 +4,8 @@ import {
   RefreshCcw, Settings2, ShieldCheck, TerminalSquare
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { checkRuntime, manageOwnedCli, copyOwnedOwnerToken, registerOwnedOwnerToken, inspectOwnedPublicTunnelHealth, inspectOwnedCatalog, unregisterOwnedRepository, pickOwnedRepositoryFolder, registerOwnedPickedRepository, cancelOwnedPickedRepository, closePreviewWindow, closePreviewWithOwnedMcp, hidePreviewWindow, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type ManagedAction, type ManagedResult, type CatalogInspection, type PickedRepositoryFolder, type PublicTunnelHealth, type RuntimeHealth } from "./runtime";
+import { listen } from "@tauri-apps/api/event";
+import { checkRuntime, manageOwnedCli, setOwnedPort, copyOwnedOwnerToken, registerOwnedOwnerToken, inspectOwnedPublicTunnelHealth, inspectOwnedCatalog, unregisterOwnedRepository, pickOwnedRepositoryFolder, registerOwnedPickedRepository, cancelOwnedPickedRepository, closePreviewWithOwnedMcp, hidePreviewWindow, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type ManagedAction, type ManagedResult, type CatalogInspection, type PickedRepositoryFolder, type PublicTunnelHealth, type RuntimeHealth } from "./runtime";
 import { SettingsScreen } from "./SettingsScreen";
 import { DiagnosticsScreen } from "./DiagnosticsScreen";
 import { ConnectionsSecurityScreen } from "./ConnectionsSecurityScreen";
@@ -16,7 +17,7 @@ import { ProfilesScreen } from "./ProfilesScreen";
 import { JobsScreen } from "./JobsScreen";
 import { Toast, type AppToast } from "./Toast";
 import { storedPublicPreference } from "./dashboard-state";
-import { parseUiPort, storedHealthPort, storedAutoRefresh } from "./ui-preferences";
+import { DEFAULT_HEALTH_PORT, parseUiPort, storedAutoRefresh } from "./ui-preferences";
 
 type Screen = "overview" | "projects" | "profiles" | "connections" | "jobs" | "cli" | "diagnostics" | "settings";
 
@@ -27,11 +28,7 @@ function nativeFailureMessage(error: unknown, fallback: string): string {
 }
 
 function loadPort(): number {
-  try {
-    return storedHealthPort(localStorage.getItem("c2c.desktop.health-port"));
-  } catch {
-    return 18797;
-  }
+  return DEFAULT_HEALTH_PORT;
 }
 function loadAutoRefresh(): boolean {
   try { return storedAutoRefresh(localStorage.getItem("c2c.desktop.autorefresh")); }
@@ -90,6 +87,7 @@ function App() {
   const [unregisterNotice, setUnregisterNotice] = useState("");
   const [settingError, setSettingError] = useState("");
   const [settingsNotice, setSettingsNotice] = useState("");
+  const [portBusy, setPortBusy] = useState(false);
   const [previewStartup, setPreviewStartup] = useState<PreviewStartupInspection | null>(null);
   const [startupBusy, setStartupBusy] = useState(false);
   const [startupError, setStartupError] = useState("");
@@ -104,6 +102,19 @@ function App() {
     const timer = window.setTimeout(() => setToast(null), 3600);
     return () => window.clearTimeout(timer);
   }, [toast]);
+  useEffect(() => {
+    if (!native) return;
+    let active = true;
+    let unlisten: (() => void) | undefined;
+    void listen<string>("c2c:tray-exit-error", event => {
+      setExitError(event.payload);
+      notify(event.payload, "error");
+    }).then(dispose => {
+      if (active) unlisten = dispose;
+      else dispose();
+    }).catch(() => {});
+    return () => { active = false; unlisten?.(); };
+  }, [native, notify]);
 
   const runCheck = useCallback(async () => {
     const current = ++requestCounter.current;
@@ -164,7 +175,7 @@ function App() {
 
   const runOwnedAction = useCallback(async (action: ManagedAction, confirmedRotation = false) => {
     if (action === "start-public" && !window.confirm(
-      "Tauri 전용 MCP를 Cloudflare Quick Tunnel로 외부에 공개할까요?\n\n별도 18797 인스턴스만 사용하며 기존 WinForms/7979는 변경하지 않습니다. 공개 주소는 재시작 때 변경될 수 있고, 연결에는 인증 승인이 필요합니다."
+      "MCP를 Cloudflare Quick Tunnel로 외부에 공개할까요?\n\n공개 주소는 재시작 때 변경될 수 있으며, 연결에는 OAuth 인증 승인이 필요합니다."
     )) return;
     if (action === "rotate-token") {
       if (!confirmedRotation) {
@@ -189,6 +200,8 @@ function App() {
       } else {
         setOwned(next);
       }
+      setPort(next.port);
+      setDraftPort(String(next.port));
       if (action === "rotate-token") setRotationDialogOpen(false);
       if (action !== "status") {
         const labels: Record<ManagedAction, string> = {
@@ -222,6 +235,9 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (screen === "settings") {
+      void runOwnedAction("status");
+    }
     if (screen === "connections" || screen === "overview" || screen === "projects" || screen === "profiles") {
       void runOwnedAction("status");
       void refreshCatalog();
@@ -273,7 +289,7 @@ function App() {
       return;
     }
     if (!window.confirm(
-      `다음 폴더를 Tauri 전용 프로젝트로 등록할까요?\n\n경로: ${choice.path}\n이름: ${name}\nID: ${id}\n\n기존 WinForms/7979는 변경되지 않으며 등록만 하고 서버를 시작하지 않습니다.`
+      `다음 폴더를 프로젝트로 등록할까요?\n\n경로: ${choice.path}\n이름: ${name}\nID: ${id}\n\n등록만 진행하며 MCP 서버는 시작하지 않습니다.`
     )) return;
     setFolderBusy(true);
     setFolderError("");
@@ -401,21 +417,17 @@ function App() {
     }
   }
 
-  async function exitPreview(includeOwnedMcp = false) {
+  async function exitPreview() {
     if (exitBusy || ownedBusy) return;
-    if (includeOwnedMcp && !window.confirm(
-      "Tauri 전용 MCP 서버와 Quick Tunnel을 안전하게 중지하고 앱을 종료할까요?\n\n현재 ChatGPT의 작업 연결은 끊어집니다. 기존 WinForms/7979 서버는 유지됩니다. 서버 중지에 실패하면 앱을 종료하지 않습니다."
+    if (!window.confirm(
+      "MCP 서버와 Quick Tunnel을 중지하고 앱을 완전히 종료할까요?\n\n현재 ChatGPT 연결이 끊어집니다. 서버 중지에 실패하면 앱은 종료되지 않습니다."
     )) return;
     setExitBusy(true);
     setExitError("");
     try {
-      if (includeOwnedMcp) await closePreviewWithOwnedMcp();
-      else await closePreviewWindow();
+      await closePreviewWithOwnedMcp();
     } catch (error) {
-      setExitError(nativeFailureMessage(error,
-        includeOwnedMcp
-          ? "전용 MCP 종료에 실패했습니다. 앱을 유지하고 상태를 확인하세요."
-          : "Tauri 앱 종료에 실패했습니다."));
+      setExitError(nativeFailureMessage(error, "MCP 종료에 실패했습니다. 앱을 유지하고 상태를 확인하세요."));
     } finally {
       setExitBusy(false);
     }
@@ -430,24 +442,47 @@ function App() {
     }
   }
 
-  function saveSettings(event: React.FormEvent<HTMLFormElement>) {
+  async function saveSettings(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!native || portBusy || ownedBusy) return;
     const next = parseUiPort(draftPort);
     if (next === null) {
       setSettingError("포트는 1부터 65535까지의 정수여야 합니다.");
       setSettingsNotice("");
       return;
     }
-    try {
-      localStorage.setItem("c2c.desktop.health-port", String(next));
-    } catch {
-      setSettingError("모니터링 포트를 저장하지 못했습니다. 저장소 권한을 확인하세요.");
-      setSettingsNotice("");
+    if (next === port) {
+      setSettingError("");
+      setSettingsNotice("이미 적용된 서버 포트입니다.");
       return;
     }
+    if (owned?.running && !window.confirm(
+      `서버 포트를 ${port}에서 ${next}(으)로 변경할까요?\n\n실행 중인 MCP와 터널을 중지한 뒤 새 포트로 재시작합니다. ChatGPT 연결이 일시적으로 끊길 수 있습니다.`
+    )) return;
+    setPortBusy(true);
+    setOwnedBusy(true);
     setSettingError("");
-    setSettingsNotice("로컬 상태 검사 대상 포트만 변경했습니다. 실제 C2C 서버 설정은 그대로입니다.");
-    setPort(next);
+    setSettingsNotice("");
+    try {
+      const result = await setOwnedPort(next);
+      setOwned(result);
+      setOwnedPublicHealth(null);
+      setPort(result.port);
+      setDraftPort(String(result.port));
+      setSettingsNotice(`MCP 서버 포트를 ${result.port}(으)로 적용했습니다.`);
+      notify(`MCP 서버 포트 변경 완료 · ${result.port}`);
+    } catch (error) {
+      setSettingError(nativeFailureMessage(error, "MCP 서버 포트 변경에 실패했습니다."));
+      try {
+        const current = await manageOwnedCli("status");
+        setOwned(current);
+        setPort(current.port);
+        setDraftPort(String(current.port));
+      } catch { /* Preserve the native error; never claim a successful change. */ }
+    } finally {
+      setPortBusy(false);
+      setOwnedBusy(false);
+    }
   }
 
   function toggleAutoRefresh(next: boolean) {
@@ -476,11 +511,11 @@ function App() {
         <div className="nav-section-title">RUNTIME</div>
         <button type="button" className="mini-runtime" onClick={() => setScreen("connections")}>
           <HardDrive size={17} />
-          <span><strong>Tauri 전용 MCP</strong><small>127.0.0.1:18797</small></span>
+          <span><strong>MCP 서버</strong><small>127.0.0.1:{owned?.port ?? port}</small></span>
           <span className={"tiny-led " + (owned?.running ? "glow" : "")} />
         </button>
         <div className="sidebar-bottom">
-          <div className="mini-security"><ShieldCheck size={16} /><span>독립 Tauri · 전환 준비 중</span></div>
+          <div className="mini-security"><ShieldCheck size={16} /><span>로컬 MCP · Tauri 관리</span></div>
           <div className="sidebar-version">Preview 0.1 · Tauri 2</div>
         </div>
       </aside>
@@ -588,10 +623,10 @@ function App() {
           previewStartup={previewStartup} startupBusy={startupBusy} startupError={startupError}
           onRefreshStartup={() => { void refreshPreviewStartup(); }}
           onToggleStartup={enable => { void togglePreviewStartup(enable); }}
+          portBusy={portBusy} ownedRunning={owned?.running === true}
           exitBusy={exitBusy} ownedBusy={ownedBusy} exitError={exitError} trayError={trayError}
           onHide={() => { void hideToTray(); }}
-          onExitApp={() => { void exitPreview(); }}
-          onExitAll={() => { void exitPreview(true); }}
+          onExitAll={() => { void exitPreview(); }}
         />}
 
         <footer><span>ChatGPT To Codex · desktop preview</span><span><ExternalLink size={13}/> Local-first • Tauri + React</span></footer>

@@ -82,9 +82,7 @@ export function parseLocks(value: unknown): LockDiagnostic[] | null {
 export function displayCliText(value: unknown): string {
   if (typeof value !== "string") return "";
   // Redaction and 80-line/512-char limits are applied at Rust boundary.
-  // Add a client-side cap and strip CLI's *generic* default:7979 guidance:
-  // it does not describe the isolated Tauri:18797 instance.
-  return value.split(/\r?\n/).filter(line =>
-    !/^http default endpoint:/i.test(line.trim())
-  ).slice(-80).map(line => line.slice(0, 512)).join("\n").slice(0, 40_960);
+  // Add a client-side cap without hiding the configured server endpoint.
+  return value.split(/\r?\n/).slice(-80)
+    .map(line => line.slice(0, 512)).join("\n").slice(0, 40_960);
 }

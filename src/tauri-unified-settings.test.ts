@@ -10,30 +10,41 @@ describe("Tauri Settings screen isolation and user intent", () => {
     expect(app).toContain('screen === "settings" && <SettingsScreen');
     expect(app).not.toContain("<LegacySettingsControls");
     expect(screen).toContain("Windows 자동 시작");
-    expect(screen).toContain("상태 모니터링");
+    expect(screen).toContain("서버 포트 설정");
     expect(screen).toContain("앱·트레이·종료");
     expect(css).toContain("grid-template-columns:repeat(2,minmax(0,1fr))");
     expect(css).toContain("grid-template-columns:1fr");
   });
 
-  it("labels read-only monitoring separately from server changes", () => {
-    expect(screen).toContain("상태 조회 대상만 변경하며 서버 수신 포트는 바꾸지 않습니다.");
-    expect(screen).toContain('draftPort === "18797"');
-    expect(screen).not.toContain('draftPort === "7979"');
-    expect(screen).not.toContain("기존 WinForms · 7979");
-    expect(app).toContain('localStorage.setItem("c2c.desktop.health-port"');
-    expect(app).toContain("실제 C2C 서버 설정은 그대로입니다.");
+  it("applies the actual owned MCP port, restarting the server when necessary", () => {
+    const native = readFileSync("desktop/src-tauri/src/managed_cli.rs", "utf8");
+    const runtime = readFileSync("desktop/src/runtime.ts", "utf8");
+    expect(screen).toContain("실제 MCP 서버의 수신 포트와 상태 확인 포트를 함께 변경합니다.");
+    expect(screen).toContain("포트 적용");
+    expect(app).toContain("await setOwnedPort(next)");
+    expect(app).not.toContain('localStorage.setItem("c2c.desktop.health-port"');
+    expect(runtime).toContain('invoke<ManagedResult>("set_owned_port", { port })');
+    expect(native).toContain("const DEFAULT_PORT: u16 = 7979;");
+    expect(native).toContain("fn configure_owned_port(next: u16)");
+    expect(native).toContain("start_owned_at_port(&root, next, public_start)");
+    expect(native).toContain("persist_port(&root, previous_setting)");
     expect(screen).not.toContain("setPreviewAutostart(");
   });
 
-  it("guards native app exit and keeps a separate confirmation for owned MCP shutdown", () => {
+  it("keeps only hide and complete exit; tray quit stops the owned MCP", () => {
+    const tray = readFileSync("desktop/src-tauri/src/tray_lifecycle.rs", "utf8");
     expect(screen).toContain("const canExit = native && !exitBusy && !ownedBusy");
     expect(screen).toContain("disabled={!canExit}");
     expect(screen).toContain("onClick={onExitAll}");
-    expect(app).toContain("if (includeOwnedMcp && !window.confirm(");
-    expect(app).toContain("if (includeOwnedMcp) await closePreviewWithOwnedMcp()");
-    expect(app).toContain("else await closePreviewWindow()");
-    expect(screen).toContain("기존 WinForms 7979 서버를 제어하지 않습니다.");
+    expect(screen).not.toContain("onExitApp");
+    expect(app).toContain("await closePreviewWithOwnedMcp()");
+    expect(app).not.toContain("closePreviewWindow");
+    expect(tray).toContain('MENU_HIDE, "숨기기"');
+    expect(tray).toContain('MENU_QUIT, "종료"');
+    expect(tray).toContain("close_preview_with_owned_mcp(handle.clone())");
+    expect(tray).not.toContain("WindowEvent::Resized(");
+    expect(tray).toContain("WindowEvent::CloseRequested { api, .. }");
+    expect(screen).not.toContain("WinForms");
   });
 
   it("does not expose obsolete WinForms migration, backups, or cutover test controls", () => {

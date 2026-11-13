@@ -44,53 +44,6 @@ export async function checkRuntime(port: number): Promise<RuntimeHealth> {
   return invoke<RuntimeHealth>("runtime_health", { port });
 }
 
-export interface CliInspection {
-  available: boolean;
-  instance: string;
-  alive: boolean;
-  healthy: boolean;
-  tunnelAlive: boolean | null;
-  publicHealthy: boolean | null;
-  endpoint: string | null;
-  publicConnector: string | null;
-  details: string;
-}
-
-export async function inspectInstalledCli(instance = "default"): Promise<CliInspection> {
-  if (!isNativeApp()) {
-    return {
-      available: false, instance, alive: false, healthy: false,
-      tunnelAlive: null, publicHealthy: null, endpoint: null, publicConnector: null,
-      details: "CLI 인스턴스 조회는 Windows Tauri 앱에서만 지원합니다."
-    };
-  }
-  return invoke<CliInspection>("inspect_cli_health", { instance });
-}
-
-export type CliLogComponent = "server" | "tunnel";
-
-export interface CliLogPreview {
-  available: boolean;
-  instance: string;
-  component: CliLogComponent;
-  content: string;
-  details: string;
-  truncated: boolean;
-}
-
-export async function inspectInstalledCliLogs(component: CliLogComponent, instance = "default"): Promise<CliLogPreview> {
-  if (!isNativeApp()) {
-    return { available: false, instance, component, content: "", truncated: false,
-      details: "로그 조회는 Windows 네이티브 프리뷰에서만 지원합니다." };
-  }
-  return invoke<CliLogPreview>("inspect_cli_logs", { instance, component });
-}
-
-export async function closePreviewWindow(): Promise<void> {
-  if (!isNativeApp()) return;
-  await invoke<void>("close_preview_window");
-}
-
 /** Exit after an audited stop of only the isolated Tauri-owned MCP/tunnel.
  * Rejects and leaves the app open on ambiguous ownership or an occupied port. */
 export async function closePreviewWithOwnedMcp(): Promise<void> {
@@ -98,17 +51,10 @@ export async function closePreviewWithOwnedMcp(): Promise<void> {
   await invoke<void>("close_preview_with_owned_mcp");
 }
 
-/** F5-B: native Tauri window only. Never touches CLI or the WinForms server. */
+/** Native Tauri window only; hiding leaves the MCP running. */
 export async function hidePreviewWindow(): Promise<void> {
   if (!isNativeApp()) throw new Error("Windows Tauri 앱에서만 트레이로 숨길 수 있습니다.");
   await invoke<void>("hide_preview_window");
-}
-
-export type TrustedLink = "github" | "developer" | "local_health" | "public_health";
-/** The Rust command selects exact destinations and revalidates health on click. */
-export async function openTrustedLink(kind: TrustedLink, port?: number): Promise<void> {
-  if (!isNativeApp()) throw new Error("Windows Tauri 앱에서만 외부 브라우저를 열 수 있습니다.");
-  await invoke<void>("open_trusted_link", { kind, port: port ?? null });
 }
 
 export type PublicTunnelState = "online" | "offline" | "unavailable" | "unsupported";
@@ -117,14 +63,6 @@ export interface PublicTunnelHealth {
   state: PublicTunnelState;
   endpoint: string | null;
   details: string;
-}
-
-/** Read-only public HTTPS probe. No token is used or sent. */
-export async function inspectPublicTunnel(instance = "default"): Promise<PublicTunnelHealth> {
-  if (!isNativeApp()) {
-    return { state: "unavailable", endpoint: null, details: "공개 상태 확인은 Tauri 네이티브 앱에서만 지원합니다." };
-  }
-  return invoke<PublicTunnelHealth>("inspect_public_tunnel_health", { instance });
 }
 
 export interface CatalogRepository {
@@ -141,15 +79,13 @@ export interface CatalogInspection {
   available: boolean;
   projects: CatalogRepository[];
   profiles: CatalogProfile[];
-  legacyProject: string | null;
-  legacyProjectExists: boolean;
   details: string;
 }
-/** Read-only. Lists use the isolated hash-verified preview CLI, not WinForms. */
+/** Read-only. Lists use the app-owned, hash-verified CLI. */
 export async function inspectOwnedCatalog(): Promise<CatalogInspection> {
   if (!isNativeApp()) {
-    return { available: false, projects: [], profiles: [], legacyProject: null,
-      legacyProjectExists: false, details: "프로젝트/프로필 조회는 Windows Tauri 앱에서만 지원합니다." };
+    return { available: false, projects: [], profiles: [],
+      details: "프로젝트/프로필 조회는 Windows Tauri 앱에서만 지원합니다." };
   }
   return invoke<CatalogInspection>("inspect_owned_catalog");
 }
@@ -181,8 +117,7 @@ export async function cancelOwnedPickedRepository(serial: number): Promise<void>
   await invoke<void>("cancel_owned_picked_repository", { serial });
 }
 
-/** External HTTPS identity probe for the exact Tauri-owned Quick Tunnel.
- * Never uses the installed WinForms/default connector or a WebView URL. */
+/** External HTTPS identity probe for the app-owned Quick Tunnel. */
 export async function inspectOwnedPublicTunnelHealth(): Promise<PublicTunnelHealth> {
   if (!isNativeApp()) {
     return { state: "unavailable", endpoint: null, details: "Windows Tauri 앱에서만 외부 연결을 검사합니다." };
@@ -204,10 +139,17 @@ export interface ManagedResult {
   oneTimeOwnerToken?: string;
   tokenCopyAvailable?: boolean;
 }
+
+/** Change the actual owned MCP listening port, restarting it when running. */
+export async function setOwnedPort(port: number): Promise<ManagedResult> {
+  if (!isNativeApp()) throw new Error("서버 포트는 Windows Tauri 앱에서만 변경할 수 있습니다.");
+  return invoke<ManagedResult>("set_owned_port", { port });
+}
+
 export async function manageOwnedCli(action: ManagedAction): Promise<ManagedResult> {
   if (!isNativeApp()) {
     return { available: false, ready: false, running: false, tunnelCapable: false, tunnelRunning: false,
-      instance: "tauri-preview-v1", port: 18797, details: "Windows Tauri 프리뷰에서만 지원합니다." };
+      instance: "tauri-preview-v1", port: 7979, details: "Windows Tauri 앱에서만 지원합니다." };
   }
   return invoke<ManagedResult>("manage_owned_cli", { action });
 }
