@@ -292,6 +292,7 @@ mod tests {
 
     #[test]
     fn native_catalog_reads_bounded_isolated_fixtures_without_starting_node() {
+        let timer = std::time::Instant::now();
         let base = std::env::temp_dir().join(format!("c2c-native-catalog-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -321,6 +322,8 @@ mod tests {
         assert_eq!(detail["python"], Value::Null);
         assert!(native_profile_detail_from(&config, "../bad").is_err());
         assert!(native_profile_detail_from(&config, "missing").is_err());
+        println!("native catalog + profile fixture: {}ms (no Node)",
+            timer.elapsed().as_millis());
         fs::write(config.join("repositories.json"), b"{\"version\":2}").unwrap();
         assert!(native_repositories(&config).is_err());
         fs::write(config.join("repositories.json"), vec![b'X'; 512 * 1024 + 1]).unwrap();

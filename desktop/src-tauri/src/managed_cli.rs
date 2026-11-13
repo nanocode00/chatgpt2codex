@@ -1170,7 +1170,10 @@ mod tests {
         persist_port(&root, port).unwrap();
         assert!(complete_exit_without_record(&root).is_err());
         drop(listener);
+        let started = Instant::now();
         assert_eq!(complete_exit_without_record(&root).unwrap(), true);
+        println!("idle complete-exit preflight: {}ms (no Node)",
+            started.elapsed().as_millis());
         fs::create_dir_all(state_record(&root).parent().unwrap()).unwrap();
         fs::write(state_record(&root), "{}").unwrap();
         assert_eq!(complete_exit_without_record(&root).unwrap(), false);

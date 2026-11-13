@@ -64,6 +64,7 @@ export function CliConsole({ onNotify, onRuntimeChanged, refreshKey = 0 }: {
   const [history, setHistory] = useState<HistoryEntry[]>(() => sessionHistory);
   const [selectedId, setSelectedId] = useState<number | null>(() => sessionHistory[0]?.id ?? null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const handledRefreshKey = useRef(refreshKey);
   const historyCursor = useRef(-1);
   const historyDraft = useRef(sessionDraft);
   const runningSince = useRef(0);
@@ -98,7 +99,9 @@ export function CliConsole({ onNotify, onRuntimeChanged, refreshKey = 0 }: {
   }, [pending]);
 
   useEffect(() => {
-    if (!refreshKey || !native || busy || pending) return;
+    if (handledRefreshKey.current === refreshKey) return;
+    handledRefreshKey.current = refreshKey;
+    if (!native || busy || pending) return;
     // A global refresh may repeat only a previously validated read-only
     // command. It must never implicitly replay stop/restart/config mutations.
     void checkOwnedCliConsole(lastReadOnlyCommand).then(checked => {
