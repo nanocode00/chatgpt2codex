@@ -54,6 +54,8 @@ function App() {
   const [screen, setScreen] = useState<Screen>("overview");
   const [jobsRefreshKey, setJobsRefreshKey] = useState(0);
   const [diagnosticsRefreshKey, setDiagnosticsRefreshKey] = useState(0);
+  const [cliRefreshKey, setCliRefreshKey] = useState(0);
+  const [refreshBusy, setRefreshBusy] = useState(false);
   const [port, setPort] = useState(loadPort);
   const [draftPort, setDraftPort] = useState(String(loadPort()));
   const [autoRefresh, setAutoRefresh] = useState(loadAutoRefresh);
@@ -93,6 +95,10 @@ function App() {
   const requestCounter = useRef(0);
   const publicProbeBusy = useRef(false);
   const toastId = useRef(0);
+  const statusRequest = useRef<Promise<void> | null>(null);
+  const catalogRequest = useRef<Promise<void> | null>(null);
+  const catalogLastRead = useRef(0);
+  const refreshing = useRef(false);
   const notify = useCallback((message: string, tone: "info" | "error" = "info") => {
     setToast({ id: ++toastId.current, message, tone });
   }, []);
@@ -219,29 +225,42 @@ function App() {
     }
   }, [notify]);
 
-  const refreshCatalog = useCallback(async () => {
+  const refreshOwnedStatus = useCallback(async () => {
+    if (statusRequest.current) return statusRequest.current;
+    const task = runOwnedAction("status");
+    statusRequest.current = task;
+    try { await task; } finally { statusRequest.current = null; }
+  }, [runOwnedAction]);
+
+  const refreshCatalog = useCallback(async (force = true) => {
+    if (!force && catalogLastRead.current && Date.now() - catalogLastRead.current < 3000) return;
+    if (catalogRequest.current) return catalogRequest.current;
+    const task = (async () => {
     setCatalogBusy(true);
     setCatalogError("");
     try {
       const updated = await inspectOwnedCatalog();
       setCatalog(updated);
+      if (updated.available) catalogLastRead.current = Date.now();
     } catch (error) {
       setCatalog(null);
       setCatalogError(error instanceof Error ? error.message : "프로젝트/프로필 조회에 실패했습니다.");
     } finally {
       setCatalogBusy(false);
     }
+    })();
+    catalogRequest.current = task;
+    try { await task; } finally { catalogRequest.current = null; }
   }, []);
 
   useEffect(() => {
-    if (screen === "settings") {
-      void runOwnedAction("status");
+    if (screen === "overview" || screen === "connections" || screen === "settings") {
+      void refreshOwnedStatus();
     }
-    if (screen === "connections" || screen === "overview" || screen === "projects" || screen === "profiles") {
-      void runOwnedAction("status");
-      void refreshCatalog();
+    if (screen === "overview" || screen === "projects" || screen === "profiles") {
+      void refreshCatalog(false);
     }
-  }, [screen, runOwnedAction, refreshCatalog]);
+  }, [screen, refreshOwnedStatus, refreshCatalog]);
 
   async function browseOwnedFolder() {
     if (owned?.running || ownedBusy || folderBusy || unregisterBusy || unregisterTarget !== null) return;
@@ -441,6 +460,45 @@ function App() {
     }
   }
 
+  /** Shared manual refresh coordinator: exactly the current screen's scope.
+   * It does not execute mutating CLI commands or reinterpret CLI status. */
+  async function refreshVisibleScreen() {
+    if (refreshing.current || ownedBusy || catalogBusy || exitBusy || portBusy ||
+        folderBusy || unregisterBusy) return;
+    refreshing.current = true;
+    setRefreshBusy(true);
+    try {
+      switch (screen) {
+        case "overview":
+          await Promise.all([refreshOwnedStatus(), refreshCatalog()]);
+          break;
+        case "projects":
+        case "profiles":
+          await refreshCatalog();
+          break;
+        case "connections":
+          await refreshOwnedStatus();
+          if (owned?.tunnelRunning) await checkOwnedPublicHealth();
+          break;
+        case "diagnostics":
+          setDiagnosticsRefreshKey(value => value + 1);
+          break;
+        case "jobs":
+          setJobsRefreshKey(value => value + 1);
+          break;
+        case "cli":
+          setCliRefreshKey(value => value + 1);
+          break;
+        case "settings":
+          await Promise.all([refreshOwnedStatus(), refreshPreviewStartup()]);
+          break;
+      }
+    } finally {
+      refreshing.current = false;
+      setRefreshBusy(false);
+    }
+  }
+
   async function saveSettings(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!native || portBusy || ownedBusy) return;
@@ -521,15 +579,10 @@ function App() {
           <div className="breadcrumb"><span>ChatGPT To Codex</span><ChevronRight size={15}/><strong>{NAV.find(n => n.name === screen)?.label}</strong></div>
           <div className="header-actions">
             <span className="host-indicator"><span className={"host-dot " + (native ? "connected" : "")} />{native ? "이 컴퓨터" : "웹 미리보기"}</span>
-            <button className={"icon-btn " + (checking ? "spin-icon" : "")} type="button" onClick={() => {
-                if (screen === "jobs") {
-                  setJobsRefreshKey(value => value + 1);
-                } else if (screen === "diagnostics") {
-                  setDiagnosticsRefreshKey(value => value + 1);
-                } else if (screen === "overview" || screen === "projects" || screen === "connections") {
-                  void runOwnedAction("status"); void refreshCatalog();
-                } else { void runCheck(); }
-              }} aria-label="현재 화면 새로고침" title="현재 화면 새로고침" disabled={checking || ownedBusy || catalogBusy}><RefreshCcw size={17}/></button>
+            <button className={"icon-btn " + (refreshBusy ? "spin-icon" : "")} type="button"
+              onClick={() => { void refreshVisibleScreen(); }} aria-label="현재 화면 새로고침"
+              title="현재 화면 새로고침" disabled={refreshBusy || ownedBusy || catalogBusy ||
+                exitBusy || portBusy || folderBusy || unregisterBusy}><RefreshCcw size={17}/></button>
           </div>
         </header>
 
@@ -541,8 +594,6 @@ function App() {
           ownedPublicHealth={ownedPublicHealth} ownedPublicChecking={ownedPublicChecking}
           publicPreferred={publicPreferred}
           catalog={catalog} catalogBusy={catalogBusy} catalogError={catalogError}
-          onRefreshOwned={() => { void runOwnedAction("status"); }}
-          onRefreshCatalog={() => { void refreshCatalog(); }}
           onOwnedAction={action => { void runOwnedAction(action); }}
           onTogglePublic={togglePublicPreference}
           onCopyPublic={() => { void copyOwnedConnector(); }}
@@ -557,7 +608,6 @@ function App() {
           folderName={folderName} folderId={folderId} folderError={folderError}
           unregisterTarget={unregisterTarget} unregisterTyped={unregisterTyped}
           unregisterBusy={unregisterBusy} unregisterError={unregisterError}
-          onRefresh={() => { void refreshCatalog(); }}
           onBrowse={() => { void browseOwnedFolder(); }}
           onCancelBrowse={() => { void discardOwnedFolder(); }}
           onFolderName={setFolderName} onFolderId={setFolderId}
@@ -580,8 +630,8 @@ function App() {
 
         {screen === "cli" && <>
           <div className="page-heading"><div><h1>CLI 콘솔</h1><p>명령을 입력해 문법을 확인하고 실행 결과를 살펴보세요.</p></div></div>
-          <CliConsole onNotify={notify} onRuntimeChanged={() => {
-            void runOwnedAction("status");
+          <CliConsole onNotify={notify} refreshKey={cliRefreshKey} onRuntimeChanged={() => {
+            void refreshOwnedStatus();
             void refreshCatalog();
           }}/>
         </>}
@@ -591,7 +641,6 @@ function App() {
           ownerTokenPending={!!ownedToken}
           tokenCopyAvailable={owned?.tokenCopyAvailable === true} publicPreferred={publicPreferred}
           publicHealth={ownedPublicHealth} publicChecking={ownedPublicChecking}
-          onRefresh={() => { void runOwnedAction("status"); }}
           onManagedAction={action => { void runOwnedAction(action); }}
           onTogglePublic={togglePublicPreference}
           onCopyPublic={() => { void copyOwnedConnector(); }}
@@ -609,8 +658,6 @@ function App() {
           native={native} owned={owned} ownedBusy={ownedBusy} ownedError={ownedError}
           publicHealth={ownedPublicHealth} publicChecking={ownedPublicChecking}
           refreshKey={diagnosticsRefreshKey}
-          onRefreshOwned={() => { void runOwnedAction("status"); }}
-          onRefreshPublic={() => { void checkOwnedPublicHealth(); }}
           onConnections={() => setScreen("connections")}
           onNotify={notify}
         />}
@@ -620,7 +667,6 @@ function App() {
           onSavePort={saveSettings} autoRefresh={autoRefresh} onAutoRefresh={toggleAutoRefresh}
           settingError={settingError}
           previewStartup={previewStartup} startupBusy={startupBusy} startupError={startupError}
-          onRefreshStartup={() => { void refreshPreviewStartup(); }}
           onToggleStartup={enable => { void togglePreviewStartup(enable); }}
           portBusy={portBusy}
           exitBusy={exitBusy} ownedBusy={ownedBusy} exitError={exitError} trayError={trayError}

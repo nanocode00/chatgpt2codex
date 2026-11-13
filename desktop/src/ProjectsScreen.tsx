@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertCircle, ArrowRight, CheckCircle2, ChevronRight, ClipboardCopy, FolderOpen,
-  FolderPlus, FolderSearch2, GitBranch, Info, LoaderCircle, RefreshCcw,
+  FolderPlus, FolderSearch2, GitBranch, Info, LoaderCircle,
   Search, ShieldCheck, Trash2, X
 } from "lucide-react";
 import {
@@ -26,7 +26,6 @@ interface ProjectsScreenProps {
   unregisterTyped: string;
   unregisterBusy: boolean;
   unregisterError: string;
-  onRefresh: () => void;
   onBrowse: () => void;
   onCancelBrowse: () => void;
   onFolderName: (value: string) => void;
@@ -44,7 +43,7 @@ export function ProjectsScreen({
   catalog, catalogBusy, catalogError, ownedRunning, ownedBusy,
   pickedFolder, folderBusy, folderName, folderId, folderError,
   unregisterTarget, unregisterTyped, unregisterBusy, unregisterError,
-  onRefresh, onBrowse, onCancelBrowse, onFolderName, onFolderId, onRegister,
+  onBrowse, onCancelBrowse, onFolderName, onFolderId, onRegister,
   onRequestUnregister, onCancelUnregister, onUnregisterTyped, onConfirmUnregister,
   onNotify, onManageRuntime
 }: ProjectsScreenProps) {
@@ -108,11 +107,6 @@ export function ProjectsScreen({
         <p>ChatGPT가 작업할 프로젝트를 등록하고, 경로와 실행 준비 상태를 확인합니다.</p>
       </div>
       <div className="projects-header-actions">
-        <button type="button" className="projects-button secondary" onClick={onRefresh}
-          disabled={!native || catalogBusy || folderBusy || unregisterBusy}>
-          <RefreshCcw size={16} className={catalogBusy ? "projects-spinning" : ""}/>
-          목록 새로고침
-        </button>
         <button type="button" className="projects-button primary" onClick={onBrowse} disabled={!canEdit}>
           <FolderPlus size={16}/> 프로젝트 추가
         </button>

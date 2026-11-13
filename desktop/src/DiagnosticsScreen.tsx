@@ -17,8 +17,6 @@ interface DiagnosticsScreenProps {
   publicHealth: PublicTunnelHealth | null;
   publicChecking: boolean;
   refreshKey: number;
-  onRefreshOwned: () => void;
-  onRefreshPublic: () => void;
   onConnections: () => void;
   onNotify: (message: string, tone?: "info" | "error") => void;
 }
@@ -33,7 +31,7 @@ const labelTime = () => new Intl.DateTimeFormat("ko-KR", {
 
 export function DiagnosticsScreen({
   native, owned, ownedBusy, ownedError, publicHealth, publicChecking, refreshKey,
-  onRefreshOwned, onRefreshPublic, onConnections, onNotify
+  onConnections, onNotify
 }: DiagnosticsScreenProps) {
   const [runtime, setRuntime] = useState<RuntimeDiagnostic | null>(null);
   const [health, setHealth] = useState<HealthDiagnostic | null>(null);
@@ -51,27 +49,6 @@ export function DiagnosticsScreen({
   const [reloadError, setReloadError] = useState("");
   const [lockExpanded, setLockExpanded] = useState(false);
   const [lockError, setLockError] = useState("");
-
-  async function fetchOverview(): Promise<void> {
-    setBusy("overview");
-    setSnapshotError("");
-    try {
-      const [s, h] = await Promise.allSettled([
-        runOwnedCliParity({ operation: "status" }),
-        runOwnedCliParity({ operation: "health" })
-      ]);
-      const valueStatus = s.status === "fulfilled" ? parseRuntimeStatus(s.value.json) : null;
-      const valueHealth = h.status === "fulfilled" ? parseHealth(h.value.json) : null;
-      setRuntime(valueStatus);
-      setHealth(valueHealth);
-      const errors = [
-        s.status === "rejected" ? "상태: " + failure(s.reason) : !valueStatus ? "상태: CLI 형식 확인 필요" : "",
-        h.status === "rejected" ? "Health: " + failure(h.reason) : !valueHealth ? "Health: CLI 형식 확인 필요" : ""
-      ].filter(Boolean);
-      setSnapshotError(errors.join(" · ").slice(0, 650));
-      setCheckedAt(labelTime());
-    } finally { setBusy(null); }
-  }
 
   // This screen is mounted only while selected. Only query the owned CLI instance.
   useEffect(() => {
@@ -99,12 +76,6 @@ export function DiagnosticsScreen({
     return () => { active = false; };
   }, [native, refreshKey]);
 
-  async function refresh() {
-    if (busy || !native) return;
-    onRefreshOwned();
-    if (owned?.tunnelRunning) onRefreshPublic();
-    await fetchOverview();
-  }
   async function checkDoctor() {
     if (busy || !native) return;
     setBusy("doctor"); setDoctorError(""); setDoctor(null);
@@ -173,10 +144,6 @@ export function DiagnosticsScreen({
         <h1>진단·복구</h1>
         <p>Tauri 전용 MCP의 실행 상태, 진단 결과, 로그와 프로젝트 잠금을 확인합니다.</p>
       </div>
-      <button className="diag-button secondary" type="button" disabled={!native || isBusy}
-        onClick={() => { void refresh(); }}>
-        <RefreshCcw size={16}/> 전체 점검
-      </button>
     </header>
 
     <div className="diag-summary" aria-label="진단 요약">
@@ -208,8 +175,6 @@ export function DiagnosticsScreen({
           <div><span>공개 Health</span><strong>{health?.publicHealthy === true ? "정상" : health?.publicHealthy === false ? "실패" : "확인 대상 아님"}</strong></div>
         </div>
         <div className="diag-actions">
-          <button type="button" className="diag-button primary" disabled={!native || isBusy}
-            onClick={() => { void refresh(); }}><RefreshCcw size={16}/> 상태 다시 확인</button>
           <button type="button" className="diag-button secondary" onClick={onConnections}>
             MCP 연결 관리 <ArrowRight size={15}/>
           </button>

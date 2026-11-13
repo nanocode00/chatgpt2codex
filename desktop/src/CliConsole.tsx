@@ -36,6 +36,7 @@ interface PendingCommand {
 let sessionHistory: HistoryEntry[] = [];
 let sessionSequence = 0;
 let sessionDraft = "c2c status";
+let lastReadOnlyCommand = "c2c status";
 
 function errorText(error: unknown) {
   return (typeof error === "string" ? error : error instanceof Error ? error.message : "CLI 실행에 실패했습니다.").slice(0, 500);
@@ -47,9 +48,10 @@ function outputText(entry: HistoryEntry): string {
   return entry.result.text ?? JSON.stringify(entry.result.json, null, 2) ?? "출력이 없습니다.";
 }
 
-export function CliConsole({ onNotify, onRuntimeChanged }: {
+export function CliConsole({ onNotify, onRuntimeChanged, refreshKey = 0 }: {
   onNotify?: (message: string, tone?: "info" | "error") => void;
   onRuntimeChanged?: () => void;
+  refreshKey?: number;
 }) {
   const native = isNativeApp();
   const [input, setInput] = useState(sessionDraft);
@@ -119,6 +121,16 @@ export function CliConsole({ onNotify, onRuntimeChanged }: {
     return () => { active = false; window.clearTimeout(timer); };
   }, [input, native]);
 
+  useEffect(() => {
+    if (!refreshKey || !native || busy || pending) return;
+    // The shared top-bar refresh must never replay a mutating command.
+    void checkOwnedCliConsole(lastReadOnlyCommand).then(checked => {
+      if (!checked.mutating) void runChecked(lastReadOnlyCommand, checked);
+    }).catch(error => onNotify?.(errorText(error), "error"));
+    // Only an explicit top-bar refresh should trigger this request.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
+
   async function checkNow() {
     if (!native || busy || !input.trim()) return;
     setChecking(true);
@@ -163,6 +175,7 @@ export function CliConsole({ onNotify, onRuntimeChanged }: {
     let error: string | null = null;
     try {
       result = await runOwnedCliConsole(command, checked.mutating);
+      if (!checked.mutating) lastReadOnlyCommand = command;
       if (checked.mutating) onRuntimeChanged?.();
     } catch (reason) {
       error = errorText(reason);

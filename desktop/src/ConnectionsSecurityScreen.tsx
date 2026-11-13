@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
   Activity, ArrowRight, CheckCircle2, ChevronDown, ClipboardCopy, Cloud, Globe2,
-  HardDrive, KeyRound, LockKeyhole, Play, RefreshCcw, RotateCw,
+  HardDrive, KeyRound, LockKeyhole, Play, RotateCw,
   ShieldCheck, Square, TerminalSquare, TriangleAlert
 } from "lucide-react";
 import { publicView, runtimeView, startAction } from "./dashboard-state";
@@ -18,7 +18,6 @@ interface ConnectionsSecurityProps {
   publicPreferred: boolean;
   publicHealth: PublicTunnelHealth | null;
   publicChecking: boolean;
-  onRefresh: () => void;
   onManagedAction: (action: ManagedAction) => void;
   onTogglePublic: (enable: boolean) => void;
   onCopyPublic: () => void;
@@ -33,7 +32,7 @@ interface ConnectionsSecurityProps {
 export function ConnectionsSecurityScreen({
   native, owned, ownedBusy, ownedError, ownerTokenPending, tokenCopyAvailable,
   publicPreferred, publicHealth, publicChecking,
-  onRefresh, onManagedAction, onTogglePublic, onCopyPublic, onCopyToken,
+  onManagedAction, onTogglePublic, onCopyPublic, onCopyToken,
   onCopyStoredToken, onRegisterToken, onNotify, onDiagnostics
 }: ConnectionsSecurityProps) {
   const state = runtimeView(native, owned);
@@ -100,10 +99,6 @@ export function ConnectionsSecurityScreen({
         <h1>연결·보안</h1>
         <p>Tauri 전용 MCP를 준비하고, 로컬·외부 연결과 ChatGPT 인증을 확인합니다.</p>
       </div>
-      <button className="connections-button secondary" type="button"
-        disabled={!native || runtimeBusy} onClick={onRefresh}>
-        <RefreshCcw size={16}/> 상태 새로고침
-      </button>
     </header>
 
     <section className="connections-overview" aria-label="연결 현황">
@@ -155,11 +150,7 @@ export function ConnectionsSecurityScreen({
             disabled={!running || runtimeBusy} onClick={() => onManagedAction("restart")}>
             <RotateCw size={16}/> 재시작
           </button>
-          <button type="button" className="connections-button secondary" disabled={runtimeBusy} onClick={onRefresh}>
-            <RefreshCcw size={15}/> 상태 확인
-          </button>
         </div>
-        <p className="connections-subnote">모니터링용 포트 설정은 실제 MCP 수신 포트를 변경하지 않습니다.</p>
       </section>
 
       <section className="connections-card connections-external" aria-labelledby="connections-external-heading">

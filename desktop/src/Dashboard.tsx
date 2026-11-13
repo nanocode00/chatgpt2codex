@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
   Activity, ArrowRight, CircleAlert, ClipboardCopy, Cloud,
-  FolderCode, HardDrive, Layers, LockKeyhole, Play, RefreshCcw,
+  FolderCode, HardDrive, Layers, LockKeyhole, Play,
   RotateCw, Settings2, ShieldCheck, Square, TerminalSquare
 } from "lucide-react";
 import type { CatalogInspection, ManagedAction, ManagedResult, PublicTunnelHealth } from "./runtime";
@@ -20,8 +20,6 @@ interface DashboardProps {
   catalog: CatalogInspection | null;
   catalogBusy: boolean;
   catalogError: string;
-  onRefreshOwned: () => void;
-  onRefreshCatalog: () => void;
   onOwnedAction: (action: ManagedAction) => void;
   onTogglePublic: (enable: boolean) => void;
   onCopyPublic: () => void;
@@ -49,7 +47,7 @@ const tunnelLabels = {
 export function Dashboard({
   native, owned, ownedBusy, ownedError, ownedPublicHealth,
   ownedPublicChecking, publicPreferred, catalog, catalogBusy, catalogError,
-  onRefreshOwned, onRefreshCatalog, onOwnedAction, onTogglePublic, onCopyPublic, onNotify, onNavigate
+  onOwnedAction, onTogglePublic, onCopyPublic, onNotify, onNavigate
 }: DashboardProps) {
   const runtimeState = runtimeView(native, owned);
   const runtimeLabel = runtimeLabels[runtimeState];
@@ -85,10 +83,6 @@ export function Dashboard({
         <h1>내 개발 환경</h1>
         <p>로컬 MCP와 외부 공개를 독립적으로 관리하고 프로젝트 상태를 확인합니다.</p>
       </div>
-      <button type="button" className="dash-quiet-button" disabled={!native || ownedBusy}
-        onClick={() => { onRefreshOwned(); onRefreshCatalog(); }}>
-        <RefreshCcw size={16} /> 상태 새로고침
-      </button>
     </header>
 
     <section className="dash-runtime" aria-labelledby="dash-runtime-title">
