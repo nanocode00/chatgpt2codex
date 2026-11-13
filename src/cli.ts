@@ -1903,24 +1903,19 @@ async function cmdStop(flags: Record<string, string | boolean>): Promise<void> {
     cliPerf("stop", started);
     return;
   }
-  // The health endpoint identifies a service on this port, not the process
-  // recorded in our PID file. Check ownership on *all* stop paths, even
-  // healthy ones. --force must never override an identity mismatch.
+  // Health identifies a service, not its PID. Check the server identity
+  // immediately before signalling on *every* stop path, including --force.
+  // The former duplicate server CIM query ran before Health and then again
+  // before SIGTERM; only the final result could authorize the signal.
   const tunnelRunning = record.tunnelPid !== undefined && isProcessAlive(record.tunnelPid);
-  const ownershipStarted = performance.now();
-  // Independently validate both process identities in parallel. The server
-  // is checked again immediately before signalling; no ownership guard is
-  // removed. On Windows this overlaps two expensive CIM queries.
-  const [serverOwned, tunnelOwned] = await Promise.all([
-    runtimeProcessMatchesRecord(record),
+  const readinessStarted = performance.now();
+  // Preflight tunnel ownership BEFORE touching the server to avoid a partial
+  // shutdown. The independent read-only Health check can run in parallel.
+  const [healthy, tunnelOwned] = await Promise.all([
+    runtimeHealth(record),
     tunnelRunning ? runtimeTunnelMatchesRecord(record) : Promise.resolve(true),
   ]);
-  cliPerf("stop ownership preflight", ownershipStarted);
-  if (!serverOwned) {
-    throw new Error(
-      "refusing stop because pid " + record.pid + " could not be verified as instance " + instance,
-    );
-  }
+  cliPerf("stop readiness preflight", readinessStarted);
   // Preflight the tunnel too, before stopping the server. This avoids
   // partially stopping an instance that cannot safely clean up its tunnel.
   if (!tunnelOwned) {
@@ -1928,20 +1923,18 @@ async function cmdStop(flags: Record<string, string | boolean>): Promise<void> {
       "refusing stop because tunnel pid " + record.tunnelPid + " could not be verified as instance " + instance,
     );
   }
-  const healthStarted = performance.now();
-  const healthy = await runtimeHealth(record);
-  cliPerf("stop health check", healthStarted);
   if (!healthy && flags.force !== true) {
     throw new Error(
       "refusing to signal pid " + record.pid + " because its health endpoint is not responding; retry with --force only after verifying instance identity",
     );
   }
-  // Recheck immediately before signalling (processes can exit between probes).
+  // The sole server identity query is performed immediately before signalling;
+  // no health, network, or additional preflight work runs between it and kill.
   const finalOwnershipStarted = performance.now();
   const finalOwned = await runtimeProcessMatchesRecord(record);
-  cliPerf("stop ownership recheck", finalOwnershipStarted);
+  cliPerf("stop final ownership check", finalOwnershipStarted);
   if (!finalOwned) {
-    throw new Error("runtime process identity changed before stop: " + instance);
+    throw new Error("refusing stop because pid " + record.pid + " could not be verified as instance " + instance);
   }
   process.kill(record.pid, "SIGTERM");
   const serverWaitStarted = performance.now();

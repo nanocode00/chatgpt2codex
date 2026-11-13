@@ -29,9 +29,16 @@ describe("CLI lifecycle latency and tray quit feedback", () => {
     expect(stop).toContain("runtimeTunnelMatchesRecord(record)");
     expect(stop).toContain("process.kill(record.pid, \"SIGTERM\")");
     for (const phase of [
-      "stop ownership preflight", "stop health check", "stop ownership recheck",
+      "stop readiness preflight", "stop final ownership check",
       "stop server exit wait", "stop tunnel exit wait", "stop record cleanup",
     ]) expect(stop).toContain('cliPerf("' + phase + '"');
+    const beforeSigterm = stop.slice(0, stop.indexOf('process.kill(record.pid, "SIGTERM")'));
+    expect(beforeSigterm.match(/runtimeProcessMatchesRecord\(record\)/g)).toHaveLength(1);
+    expect(beforeSigterm).toContain("const [healthy, tunnelOwned] = await Promise.all([");
+    expect(beforeSigterm.indexOf("if (!tunnelOwned)")).toBeLessThan(
+      beforeSigterm.indexOf("const finalOwned = await runtimeProcessMatchesRecord(record)")
+    );
+    expect(beforeSigterm).toContain("if (!finalOwned)");
     expect(cli).toContain('cliPerf("start", started)');
     expect(cli).toContain('cliPerf("reload", started)');
     expect(cli).toContain('cliPerf("restart", started)');
