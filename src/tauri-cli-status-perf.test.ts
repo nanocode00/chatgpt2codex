@@ -41,7 +41,10 @@ describe("CLI console status fast path", () => {
     expect(rust).toContain("WaitForSingleObject(handle, 0)");
     expect(rust).toContain("CloseHandle(handle)");
     expect(app).toContain("pub(crate) fn native_local_c2c_health(port: u16)");
-    expect(app).toContain("probe_local_runtime(port).online");
+    expect(app).toContain("probe_local_runtime_with_timeout(port, Duration::from_millis(500)).online");
+    expect(app).toContain("if let Ok(value) = serde_json::from_str::<serde_json::Value>(body)");
+    expect(app).toContain("return snapshot;");
+    expect(app).toContain("complete_health_json_does_not_wait_for_keepalive_connection_to_close");
     expect(app).toContain('value["ok"] == true && value["name"] == "chatgpt2codex"');
   });
 });

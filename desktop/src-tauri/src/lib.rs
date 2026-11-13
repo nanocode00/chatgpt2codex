@@ -60,6 +60,10 @@ struct RuntimeHealth {
 }
 
 fn probe_local_runtime(port: u16) -> RuntimeHealth {
+    probe_local_runtime_with_timeout(port, Duration::from_millis(1100))
+}
+
+fn probe_local_runtime_with_timeout(port: u16, timeout: Duration) -> RuntimeHealth {
     let endpoint = format!("http://127.0.0.1:{port}/mcp");
     let mut snapshot = RuntimeHealth {
         online: false,
@@ -72,15 +76,15 @@ fn probe_local_runtime(port: u16) -> RuntimeHealth {
     // Deliberately limit health probes to localhost. Never accept arbitrary
     // endpoints or fetch Owner Tokens from a public tunnel.
     let address = SocketAddr::from(([127, 0, 0, 1], port));
-    let mut stream = match TcpStream::connect_timeout(&address, Duration::from_millis(1100)) {
+    let mut stream = match TcpStream::connect_timeout(&address, timeout) {
         Ok(stream) => stream,
         Err(_) => {
             snapshot.details = "해당 포트에서 로컬 C2C 서버를 찾을 수 없습니다.".into();
             return snapshot;
         }
     };
-    let _ = stream.set_read_timeout(Some(Duration::from_millis(1100)));
-    let _ = stream.set_write_timeout(Some(Duration::from_millis(1100)));
+    let _ = stream.set_read_timeout(Some(timeout));
+    let _ = stream.set_write_timeout(Some(timeout));
     if stream
         .write_all(b"GET /healthz HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: application/json\r\nConnection: close\r\n\r\n")
         .is_err()
@@ -94,7 +98,28 @@ fn probe_local_runtime(port: u16) -> RuntimeHealth {
     while response.len() < 8192 {
         match stream.read(&mut buf) {
             Ok(0) => break,
-            Ok(n) => response.extend_from_slice(&buf[..n]),
+            Ok(n) => {
+                response.extend_from_slice(&buf[..n]);
+                // HTTP keep-alive or a slow close must not add a whole read
+                // timeout after /healthz has already returned a complete
+                // JSON identity. This was a measurable ~1.1s cost in CI.
+                let received = String::from_utf8_lossy(&response);
+                if let Some((_, body)) = received.split_once("\r\n\r\n") {
+                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(body) {
+                        if received.starts_with("HTTP/1.1 200 ") ||
+                           received.starts_with("HTTP/1.0 200 ") {
+                            snapshot.online = value["ok"] == true &&
+                                value["name"] == "chatgpt2codex";
+                            snapshot.details = if snapshot.online {
+                                "로컬 MCP 서버가 정상 응답 중입니다."
+                            } else {
+                                "해당 포트는 C2C 서버로 확인되지 않았습니다."
+                            }.into();
+                            return snapshot;
+                        }
+                    }
+                }
+            },
             Err(_) => break,
         }
     }
@@ -120,7 +145,9 @@ fn probe_local_runtime(port: u16) -> RuntimeHealth {
 /// Read-only native status fast path: only an authenticated localhost C2C
 /// health response counts as healthy. No process is launched or stopped.
 pub(crate) fn native_local_c2c_health(port: u16) -> bool {
-    probe_local_runtime(port).online
+    // Fast read-only checks are used interactively; bound an unresponsive
+    // localhost listener more tightly than the background health poll.
+    probe_local_runtime_with_timeout(port, Duration::from_millis(500)).online
 }
 
 #[tauri::command]
@@ -165,6 +192,38 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn complete_health_json_does_not_wait_for_keepalive_connection_to_close() {
+        use std::net::TcpListener;
+        use std::thread;
+        use std::time::Instant;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = thread::spawn(move || {
+            let (mut client, _) = listener.accept().unwrap();
+            let _ = client.set_read_timeout(Some(Duration::from_secs(1)));
+            let mut request = [0u8; 256];
+            let _ = client.read(&mut request);
+            let body = r#"{"ok":true,"name":"chatgpt2codex"}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\r\n{}",
+                body.len(), body
+            );
+            client.write_all(response.as_bytes()).unwrap();
+            // Deliberately keep the socket open after the complete response.
+            thread::sleep(Duration::from_millis(1000));
+        });
+        let start = Instant::now();
+        let health = probe_local_runtime_with_timeout(port, Duration::from_millis(900));
+        let elapsed = start.elapsed();
+        assert!(health.online, "complete C2C health identity must be recognized");
+        assert!(elapsed < Duration::from_millis(600),
+            "the probe waited on keep-alive despite a complete JSON body: {elapsed:?}");
+        println!("health keep-alive early return: {elapsed:?}");
+        server.join().unwrap();
+    }
 
     #[test]
     fn empty_port_returns_offline() {
