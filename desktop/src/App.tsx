@@ -108,15 +108,22 @@ function App() {
   useEffect(() => {
     if (!native) return;
     let active = true;
-    let unlisten: (() => void) | undefined;
+    const unlisteners: Array<() => void> = [];
+    void listen("c2c:tray-exit-started", () => {
+      setScreen("settings");
+      setExitError("");
+      setExitBusy(true);
+    }).then(dispose => {
+      if (active) unlisteners.push(dispose); else dispose();
+    }).catch(() => {});
     void listen<string>("c2c:tray-exit-error", event => {
+      setExitBusy(false);
       setExitError(event.payload);
       notify(event.payload, "error");
     }).then(dispose => {
-      if (active) unlisten = dispose;
-      else dispose();
+      if (active) unlisteners.push(dispose); else dispose();
     }).catch(() => {});
-    return () => { active = false; unlisten?.(); };
+    return () => { active = false; unlisteners.forEach(dispose => dispose()); };
   }, [native, notify]);
 
   useEffect(() => {
@@ -677,6 +684,14 @@ function App() {
         onCancel={() => { if (!ownedBusy) setRotationDialogOpen(false); }}
         onConfirm={() => { void runOwnedAction("rotate-token", true); }}
       />}
+      {exitBusy && <div className="exit-progress-backdrop" role="status" aria-live="polite"
+        aria-label="C2C 종료 진행 중">
+        <div className="exit-progress-dialog">
+          <span className="exit-progress-spinner" aria-hidden="true"/>
+          <strong>MCP 서버와 터널을 종료하는 중...</strong>
+          <p>안전하게 종료하고 있어요. 완료되면 앱이 닫힙니다.</p>
+        </div>
+      </div>}
       <Toast toast={toast}/>
     </div>
   );
