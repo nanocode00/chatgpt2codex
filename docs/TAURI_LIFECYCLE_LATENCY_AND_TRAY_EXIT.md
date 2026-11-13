@@ -42,3 +42,12 @@
 - 종료 지연의 근거가 확보되기 전에는 CLI의 PID 보호 규칙, Health 검사, 종료 타임아웃, 강제 종료 조건을 임의로 완화하지 않는다.
 
 **병합 게이트:** Windows CI CLI 수명주기 통과, Rust·TypeScript 테스트 통과, 트레이 종료 성공·실패 수동 점검 이후에만 Draft 해제 검토.
+
+## Quick Tunnel 시작 지연 최적화 (후속 Draft)
+
+- 기존 CLI `start --tunnel cloudflare`는 Quick Tunnel URL 확보 및 로컬 MCP Health/소유 기록 검증을 마친 **뒤**, 별도 외부 HTTPS `/healthz`를 여러 차례 재시도한다. 네트워크 응답이 느리면 CLI가 이미 관리 가능한 로컬 MCP를 시작해 놓고도 시작 응답이 지연될 수 있다.
+- Tauri 전용 `tauri-preview-v1` 공개 시작에서만 `--defer-public-health`를 CLI에 명시한다. URL 확보·로컬 MCP Health·소유권 기록 생성·검증은 **동일하게 필수**이고, 외부 HTTPS는 `publicHealthy: null`(아직 미검증)로 돌려준다. 성공 또는 실패로 가장하지 않는다.
+- Tauri 화면의 **기존** `inspect_owned_public_tunnel_health()`가 고정된 Quick Tunnel 도메인의 HTTPS `/healthz`를 검사하며, 시작 직후와 30초 간격·창 포커스·네트워크 복구 시 재검사한다. SSH/WSL/default C2C에는 영향이 없다.
+- 일반 CLI 및 다른 인스턴스의 외부 Health 검증은 **기존 동기 방식 유지**. 해당 옵션은 Tauri 지정 인스턴스+cloudflare에서만 허용한다. 실행 중 공개 전환 금지·PID/Cloudflare 바이너리 소유권 검사·정상 종료 규칙을 완화하지 않는다.
+- CLI 선택적 `C2C_CLI_PERF=1` 계측은 `start tunnel ready`, `start local ready`, 기존 방식의 `start public health`, 전체 `start`를 숫자로만 구분한다. 터널 URL 발급 자체가 지연된다면 이 변경만으로 10초가 모두 없어지지는 않는다.
+- Windows CI에서는 옵트인 정책/지연된 HTTPS 응답에 대한 단위 검사·실제 Tauri 빌드를 확인한다. **실제 외부 Cloudflare 지연, 최초 HTTPS 불안정, 사용자 PC 체감값은 별도로 검수**한다.

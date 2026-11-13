@@ -833,9 +833,15 @@ fn start_owned_at_port(root: &Payload, port: u16, public_start: bool) -> Result<
     clear_startup_repository_preference(root)?;
     let tunnel_mode = if public_start { "cloudflare" } else { "none" };
     let port_text = port.to_string();
-    let args = ["start", "--instance", INSTANCE,
+    let mut args = vec!["start", "--instance", INSTANCE,
         "--workspace", root.workspace.to_str().ok_or("유효하지 않은 경로입니다.")?,
         "--host", "127.0.0.1", "--port", port_text.as_str(), "--tunnel", tunnel_mode];
+    if public_start {
+        // Only the isolated preview may defer the CLI's blocking public HTTPS
+        // retry loop. The GUI checks HTTPS separately with its pinned native
+        // Quick Tunnel probe; never represent an unverified URL as healthy.
+        args.push("--defer-public-health");
+    }
     let started = cli_command(root, &args,
         Duration::from_secs(if public_start { 100 } else { 35 }))?;
     if started["started"] != true || started["healthy"] != true ||
