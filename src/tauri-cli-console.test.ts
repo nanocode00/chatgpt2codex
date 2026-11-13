@@ -9,8 +9,8 @@ describe("Tauri CLI console: native syntax guard and interactive UI", () => {
   const app = readFileSync("desktop/src/App.tsx", "utf8");
 
   it("replaces the old parity button matrix with command input, validation, output and session history", () => {
-    expect(app).toContain("<CliConsole onNotify={notify} onRuntimeChanged=");
-    expect(app).toContain('void runOwnedAction("status")');
+    expect(app).toContain("<CliConsole onNotify={notify} refreshKey={cliRefreshKey} onRuntimeChanged=");
+    expect(app).toContain("void refreshOwnedStatus()");
     expect(app).toContain("<h1>CLI 콘솔</h1>");
     expect(app).not.toContain("<CliParityPanel");
     expect(screen).toContain("CLI 명령");
