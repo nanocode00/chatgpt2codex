@@ -357,9 +357,56 @@ fn execute(request: CliParityRequest) -> Result<CliParityResponse, String> {
     })
 }
 
+fn execute_with_read_only_fast_path(request: CliParityRequest) -> Result<CliParityResponse, String> {
+    // All screens and the CLI console share the same audited read-only
+    // optimizations. Mutations and unknown commands still use execute().
+    let plan = plan(&request)?;
+    if plan.mutating { return execute(request); }
+    let started = Instant::now();
+    if matches!(request.operation.as_str(), "status" | "health") {
+        if let Some(snapshot) = managed_cli::native_console_status(&request.operation)? {
+            return Ok(CliParityResponse {
+                operation: request.operation,
+                command: format!("c2c {}", plan.args.join(" ")),
+                json: Some(redact_json(snapshot, 0)), text: None,
+                note: format!("Windows 네이티브 상태 조회 · {}ms · Node 실행 없음",
+                    started.elapsed().as_millis()),
+            });
+        }
+    }
+    if matches!(request.operation.as_str(), "repository-list" | "profile-list") {
+        let kind = if request.operation == "repository-list" { "repository" } else { "profile" };
+        return Ok(CliParityResponse {
+            operation: request.operation,
+            command: format!("c2c {}", plan.args.join(" ")),
+            json: Some(redact_json(crate::catalog::native_catalog_command(kind)?, 0)),
+            text: None,
+            note: format!("네이티브 목록 조회 · {}ms · Node 실행 없음",
+                started.elapsed().as_millis()),
+        });
+    }
+    if request.operation == "profile-show" {
+        let name = request.alias.as_deref().ok_or("프로필 별칭이 필요합니다.")?;
+        let details = crate::catalog::native_profile_detail(name)?;
+        return Ok(CliParityResponse {
+            operation: request.operation,
+            command: format!("c2c {}", plan.args.join(" ")),
+            json: Some(redact_json(details, 0)), text: None,
+            note: format!("네이티브 프로필 조회 · {}ms · Node 실행 없음",
+                started.elapsed().as_millis()),
+        });
+    }
+    let mut output = execute(request)?;
+    if matches!(output.operation.as_str(), "status" | "health") {
+        output.note = format!("검증된 Node CLI 조회 · {}ms · 호환 경로",
+            started.elapsed().as_millis());
+    }
+    Ok(output)
+}
+
 #[tauri::command]
 pub async fn run_owned_cli_parity(request: CliParityRequest) -> Result<CliParityResponse, String> {
-    tauri::async_runtime::spawn_blocking(move || execute(request))
+    tauri::async_runtime::spawn_blocking(move || execute_with_read_only_fast_path(request))
         .await.map_err(|_| "Tauri CLI 작업이 실패했습니다.".to_string())?
 }
 
@@ -536,28 +583,8 @@ pub async fn run_owned_cli_console(input: String, confirmed: bool) -> Result<Cli
                 fast_console_logs(if request.operation == "logs-server" { "server" } else { "tunnel" }, check)
             }).await.map_err(|_| "로그 조회를 완료하지 못했습니다.".to_string())?
         }
-        ConsoleAction::Parity(request) if matches!(request.operation.as_str(), "status" | "health") => {
-            tauri::async_runtime::spawn_blocking(move || {
-                let start = Instant::now();
-                match managed_cli::native_console_status(&request.operation)? {
-                    Some(snapshot) => Ok(CliParityResponse {
-                        operation: request.operation,
-                        command: check.command,
-                        json: Some(redact_json(snapshot, 0)), text: None,
-                        note: format!("Windows 네이티브 상태 조회 · {}ms · Node 실행 없음",
-                            start.elapsed().as_millis()),
-                    }),
-                    None => {
-                        let mut result = execute(request)?;
-                        result.note = format!("기존 Node CLI 조회 · {}ms · 이전 형식/검증 대체 경로",
-                            start.elapsed().as_millis());
-                        Ok(result)
-                    }
-                }
-            }).await.map_err(|_| "CLI 상태 조회를 완료하지 못했습니다.".to_string())?
-        }
         ConsoleAction::Parity(request) =>
-            tauri::async_runtime::spawn_blocking(move || execute(request))
+            tauri::async_runtime::spawn_blocking(move || execute_with_read_only_fast_path(request))
                 .await.map_err(|_| "CLI 콘솔 실행을 완료하지 못했습니다.".to_string())?,
     }
 }

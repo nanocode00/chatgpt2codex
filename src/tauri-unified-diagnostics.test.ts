@@ -61,7 +61,8 @@ describe("Tauri isolated diagnostics data models", () => {
     expect(screen).toContain('runOwnedCliParity({ operation: "doctor" })');
     expect(screen).toContain('runOwnedCliParity({ operation: "lock-list" })');
     expect(screen).toContain('runOwnedCliParity({ operation: "reload" })');
-    expect(screen).toContain('onRefreshPublic');
+    expect(screen).not.toContain('onRefreshPublic');
+    expect(app).toContain('setDiagnosticsRefreshKey(value => value + 1)');
     expect(screen).not.toContain('runOwnedCliParity({ operation: "lock-release" })');
   });
 
@@ -75,7 +76,7 @@ describe("Tauri isolated diagnostics data models", () => {
     expect(screen).toContain('(response as Record<string, unknown>).reloaded !== true');
     expect(screen).toContain('setReloadResult("Tauri 전용 프로젝트·실행 환경 구성 재로드가 확인되었습니다.")');
     // CLI lock list can clear stale records: not called on screen entry or every auto refresh.
-    const autoRange = screen.slice(screen.indexOf("// This screen is mounted"), screen.indexOf("  async function refresh()"));
+    const autoRange = screen.slice(screen.indexOf("// This screen is mounted"), screen.indexOf("  async function checkDoctor()"));
     expect(autoRange).not.toContain('"lock-list"');
     expect(screen).toContain("조회 시 만료되거나 종료된 잠금 기록을 CLI가 자동 정리할 수 있습니다.");
     expect(screen).toContain("강제 잠금 해제·임의 PID 종료·인스턴스 파일 삭제");

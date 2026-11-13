@@ -119,6 +119,13 @@ jobs:
         run: cargo test --manifest-path desktop/src-tauri/Cargo.toml --lib native_status_uses_owned_record_without_running_node_or_modifying_files -- --nocapture
       - name: Verify early-return localhost Health latency
         run: cargo test --manifest-path desktop/src-tauri/Cargo.toml --lib complete_health_json_does_not_wait_for_keepalive_connection_to_close -- --nocapture
+      - name: Measure native catalogs and already-stopped complete exit
+        shell: pwsh
+        run: |
+          cargo test --manifest-path desktop/src-tauri/Cargo.toml --lib native_catalog_reads_bounded_isolated_fixtures_without_starting_node -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw "Native catalog fixture failed" }
+          cargo test --manifest-path desktop/src-tauri/Cargo.toml --lib exit_without_runtime_record_never_needs_node_and_refuses_occupied_port -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw "Idle complete-exit fixture failed" }
       - name: F3 disposable DPAPI restore and authenticated MCP E2E
         env:
           C2C_F3_E2E: "true"

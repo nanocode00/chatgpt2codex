@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity, AlertCircle, ArrowRight, Ban, CheckCircle2, ChevronRight, CirclePause,
   ClipboardCopy, Clock3, FileText, History, Layers, LoaderCircle,
-  Play, RefreshCcw, Search, ShieldCheck, X
+  Play, Search, ShieldCheck, X
 } from "lucide-react";
 import { isNativeApp, runOwnedCliParity } from "./runtime";
 import {
@@ -16,6 +16,7 @@ interface JobsScreenProps {
   onNotify: (message: string, tone?: "info" | "error") => void;
   onProjects: () => void;
   refreshKey: number;
+  onListBusyChange?: (busy: boolean) => void;
 }
 function errorText(error: unknown): string {
   return (typeof error === "string" ? error : error instanceof Error ? error.message : "작업 조회에 실패했습니다.").slice(0, 460);
@@ -31,10 +32,12 @@ const filterItems: { id: JobFilter; label: string; symbol: "layers" | "active" |
   { id: "attention", label: "대기·차단", symbol: "attention" },
   { id: "history", label: "완료·취소", symbol: "history" }
 ];
-export function JobsScreen({ onNotify, onProjects, refreshKey }: JobsScreenProps) {
+export function JobsScreen({ onNotify, onProjects, refreshKey, onListBusyChange }: JobsScreenProps) {
   const native = isNativeApp();
   const [items, setItems] = useState<JobListItem[] | null>(null);
   const [listBusy, setListBusy] = useState(false);
+  useEffect(() => { onListBusyChange?.(listBusy); }, [listBusy, onListBusyChange]);
+  useEffect(() => () => onListBusyChange?.(false), [onListBusyChange]);
   const listLock = useRef(false);
   const [listError, setListError] = useState("");
   const [filter, setFilter] = useState<JobFilter>("all");
@@ -181,11 +184,6 @@ export function JobsScreen({ onNotify, onProjects, refreshKey }: JobsScreenProps
         <h1>작업 관리</h1>
         <p>저장된 작업의 진행 상태와 기록을 살펴보고, 다음 진행에 필요한 ID를 확인합니다.</p>
       </div>
-      <button type="button" className="jobs-button secondary" disabled={!native || listBusy || actionBusy}
-        onClick={() => { void reloadList(); }}>
-        <RefreshCcw size={16} className={listBusy ? "jobs-spin" : ""}/>
-        {listBusy ? "확인 중" : "목록 새로고침"}
-      </button>
     </header>
 
     <section className="jobs-stats" aria-label="작업 상태 필터">
