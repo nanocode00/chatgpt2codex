@@ -80,6 +80,8 @@ Tauri에 필요한 실행 파일 무결성 검사, 허용 인자 전달, 프로�
 
 ## 7. 기존 구현과 충돌하는 부분 — 정리 대상
 
+> **2026-11-13 이행 작업:** `feat/cli-owned-execution-refresh-integration`에서 PR #103의 Rust 직접 상태/Health·로그 우회와 WIP의 직접 JSON 카탈로그 파서를 실행 경로에서 제거하는 작업을 시작했다. 프로젝트·프로필은 CLI `catalog list` 한 번으로 조회하고, 현재 화면 새로고침은 상단바에 모으는 방향이다. 최종 완료 여부는 Windows CI와 수동 성능 검수 이후 확정한다. 검수 항목은 [TAURI_UNIFIED_REFRESH_PERF_ACCEPTANCE.md](./TAURI_UNIFIED_REFRESH_PERF_ACCEPTANCE.md).
+
 이 문서는 **정책 확정**이며 아래 내용은 **아직 정리·교체 전**이다.
 
 - Draft PR #103의 Rust `native_console_status` 및 자체 로컬 Health/PID 검사: **CLI 대신 상태를 판정**하므로 최종 구조와 충돌. 알고리즘 최적화와 Health 조기 반환의 실험·성능 측정은 자료로 남기되 **CLI 코어로 이전하거나 제거**해야 한다.

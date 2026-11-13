@@ -184,156 +184,6 @@ fn payload() -> Result<Payload, String> {
     payload_for(directory, &PathBuf::from(local))
 }
 
-/// The console status/health fast path *never executes a binary or mutates
-/// server state*. Resolve only fixed bundle paths without hashing large
-/// executables. Every operation which can execute a CLI still uses payload()
-/// and verifies all SHA-256 manifest hashes.
-fn read_only_payload() -> Result<Payload, String> {
-    if !cfg!(target_os = "windows") {
-        return Err("빠른 상태 조회는 현재 Windows 전용입니다.".into());
-    }
-    let exe = std::env::current_exe().map_err(|_| "Tauri 실행 위치를 확인하지 못했습니다.")?;
-    let directory = exe.parent().ok_or("Tauri 실행 위치가 올바르지 않습니다.")?;
-    let resource_root = if directory.join("c2c-runtime").join("manifest.json").is_file() {
-        directory.to_path_buf()
-    } else {
-        directory.join("resources")
-    };
-    let bundle = resource_root.join("c2c-runtime");
-    if !bundle.join("manifest.json").is_file() {
-        return Err("번들 CLI 매니페스트를 찾지 못했습니다.".into());
-    }
-    let node = bundle.join("bin").join("node.exe");
-    let cli = bundle.join("dist").join("cli.js");
-    if !node.is_file() || !cli.is_file() {
-        return Err("번들 CLI 실행 파일이 없습니다.".into());
-    }
-    let local = std::env::var_os("LOCALAPPDATA").ok_or("LOCALAPPDATA를 확인할 수 없습니다.")?;
-    let base = PathBuf::from(local).join("ChatGPTToCodex-Tauri-Preview");
-    let cloudflared = bundle.join("bin").join("cloudflared.exe");
-    Ok(Payload {
-        node, cli, home: base.join("isolated-home"),
-        workspace: base.join("workspace"),
-        cloudflared: cloudflared.is_file().then_some(cloudflared),
-    })
-}
-
-#[cfg(target_os = "windows")]
-fn native_pid_alive(pid: u32) -> Option<bool> {
-    use windows_sys::Win32::Foundation::{CloseHandle, WAIT_TIMEOUT};
-    use windows_sys::Win32::System::Threading::{
-        OpenProcess, WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION,
-    };
-    if pid == 0 { return Some(false); }
-    // WaitForSingleObject requires SYNCHRONIZE (0x0010_0000) in addition
-    // to query access. These are read-only rights; never request terminate.
-    const SYNCHRONIZE_ACCESS: u32 = 0x0010_0000;
-    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE_ACCESS, 0, pid) };
-    if handle.is_null() {
-        // Access denied or a recycled PID: let the canonical CLI determine
-        // the state instead of guessing or probing a foreign process.
-        return None;
-    }
-    let result = unsafe { WaitForSingleObject(handle, 0) };
-    unsafe { CloseHandle(handle) };
-    match result {
-        WAIT_TIMEOUT => Some(true),
-        0 => Some(false), // WAIT_OBJECT_0
-        _ => None,
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-fn native_pid_alive(_pid: u32) -> Option<bool> {
-    None
-}
-
-/// Returns None when a legacy/stale/ambiguous record needs the canonical CLI
-/// fallback. Fast path never starts Node, relies on unverified binaries, or
-/// modifies a stale runtime record.
-pub(crate) fn native_console_status(operation: &str) -> Result<Option<serde_json::Value>, String> {
-    let root = read_only_payload()?;
-    native_console_status_for(&root, operation)
-}
-
-fn native_console_status_for(root: &Payload, operation: &str)
-    -> Result<Option<serde_json::Value>, String> {
-    if !matches!(operation, "status" | "health") {
-        return Err("빠른 상태 조회는 status/health만 지원합니다.".into());
-    }
-    let path = state_record(root);
-    let bytes = match fs::symlink_metadata(&path) {
-        Ok(meta) if meta.is_file() && !meta.file_type().is_symlink() &&
-            meta.len() <= 128 * 1024 => Some(
-            fs::read(&path).map_err(|_| "인스턴스 상태 기록을 읽지 못했습니다.")?),
-        Ok(_) => return Err("인스턴스 상태 기록이 올바른 파일이 아닙니다.".into()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(_) => return Err("인스턴스 상태 기록을 확인하지 못했습니다.".into()),
-    };
-    let record: Option<serde_json::Value> = bytes.as_ref()
-        .map(|bytes| serde_json::from_slice(bytes)
-            .map_err(|_| "인스턴스 상태 기록을 해석하지 못했습니다.".to_string()))
-        .transpose()?;
-    let Some(mut record) = record else {
-        return Ok(Some(if operation == "status" {
-            serde_json::json!({"name": INSTANCE, "alive": false, "healthy": false})
-        } else {
-            serde_json::json!({
-                "instance": INSTANCE, "alive": false, "healthy": false,
-                "tunnelAlive": null, "publicHealthy": null, "endpoint": null
-            })
-        }));
-    };
-    // Normal current Tauri records match the fixed workspace. Only those
-    // can avoid the old CLI-powered repository lookup; compatibility cases
-    // fall back to the original, fully hash-verified CLI code path.
-    let expected_workspace = fs::canonicalize(&root.workspace).ok();
-    let recorded_workspace = record["workspace"].as_str()
-        .and_then(|s| fs::canonicalize(s).ok());
-    if expected_workspace.is_none() || expected_workspace != recorded_workspace {
-        return Ok(None);
-    }
-    if !expected_record(root, &record) {
-        return Err("인스턴스 기록이 앱 소유로 검증되지 않아 상태 조회를 중단했습니다.".into());
-    }
-    // Public health intentionally retains the canonical CLI's remote
-    // HTTPS probe. The local-only fast path performs no external network I/O.
-    if operation == "health" && record["tunnelMode"] == "cloudflare" {
-        return Ok(None);
-    }
-    let pid = record["pid"].as_u64().and_then(|v| u32::try_from(v).ok());
-    let Some(alive) = pid.and_then(native_pid_alive) else { return Ok(None); };
-    if !alive {
-        // The Node CLI may safely clean up a genuinely stale record. A
-        // native read-only observation must not silently change that rule.
-        return Ok(None);
-    }
-    let port = record["port"].as_u64().and_then(|v| u16::try_from(v).ok())
-        .ok_or("인스턴스 포트가 올바르지 않습니다.")?;
-    let healthy = crate::native_local_c2c_health(port);
-    let tunnel_alive = if record["tunnelPid"].is_null() {
-        None
-    } else {
-        let Some(pid) = record["tunnelPid"].as_u64().and_then(|v| u32::try_from(v).ok())
-            else { return Ok(None); };
-        let Some(running) = native_pid_alive(pid) else { return Ok(None); };
-        Some(running)
-    };
-    if operation == "health" {
-        return Ok(Some(serde_json::json!({
-            "instance": INSTANCE, "alive": alive, "healthy": healthy,
-            "tunnelAlive": tunnel_alive, "publicHealthy": null,
-            "endpoint": record["publicUrl"].as_str().map(|url| format!("{url}/healthz"))
-        })));
-    }
-    let map = record.as_object_mut().ok_or("인스턴스 기록의 필드 형식이 올바르지 않습니다.")?;
-    map.insert("alive".into(), alive.into());
-    map.insert("healthy".into(), healthy.into());
-    map.insert("tunnelAlive".into(),
-        tunnel_alive.map(serde_json::Value::Bool).unwrap_or(serde_json::Value::Null));
-    Ok(Some(record))
-}
-
 fn state_record(root: &Payload) -> PathBuf {
     root.home.join(".local").join("share").join("chatgpt2codex")
         .join("runtime").join(format!("{INSTANCE}.json"))
@@ -489,18 +339,22 @@ fn cli_command(root: &Payload, args: &[&str], timeout: Duration) -> Result<serde
 pub(crate) fn parity_cli(args: &[String], mutating: bool, needs_owned_runtime: bool,
                          output_is_text: bool, allow_nonzero: bool) -> Result<String, String> {
     let root = payload()?;
-    ensure_workspace(&root)?;
-    let lock = MUTATION_LOCK.get_or_init(|| Mutex::new(()));
-    // Lock even reads, so a list/show cannot race with rotation or stopping.
-    let _guard = lock.lock().map_err(|_| "CLI 제어 잠금에 실패했습니다.")?;
-    // All commands, including status/health, must reject foreign/stale
-    // runtime records before a CLI status probe could mutate their state.
-    let owned_record = record_if_any(&root)?;
-    if needs_owned_runtime && owned_record.is_none() {
-        return Err("Tauri 전용 MCP가 실행 중이 아닙니다. 재로드는 실행 중인 전용 서버에만 허용됩니다.".into());
-    }
-    if mutating && port_occupied(configured_port(&root)?) && owned_record.is_none() {
-        return Err("전용 포트를 외부 프로세스가 사용 중입니다. CLI 설정 변경을 거부합니다.".into());
+    // The read-only CLI is authoritative for its own state and errors.
+    // Avoid GUI-only workspace creation, PID/Health checks and extra CLI
+    // config calls before forwarding simple status/catalog/log requests.
+    let _guard = if mutating {
+        let lock = MUTATION_LOCK.get_or_init(|| Mutex::new(()));
+        Some(lock.lock().map_err(|_| "CLI 제어 잠금에 실패했습니다.")?)
+    } else { None };
+    if mutating {
+        ensure_workspace(&root)?;
+        let owned_record = record_if_any(&root)?;
+        if needs_owned_runtime && owned_record.is_none() {
+            return Err("Tauri 전용 MCP가 실행 중이 아닙니다. 재로드는 실행 중인 전용 서버에만 허용됩니다.".into());
+        }
+        if port_occupied(configured_port(&root)?) && owned_record.is_none() {
+            return Err("전용 포트를 외부 프로세스가 사용 중입니다. CLI 설정 변경을 거부합니다.".into());
+        }
     }
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
     // Windows project scans may take longer than a basic status/list
@@ -519,17 +373,11 @@ pub(crate) fn parity_cli(args: &[String], mutating: bool, needs_owned_runtime: b
     }
 }
 
-/// Only these two fixed list verbs can be invoked by the catalog UI.
- /// Resolves a hash-verified bundle and a separate preview HOME; no init,
- /// selection, token read, legacy CLI execution, tunnel or process control.
-pub(crate) fn read_catalog_command(catalog: &str) -> Result<serde_json::Value, String> {
-    let args: &[&str] = match catalog {
-        "repository" => &["repository", "list"],
-        "profile" => &["profile", "list"],
-        _ => return Err("읽기 전용 카탈로그 명령이 아닙니다.".into()),
-    };
+/// One CLI-owned query replaces two serial bundle verifications and Node
+/// launches for the project/profile overview. No native config parsing.
+pub(crate) fn read_combined_catalog() -> Result<serde_json::Value, String> {
     let root = payload()?;
-    cli_command(&root, args, Duration::from_secs(12))
+    cli_command(&root, &["catalog", "list"], Duration::from_secs(20))
 }
 
 // The CLI does not expose a global mutable "profile use" command.
@@ -791,17 +639,13 @@ fn rotation_preflight(record_exists: bool, port_busy: bool) -> Result<(), &'stat
 }
 
 fn status(root: &Payload) -> Result<ManagedResult, String> {
-    ensure_workspace(root)?;
     let ready = owner_configured(root)?;
-    let record = record_if_any(root)?;
-    let state = if record.is_some() {
-        Some(cli_command(root, &["status", "--instance", INSTANCE], Duration::from_secs(10))?)
-    } else { None };
-    let running = state.as_ref().is_some_and(|v| v["alive"] == true && v["healthy"] == true);
-    let tunnel_running = running && state.as_ref().is_some_and(|v| v["tunnelAlive"] == true)
-        && record.as_ref().is_some_and(|v| v["tunnelMode"] == "cloudflare");
+    let state = cli_command(root, &["status", "--instance", INSTANCE], Duration::from_secs(10))?;
+    let running = state["alive"] == true && state["healthy"] == true;
+    let tunnel_running = running && state["tunnelAlive"] == true
+        && state["tunnelMode"] == "cloudflare";
     let connector = if tunnel_running {
-        record.as_ref().and_then(|v| v["publicUrl"].as_str())
+        state["publicUrl"].as_str()
             .map(|origin| format!("{origin}/mcp"))
             .filter(|url| crate::public_health::quick_tunnel_health_url(url).is_some())
     } else { None };
@@ -814,7 +658,7 @@ fn status(root: &Payload) -> Result<ManagedResult, String> {
     } else {
         "MCP 서버가 중지돼 있습니다."
     });
-    result.port = record.as_ref().and_then(|r| r["port"].as_u64())
+    result.port = state["port"].as_u64()
         .and_then(|n| u16::try_from(n).ok()).unwrap_or(configured_port(root)?);
     result.tunnel_capable = root.cloudflared.is_some();
     result.token_copy_available = ready && crate::owner_token_vault::available(&root.home);
@@ -933,11 +777,13 @@ pub async fn set_owned_port(port: u16) -> Result<ManagedResult, String> {
 }
 
 fn operate(root: Payload, action: &str) -> Result<ManagedResult, String> {
+    // Status is read-only and must be as cheap as the same canonical CLI
+    // command in a terminal. No workspace setup or mutation lock is needed.
+    if action == "status" { return status(&root); }
     ensure_workspace(&root)?;
     let lock = MUTATION_LOCK.get_or_init(|| Mutex::new(()));
     let _guard = lock.lock().map_err(|_| "CLI 제어 잠금에 실패했습니다.")?;
     match action {
-        "status" => status(&root),
         "prepare" => {
             if owner_configured(&root)? {
                 return Err("전용 Owner Token이 이미 설정됐습니다. 토큰을 임의로 재발급하지 않습니다.".into());
@@ -1031,49 +877,26 @@ fn operate(root: Payload, action: &str) -> Result<ManagedResult, String> {
     }
 }
 
-/// Read-only preflight: without an owned record we must not conclude that a
-/// process listening on the preview port belongs to this application.
-fn exit_without_record_preflight(port_busy: bool) -> Result<(), &'static str> {
-    if port_busy {
-        Err("서버 포트에 다른 프로세스가 남아 있습니다. 소유권 기록이 없어 자동 종료하지 않습니다.")
-    } else {
-        Ok(())
-    }
+/// Opt-in update/complete-exit action. Does not exit the UI on failure.
+/// The CLI owns PID identity verification, termination, and runtime cleanup.
+/// The bridge must not repeat those checks with a separate UI-owned loop.
+fn cli_stop_allows_exit(result: &serde_json::Value) -> bool {
+    result["instance"] == INSTANCE &&
+        (result["stopped"] == true ||
+         (result["stopped"] == false && result["reason"] == "not-running"))
 }
 
-/// Opt-in update/complete-exit action. Does not exit the UI on failure.
-/// Always uses the existing audited CLI stop/PID ownership checks, and only
-/// the isolated preview instance. No taskkill or process-by-name termination.
 pub(crate) fn stop_owned_for_complete_exit() -> Result<(), String> {
     let root = payload()?;
-    ensure_workspace(&root)?;
     let lock = MUTATION_LOCK.get_or_init(|| Mutex::new(()));
     let _guard = lock.lock().map_err(|_| "CLI 제어 잠금에 실패했습니다.")?;
-    let record = record_if_any(&root)?;
-    let active_port = record.as_ref().and_then(|r| r["port"].as_u64())
-        .and_then(|n| u16::try_from(n).ok()).unwrap_or(configured_port(&root)?);
-    if record.is_none() {
-        return exit_without_record_preflight(port_occupied(active_port)).map_err(str::to_owned);
-    }
     let result = cli_command(
         &root, &["stop", "--instance", INSTANCE], Duration::from_secs(30)
     )?;
-    if result["stopped"] != true || result["instance"] != INSTANCE {
+    if !cli_stop_allows_exit(&result) {
         return Err("전용 MCP 중지가 확인되지 않았습니다. 앱은 종료하지 않습니다.".into());
     }
-    // Wait for the owned record to disappear and the port to be released.
-    // If the CLI could not safely release the runtime, keep the UI available
-    // for diagnosis and do not claim the installation can be removed.
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        let record_exists = record_if_any(&root)?.is_some();
-        let busy = port_occupied(active_port);
-        if !record_exists && !busy { return Ok(()); }
-        if Instant::now() >= deadline {
-            return Err(format!("MCP 종료 후에도 포트 {active_port} 또는 인스턴스 기록이 남았습니다. 앱을 유지하고 상태를 확인하세요."));
-        }
-        thread::sleep(Duration::from_millis(100));
-    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1124,61 +947,6 @@ pub async fn register_owned_owner_token(candidate: String) -> Result<bool, Strin
 mod tests {
     use super::*;
 
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn native_status_uses_owned_record_without_running_node_or_modifying_files() {
-        let base = std::env::temp_dir().join(format!(
-            "c2c-native-status-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
-        ));
-        let root = Payload {
-            node: base.join("not-a-runnable-node.exe"),
-            cli: base.join("dist").join("cli.js"),
-            home: base.join("home"),
-            workspace: base.join("workspace"),
-            cloudflared: None,
-        };
-        fs::create_dir_all(root.cli.parent().unwrap()).unwrap();
-        fs::create_dir_all(&root.workspace).unwrap();
-        fs::create_dir_all(state_record(&root).parent().unwrap()).unwrap();
-        fs::write(&root.cli, b"this is deliberately not a Node script").unwrap();
-        assert_eq!(native_pid_alive(std::process::id()), Some(true));
-        let offline = native_console_status_for(&root, "status").unwrap().unwrap();
-        assert_eq!(offline["alive"], false);
-        assert_eq!(offline["healthy"], false);
-        let record = serde_json::json!({
-            "name": INSTANCE, "pid": std::process::id(),
-            "entrypoint": root.cli.to_string_lossy(),
-            "workspace": root.workspace.to_string_lossy(),
-            "port": 7979, "host": "127.0.0.1", "tunnelMode": "none",
-            "tunnelPid": null, "publicUrl": "http://127.0.0.1:7979"
-        });
-        let original = serde_json::to_vec(&record).unwrap();
-        fs::write(state_record(&root), &original).unwrap();
-        let start = Instant::now();
-        let result = native_console_status_for(&root, "status").unwrap().unwrap();
-        let elapsed = start.elapsed();
-        assert_eq!(result["name"], INSTANCE);
-        assert_eq!(result["alive"], true);
-        assert!(result["healthy"].is_boolean());
-        assert_eq!(result["tunnelAlive"], serde_json::Value::Null);
-        assert_eq!(fs::read(state_record(&root)).unwrap(), original);
-        let health = native_console_status_for(&root, "health").unwrap().unwrap();
-        assert_eq!(health["instance"], INSTANCE);
-        assert_eq!(health["alive"], true);
-        assert_eq!(health["publicHealthy"], serde_json::Value::Null);
-        println!("native read-only status fixture: {elapsed:?} (no Node executable)");
-        // A foreign workspace cannot use the native fast path; ownership
-        // remains subject to the old, hash-verified CLI fallback.
-        let mut foreign = record;
-        foreign["workspace"] = serde_json::json!(base.join("other").to_string_lossy());
-        fs::write(state_record(&root), serde_json::to_vec(&foreign).unwrap()).unwrap();
-        assert!(native_console_status_for(&root, "status").unwrap().is_none());
-        fs::remove_dir_all(base).unwrap();
-    }
-
     #[test]
     fn saved_port_defaults_to_7979_and_rejects_invalid_config() {
         let base = std::env::temp_dir().join(format!(
@@ -1204,9 +972,19 @@ mod tests {
     }
 
     #[test]
-    fn complete_exit_never_claims_unknown_process_on_preview_port() {
-        assert!(exit_without_record_preflight(false).is_ok());
-        assert!(exit_without_record_preflight(true).is_err());
+    fn complete_exit_requires_canonical_cli_stop_result() {
+        assert!(cli_stop_allows_exit(&serde_json::json!({
+            "stopped": true, "instance": INSTANCE
+        })));
+        assert!(cli_stop_allows_exit(&serde_json::json!({
+            "stopped": false, "instance": INSTANCE, "reason": "not-running"
+        })));
+        assert!(!cli_stop_allows_exit(&serde_json::json!({
+            "stopped": false, "instance": INSTANCE, "reason": "stale-server-live-tunnel"
+        })));
+        assert!(!cli_stop_allows_exit(&serde_json::json!({
+            "stopped": true, "instance": "foreign"
+        })));
     }
 
     #[test]

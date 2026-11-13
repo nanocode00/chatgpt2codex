@@ -9,8 +9,8 @@ describe("Tauri CLI console: native syntax guard and interactive UI", () => {
   const app = readFileSync("desktop/src/App.tsx", "utf8");
 
   it("replaces the old parity button matrix with command input, validation, output and session history", () => {
-    expect(app).toContain("<CliConsole onNotify={notify} onRuntimeChanged=");
-    expect(app).toContain('void runOwnedAction("status")');
+    expect(app).toContain("<CliConsole onNotify={notify} refreshKey={cliRefreshKey} onRuntimeChanged=");
+    expect(app).toContain("void refreshOwnedStatus()");
     expect(app).toContain("<h1>CLI 콘솔</h1>");
     expect(app).not.toContain("<CliParityPanel");
     expect(screen).toContain("CLI 명령");
@@ -67,15 +67,12 @@ describe("Tauri CLI console: native syntax guard and interactive UI", () => {
     expect(native).toContain('c2c status --instance default');
   });
 
-  it("offers a responsive running indicator and a fixed-path fast log reader", () => {
+  it("shows responsive progress and delegates log reading to the CLI", () => {
     const managed = readFileSync("desktop/src-tauri/src/managed_cli.rs", "utf8");
     expect(screen).toContain("CLI 실행 중 · {(elapsedMs / 1000).toFixed(1)}초");
     expect(screen).toContain("window.setInterval");
-    expect(native).toContain('"tauri-preview-v1.server.log"');
-    expect(native).toContain('"tauri-preview-v1.cloudflared.log"');
-    expect(native).toContain("fn local_log_tail(log_directory: &Path, component: &str)");
-    expect(native).toContain("fast_console_logs(");
-    expect(native).toContain("redacted_text(tail)");
+    expect(native).not.toContain("fast_console_logs(");
+    expect(native).toContain("managed_cli::parity_cli(");
     expect(managed).toContain("Sha256::new()");
     expect(managed).toContain("256 * 1024");
     expect(managed).toContain("Duration::from_millis(20)");

@@ -16,21 +16,18 @@ import { createServer as createNetServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { Config, LeasePreset, ProjectRegistryEntry, ToolContext } from "./types.js";
 import { findProject, inspectProjectRoot, scanWorkspace } from "./workspace/registry.js";
 import { makeLease } from "./workspace/project-select.js";
 import { Store } from "./state/store.js";
 import { Ledger } from "./state/ledger.js";
-import { createServer } from "./server/mcp-server.js";
-import { createHttpServer, defaultHttpServerConfig } from "./server/http.js";
+import type { createHttpServer as HttpServerFactory } from "./server/http.js";
 import { generateOwnerToken, hasOwnerToken, storeOwnerToken } from "./auth/owner-token.js";
-import { JsonOAuthStore } from "./auth/oauth-store.js";
-import { checkIntakeAvailability } from "./assets/image-intake.js";
+// Expensive HTTP/MCP, OAuth and image modules are loaded only by the
+// commands that need them. Direct status/profile/repository calls must not
+// initialize the server tool registry before reading small local files.
 import { controlAllowlist, isAppAllowed, isControlEnabled, isSensitiveApp } from "./control/policy.js";
-import { startExecutor } from "./control/executor.js";
 import { approveAction, isKilled, listActions, rejectAction, setKill, toSummary } from "./control/queue.js";
-import { preflightPermissions } from "./control/mac-input.js";
 import { clampMinutes, clearAuto, readAuto, setAuto, type AutoActionKind } from "./control/auto.js";
 import {
   isProcessAlive,
@@ -391,6 +388,11 @@ async function applyStartupProjectSelection(ctx: ToolContext, flags: Record<stri
 }
 
 async function cmdServeStdio(flags: Record<string, string | boolean>): Promise<void> {
+  const [{ createServer }, { StdioServerTransport }] = await Promise.all([
+    import("./server/mcp-server.js"),
+    import("@modelcontextprotocol/sdk/server/stdio.js"),
+  ]);
+  const { startExecutor } = await import("./control/executor.js");
   await hydrateDirectServeEnvironment();
   const workspace = typeof flags.workspace === "string" ? flags.workspace : process.cwd();
   const instance = normalizeInstanceName(flags.instance);
@@ -412,6 +414,10 @@ async function cmdServeStdio(flags: Record<string, string | boolean>): Promise<v
  * OAuth 2.1 (see src/server/http.ts, src/auth/oauth-provider.ts).
  */
 async function cmdServeHttp(flags: Record<string, string | boolean>): Promise<void> {
+  const [{ createHttpServer, defaultHttpServerConfig }, { startExecutor }] = await Promise.all([
+    import("./server/http.js"),
+    import("./control/executor.js"),
+  ]);
   await hydrateDirectServeEnvironment();
   const workspace = typeof flags.workspace === "string" ? flags.workspace : process.cwd();
   const instance = normalizeInstanceName(flags.instance);
@@ -438,7 +444,7 @@ async function cmdServeHttp(flags: Record<string, string | boolean>): Promise<vo
   await applyStartupProjectSelection(ctx, flags);
   if (isControlEnabled()) startExecutor(ctx);
 
-  let httpServer: ReturnType<ReturnType<typeof createHttpServer>["app"]["listen"]> | undefined;
+  let httpServer: ReturnType<ReturnType<typeof HttpServerFactory>["app"]["listen"]> | undefined;
   let closeHttpServer: () => void = () => undefined;
   let stopWindowsReload: (() => Promise<void>) | undefined;
   let shuttingDown = false;
@@ -779,6 +785,7 @@ function commaList(value: string | boolean | undefined, label: string): string[]
 }
 
 async function cmdProfile(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const started = performance.now();
   const action = positional[0] ?? "list";
   const configDir = defaultConfigDir();
   const profiles = await readManagedProfiles(configDir);
@@ -793,6 +800,7 @@ async function cmdProfile(positional: string[], flags: Record<string, string | b
         docker: alias in profiles.docker,
       })),
     }, null, 2));
+    cliPerf("profile list", started);
     return;
   }
 
@@ -929,17 +937,18 @@ async function cmdProfile(positional: string[], flags: Record<string, string | b
 }
 
 async function cmdRepository(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const started = performance.now();
   const action = positional[0] ?? "list";
   const configDir = defaultConfigDir();
   const data = await readManagedRepositories(configDir);
 
   if (action === "list") {
-    const repositories = [];
-    for (const repo of data.repositories) {
-      const available = await fs.stat(repo.root).then((st) => st.isDirectory()).catch(() => false);
-      repositories.push({ ...repo, available });
-    }
+    const repositories = await Promise.all(data.repositories.map(async (repo) => ({
+      ...repo,
+      available: await fs.stat(repo.root).then((st) => st.isDirectory()).catch(() => false),
+    })));
     console.log(JSON.stringify({ configDir, repositories }, null, 2));
+    cliPerf("repository list", started);
     return;
   }
 
@@ -1007,6 +1016,40 @@ async function cmdRepository(positional: string[], flags: Record<string, string 
   }
 
   throw new Error("usage: c2c repository [list|show <id>|add <path>|remove <id>|use <id>]");
+}
+
+/** One canonical CLI request supplies both UI catalogs. The same validated
+ * CLI-managed catalog readers back their individual terminal list commands. */
+async function cmdCatalog(positional: string[]): Promise<void> {
+  if (positional.length !== 1 || positional[0] !== "list") {
+    throw new Error("usage: c2c catalog list");
+  }
+  const started = performance.now();
+  const configDir = defaultConfigDir();
+  const [repositoriesFile, profilesFile] = await Promise.all([
+    readManagedRepositories(configDir),
+    readManagedProfiles(configDir),
+  ]);
+  const repositories = await Promise.all(
+    repositoriesFile.repositories.map(async (repo) => ({
+      ...repo,
+      available: await fs.stat(repo.root).then((st) => st.isDirectory()).catch(() => false),
+    })),
+  );
+  const aliases = Array.from(new Set([
+    ...Object.keys(profilesFile.python),
+    ...Object.keys(profilesFile.docker),
+  ])).sort();
+  console.log(JSON.stringify({
+    configDir,
+    repositories,
+    profiles: aliases.map((alias) => ({
+      alias,
+      python: alias in profilesFile.python,
+      docker: alias in profilesFile.docker,
+    })),
+  }));
+  cliPerf("catalog list", started);
 }
 
 async function cmdLock(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
@@ -1098,6 +1141,7 @@ async function cmdOwnerToken(flags: Record<string, string | boolean>): Promise<v
   }
 
   if (flags["set-stdin"]) {
+    const { JsonOAuthStore } = await import("./auth/oauth-store.js");
     const token = (await readStdin()).trim();
     await storeOwnerToken(stateDir, token);
     await new JsonOAuthStore(stateDir).clearAll();
@@ -1106,6 +1150,7 @@ async function cmdOwnerToken(flags: Record<string, string | boolean>): Promise<v
   }
 
   if (flags.generate || flags.rotate) {
+    const { JsonOAuthStore } = await import("./auth/oauth-store.js");
     const ownerToken = generateOwnerToken();
     await storeOwnerToken(stateDir, ownerToken);
     await new JsonOAuthStore(stateDir).clearAll();
@@ -1273,6 +1318,7 @@ async function cmdControl(positional: string[], flags: Record<string, string | b
       // action failing silently partway through; never throws a raw
       // NOT_IMPLEMENTED stack trace off darwin, always structured JSON.
       try {
+        const { preflightPermissions } = await import("./control/mac-input.js");
         const result = await preflightPermissions();
         console.log(JSON.stringify(result, null, 2));
         if (!result.accessibilityTrusted || !result.screenRecordingAllowed) {
@@ -1313,6 +1359,7 @@ async function checkCommand(cmd: string, args: string[]): Promise<string | undef
 }
 
 async function cmdDoctor(flags: Record<string, string | boolean>): Promise<void> {
+  const { checkIntakeAvailability } = await import("./assets/image-intake.js");
   const nodeVersion = process.version;
   const rgVersion = await checkCommand("rg", ["--version"]);
   const gitVersion = await checkCommand("git", ["--version"]);
@@ -1587,6 +1634,7 @@ async function startCloudflareTunnel(options: {
 }
 
 async function cmdStatus(flags: Record<string, string | boolean>): Promise<void> {
+  const started = performance.now();
   const stateDir = defaultStateDir();
   const requested = typeof flags.instance === "string" ? normalizeInstanceName(flags.instance) : undefined;
   const records = requested
@@ -1601,29 +1649,35 @@ async function cmdStatus(flags: Record<string, string | boolean>): Promise<void>
     status.push({ ...record, alive, healthy, tunnelAlive });
   }
   console.log(JSON.stringify(requested ? status[0] ?? { name: requested, alive: false, healthy: false } : status, null, 2));
+  cliPerf("status", started);
 }
 
 async function cmdHealth(flags: Record<string, string | boolean>): Promise<void> {
+  const started = performance.now();
   const instance = normalizeInstanceName(flags.instance);
   const record = await readRuntimeInstance(defaultStateDir(), instance);
   const alive = record ? isProcessAlive(record.pid) : false;
   const healthy = record && alive ? await runtimeHealth(record) : false;
   const tunnelAlive = record?.tunnelPid !== undefined ? isProcessAlive(record.tunnelPid) : null;
   const publicHealthy =
-    record && record.tunnelMode === "cloudflare" && healthy && tunnelAlive
+    flags["local-only"] === true
+      ? null
+      : record && record.tunnelMode === "cloudflare" && healthy && tunnelAlive
       ? await publicRuntimeHealth(record.publicUrl)
       : record?.tunnelMode === "cloudflare"
         ? false
         : null;
   console.log(JSON.stringify({
     instance,
+    port: record?.port ?? null,
     alive,
     healthy,
     tunnelAlive,
     publicHealthy,
     endpoint: record ? record.publicUrl + "/healthz" : null,
   }));
-  if (!healthy || (record?.tunnelMode === "cloudflare" && !publicHealthy)) process.exitCode = 1;
+  cliPerf("health", started);
+  if (!healthy || (flags["local-only"] !== true && record?.tunnelMode === "cloudflare" && !publicHealthy)) process.exitCode = 1;
 }
 
 async function cmdReload(flags: Record<string, string | boolean>): Promise<void> {
@@ -1819,6 +1873,7 @@ async function cmdLogs(flags: Record<string, string | boolean>): Promise<void> {
 }
 
 async function cmdStop(flags: Record<string, string | boolean>): Promise<void> {
+  const started = performance.now();
   const instance = normalizeInstanceName(flags.instance);
   const stateDir = defaultStateDir();
   const record = await readRuntimeInstance(stateDir, instance);
@@ -1845,15 +1900,22 @@ async function cmdStop(flags: Record<string, string | boolean>): Promise<void> {
   // The health endpoint identifies a service on this port, not the process
   // recorded in our PID file. Check ownership on *all* stop paths, even
   // healthy ones. --force must never override an identity mismatch.
-  if (!(await runtimeProcessMatchesRecord(record))) {
+  const tunnelRunning = record.tunnelPid !== undefined && isProcessAlive(record.tunnelPid);
+  // Independently validate both process identities in parallel. The server
+  // is checked again immediately before signalling; no ownership guard is
+  // removed. On Windows this overlaps two expensive CIM queries.
+  const [serverOwned, tunnelOwned] = await Promise.all([
+    runtimeProcessMatchesRecord(record),
+    tunnelRunning ? runtimeTunnelMatchesRecord(record) : Promise.resolve(true),
+  ]);
+  if (!serverOwned) {
     throw new Error(
       "refusing stop because pid " + record.pid + " could not be verified as instance " + instance,
     );
   }
-  const tunnelRunning = record.tunnelPid !== undefined && isProcessAlive(record.tunnelPid);
   // Preflight the tunnel too, before stopping the server. This avoids
   // partially stopping an instance that cannot safely clean up its tunnel.
-  if (tunnelRunning && !(await runtimeTunnelMatchesRecord(record))) {
+  if (!tunnelOwned) {
     throw new Error(
       "refusing stop because tunnel pid " + record.tunnelPid + " could not be verified as instance " + instance,
     );
@@ -1907,6 +1969,7 @@ async function cmdStop(flags: Record<string, string | boolean>): Promise<void> {
   }
   await removeRuntimeInstance(stateDir, instance);
   console.log(JSON.stringify({ stopped: true, instance, pid: record.pid, tunnelPid: record.tunnelPid ?? null }));
+  cliPerf("stop", started);
 }
 
 async function cmdRestart(flags: Record<string, string | boolean>): Promise<void> {
@@ -1945,6 +2008,9 @@ async function main(): Promise<void> {
       break;
     case "repository":
       await cmdRepository(positional, flags);
+      break;
+    case "catalog":
+      await cmdCatalog(positional);
       break;
     case "lock":
       await cmdLock(positional, flags);
@@ -1987,6 +2053,14 @@ async function main(): Promise<void> {
       console.error("");
       printHelp();
       process.exitCode = 1;
+  }
+}
+
+/** Debug-only, stderr-only, no IDs/paths/tokens. Opt in on the terminal via
+ * C2C_CLI_PERF=1; JSON output remains byte-compatible with the normal CLI. */
+function cliPerf(phase: string, started: number): void {
+  if (process.env.C2C_CLI_PERF === "1") {
+    console.error(`[c2c perf] ${phase}: ${Math.round(performance.now() - started)}ms`);
   }
 }
 

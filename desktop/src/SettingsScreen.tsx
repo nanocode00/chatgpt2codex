@@ -1,6 +1,6 @@
 import type { FormEvent } from "react";
 import {
-  Activity, HardDrive, Power, RefreshCcw, Square
+  Activity, HardDrive, Power, Square
 } from "lucide-react";
 import type { PreviewStartupInspection } from "./runtime";
 import "./settings-screen.css";
@@ -17,7 +17,6 @@ interface SettingsScreenProps {
   previewStartup: PreviewStartupInspection | null;
   startupBusy: boolean;
   startupError: string;
-  onRefreshStartup: () => void;
   onToggleStartup: (enabled: boolean) => void;
   portBusy: boolean;
   exitBusy: boolean;
@@ -31,7 +30,7 @@ interface SettingsScreenProps {
 export function SettingsScreen({
   native, port, draftPort, onDraftPort, onSavePort, autoRefresh,
   onAutoRefresh, settingError, previewStartup,
-  startupBusy, startupError, onRefreshStartup, onToggleStartup,
+  startupBusy, startupError, onToggleStartup,
   portBusy, exitBusy, ownedBusy, exitError, trayError, onHide, onExitAll
 }: SettingsScreenProps) {
   const canExit = native && !exitBusy && !ownedBusy;
@@ -56,10 +55,6 @@ export function SettingsScreen({
             aria-checked={previewStartup?.enabled ?? false}
             disabled={!native || !previewStartup?.supported || !!previewStartup.conflict || startupBusy}
             onClick={() => onToggleStartup(!previewStartup?.enabled)}><span /></button>
-        </div>
-        <div className="settings-card-footer">
-          <button type="button" className="secondary-btn" disabled={!native || startupBusy}
-            onClick={onRefreshStartup}><RefreshCcw size={14}/> 상태 확인</button>
         </div>
         {previewStartup?.conflict && <p className="settings-warning" role="alert">자동 시작 등록 충돌로 변경할 수 없습니다.</p>}
         {startupError && <p className="form-error" role="alert">{startupError}</p>}

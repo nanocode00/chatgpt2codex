@@ -1,50 +1,77 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const rust = readFileSync("desktop/src-tauri/src/managed_cli.rs", "utf8");
-const cli = readFileSync("desktop/src-tauri/src/cli_parity.rs", "utf8");
-const app = readFileSync("desktop/src-tauri/src/lib.rs", "utf8");
-const cargo = readFileSync("desktop/src-tauri/Cargo.toml", "utf8");
+const cli = readFileSync("src/cli.ts", "utf8");
+const bridge = readFileSync("desktop/src-tauri/src/managed_cli.rs", "utf8");
+const consoleBridge = readFileSync("desktop/src-tauri/src/cli_parity.rs", "utf8");
+const catalogBridge = readFileSync("desktop/src-tauri/src/catalog.rs", "utf8");
+const app = readFileSync("desktop/src/App.tsx", "utf8");
 
-describe("CLI console status fast path", () => {
-  it("avoids recursive Node CLI config queries for the active owned workspace", () => {
-    const check = rust.slice(rust.indexOf("fn expected_record("), rust.indexOf("fn record_if_any("));
-    expect(check).toContain("owned_workspace.as_ref() == Some(observed) ||");
-    expect(check).toContain("selected_workspace(root).ok().flatten()");
-    expect(check.indexOf("owned_workspace.as_ref() == Some(observed)"))
-      .toBeLessThan(check.indexOf("selected_workspace(root).ok().flatten()"));
+describe("CLI is the execution authority; GUI is a thin adapter", () => {
+  it("loads heavy server-only modules lazily so list/status do not pay MCP/OAuth startup costs", () => {
+    expect(cli).toContain('import("./server/mcp-server.js")');
+    expect(cli).toContain('import("./server/http.js")');
+    expect(cli).toContain('import("./auth/oauth-store.js")');
+    expect(cli).not.toContain('import { createServer } from "./server/mcp-server.js"');
+    expect(cli).not.toContain('import { createHttpServer, defaultHttpServerConfig } from "./server/http.js"');
   });
 
-  it("only shortcuts read-only status and health and never runs unverified executables", () => {
-    const fast = rust.slice(rust.indexOf("fn read_only_payload("), rust.indexOf("fn state_record("));
-    expect(fast).toContain('matches!(operation, "status" | "health")');
-    expect(fast).toContain("fn native_console_status_for(root: &Payload, operation: &str)");
-    expect(fast).toContain('fs::symlink_metadata(&path)');
-    expect(fast).toContain("expected_record(root, &record)");
-    expect(fast).toContain('record["tunnelMode"] == "cloudflare"');
-    expect(fast).toContain("native_pid_alive");
-    expect(fast).toContain("crate::native_local_c2c_health(port)");
-    expect(fast).not.toContain("cli_command(");
-    expect(fast).not.toContain("Command::new(");
-    expect(rust).toContain("let root = payload()?;");
-    expect(rust).toContain("verify_manifest(&resource_root)?");
-    expect(cli).toContain("managed_cli::native_console_status(&request.operation)?");
-    expect(cli).toContain("None => {");
-    expect(cli).toContain("execute(request)?");
-    expect(cli).toContain("Windows 네이티브 상태 조회");
-    expect(cli).toContain("기존 Node CLI 조회");
+  it("the canonical CLI owns a combined catalog query and directory availability", () => {
+    expect(cli).toContain("async function cmdCatalog(positional: string[])");
+    expect(cli).toContain('case "catalog":');
+    expect(cli).toContain("repositoriesFile.repositories.map(async (repo)");
+    expect(catalogBridge).toContain("managed_cli::read_combined_catalog()");
+    expect(bridge).toContain('cli_command(&root, &["catalog", "list"]');
+    expect(catalogBridge).not.toContain("native_repositories(");
+    expect(catalogBridge).not.toContain("native_profiles(");
   });
 
-  it("uses read-only Windows process handles and preserves bounded localhost health identity checks", () => {
-    expect(cargo).toContain('windows-sys = { version = "0.59"');
-    expect(rust).toContain("PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE_ACCESS");
-    expect(rust).toContain("WaitForSingleObject(handle, 0)");
-    expect(rust).toContain("CloseHandle(handle)");
-    expect(app).toContain("pub(crate) fn native_local_c2c_health(port: u16)");
-    expect(app).toContain("probe_local_runtime_with_timeout(port, Duration::from_millis(500)).online");
-    expect(app).toContain("if let Ok(value) = serde_json::from_str::<serde_json::Value>(body)");
-    expect(app).toContain("return snapshot;");
-    expect(app).toContain("complete_health_json_does_not_wait_for_keepalive_connection_to_close");
-    expect(app).toContain('value["ok"] == true && value["name"] == "chatgpt2codex"');
+  it("status and logs flow through canonical CLI, not a separate native domain implementation", () => {
+    expect(consoleBridge).toContain("managed_cli::parity_cli(");
+    expect(consoleBridge).not.toContain("managed_cli::native_console_status(");
+    expect(consoleBridge).not.toContain("fast_console_logs(");
+    expect(bridge).not.toContain("fn native_console_status_for(");
+    expect(bridge).toContain('cli_command(root, &["status", "--instance", INSTANCE]');
+    expect(bridge).toContain("let _guard = if mutating");
+    expect(bridge).toContain("if mutating {");
+  });
+
+  it("complete exit trusts the audited CLI stop result instead of repeating native waits", () => {
+    const exit = bridge.slice(bridge.indexOf("pub(crate) fn stop_owned_for_complete_exit()"),
+      bridge.indexOf("#[tauri::command]", bridge.indexOf("pub(crate) fn stop_owned_for_complete_exit()")));
+    expect(exit).toContain('["stop", "--instance", INSTANCE]');
+    expect(exit).toContain("cli_stop_allows_exit(&result)");
+    expect(exit).not.toContain("record_if_any(");
+    expect(exit).not.toContain("port_occupied(");
+    expect(exit).not.toContain("thread::sleep(");
+  });
+
+  it("all manual refresh uses one top-bar entrypoint with screen-specific scopes", () => {
+    expect(app).toContain("async function refreshVisibleScreen()");
+    for (const screen of ["overview", "projects", "profiles", "connections", "diagnostics", "jobs", "cli", "settings"]) {
+      expect(app).toContain('case "' + screen + '":');
+    }
+    expect(app).toContain("refreshing.current = true");
+    expect(app).toContain("onClick={() => { void refreshVisibleScreen(); }}");
+    expect(app).not.toContain("checkRuntime(port)");
+    expect(app).toContain("void refreshOwnedStatus(); }, 10_000)");
+    expect(app).toContain("statusGeneration.current");
+    expect(app).toContain('if (action === "status" && generation !== statusGeneration.current) return;');
+    const screens = ["Dashboard", "ProjectsScreen", "ProfilesScreen", "JobsScreen", "ConnectionsSecurityScreen", "SettingsScreen"];
+    for (const screen of screens) {
+      expect(readFileSync("desktop/src/" + screen + ".tsx", "utf8"))
+        .not.toContain("목록 새로고침");
+    }
+    const consoleUi = readFileSync("desktop/src/CliConsole.tsx", "utf8");
+    expect(consoleUi).toContain("lastReadOnlyCommand");
+    expect(consoleUi).toContain("!checked.mutating");
+  });
+
+  it("CLI-side opt-in performance logging never changes stdout JSON shape", () => {
+    expect(cli).toContain('process.env.C2C_CLI_PERF === "1"');
+    expect(cli).toContain('console.error(`[c2c perf]');
+    expect(cli).toContain("cliPerf(\"catalog list\", started)");
+    expect(cli).toContain("cliPerf(\"stop\", started)");
+    expect(consoleBridge).toContain("브리지 포함 {}ms");
   });
 });

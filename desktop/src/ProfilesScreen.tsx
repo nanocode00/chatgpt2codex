@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Activity, AlertCircle, Box, CheckCircle2, ChevronRight, CircleHelp, Code2,
-  Layers, LoaderCircle, Plus, RefreshCcw, Search, ShieldCheck,
+  Layers, LoaderCircle, Plus, Search, ShieldCheck,
   Terminal, Trash2, X
 } from "lucide-react";
 import {
@@ -258,9 +258,6 @@ export function ProfilesScreen({
         <p>Python과 Docker를 각각 독립된 프로필로 관리합니다.</p>
       </div>
       <div className="profiles-header-actions">
-        <button type="button" className="profiles-button secondary"
-          disabled={!native || catalogBusy || saving}
-          onClick={() => { void refresh(); }}><RefreshCcw size={16}/> 새로고침</button>
         <button type="button" className="profiles-button primary"
           disabled={!available || saving || testBusy}
           onClick={() => beginEditor("python")}><Plus size={16}/> Python 추가</button>

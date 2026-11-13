@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { checkRuntime, manageOwnedCli, setOwnedPort, copyOwnedOwnerToken, registerOwnedOwnerToken, inspectOwnedPublicTunnelHealth, inspectOwnedCatalog, unregisterOwnedRepository, pickOwnedRepositoryFolder, registerOwnedPickedRepository, cancelOwnedPickedRepository, closePreviewWithOwnedMcp, hidePreviewWindow, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type ManagedAction, type ManagedResult, type CatalogInspection, type PickedRepositoryFolder, type PublicTunnelHealth, type RuntimeHealth } from "./runtime";
+import { manageOwnedCli, setOwnedPort, copyOwnedOwnerToken, registerOwnedOwnerToken, inspectOwnedPublicTunnelHealth, inspectOwnedCatalog, unregisterOwnedRepository, pickOwnedRepositoryFolder, registerOwnedPickedRepository, cancelOwnedPickedRepository, closePreviewWithOwnedMcp, hidePreviewWindow, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type ManagedAction, type ManagedResult, type CatalogInspection, type PickedRepositoryFolder, type PublicTunnelHealth } from "./runtime";
 import { SettingsScreen } from "./SettingsScreen";
 import { DiagnosticsScreen } from "./DiagnosticsScreen";
 import { ConnectionsSecurityScreen } from "./ConnectionsSecurityScreen";
@@ -54,13 +54,13 @@ function App() {
   const [screen, setScreen] = useState<Screen>("overview");
   const [jobsRefreshKey, setJobsRefreshKey] = useState(0);
   const [diagnosticsRefreshKey, setDiagnosticsRefreshKey] = useState(0);
+  const [cliRefreshKey, setCliRefreshKey] = useState(0);
+  const [refreshBusy, setRefreshBusy] = useState(false);
   const [port, setPort] = useState(loadPort);
   const [draftPort, setDraftPort] = useState(String(loadPort()));
   const [autoRefresh, setAutoRefresh] = useState(loadAutoRefresh);
   const [publicPreferred, setPublicPreferred] = useState(loadPublicPreference);
   const [toast, setToast] = useState<AppToast | null>(null);
-  const [status, setStatus] = useState<RuntimeHealth | null>(null);
-  const [checking, setChecking] = useState(false);
   const [exitError, setExitError] = useState("");
   const [exitBusy, setExitBusy] = useState(false);
   const [trayError, setTrayError] = useState("");
@@ -90,9 +90,13 @@ function App() {
   const [previewStartup, setPreviewStartup] = useState<PreviewStartupInspection | null>(null);
   const [startupBusy, setStartupBusy] = useState(false);
   const [startupError, setStartupError] = useState("");
-  const requestCounter = useRef(0);
   const publicProbeBusy = useRef(false);
   const toastId = useRef(0);
+  const statusRequest = useRef<Promise<void> | null>(null);
+  const statusGeneration = useRef(0);
+  const catalogRequest = useRef<Promise<void> | null>(null);
+  const catalogLastRead = useRef(0);
+  const refreshing = useRef(false);
   const notify = useCallback((message: string, tone: "info" | "error" = "info") => {
     setToast({ id: ++toastId.current, message, tone });
   }, []);
@@ -115,25 +119,6 @@ function App() {
     return () => { active = false; unlisten?.(); };
   }, [native, notify]);
 
-  const runCheck = useCallback(async () => {
-    const current = ++requestCounter.current;
-    setChecking(true);
-    try {
-      const next = await checkRuntime(port);
-      if (current !== requestCounter.current) return;
-      setStatus(next);
-    } catch (error) {
-      if (current !== requestCounter.current) return;
-      const detail = error instanceof Error ? error.message : String(error);
-      setStatus({ online: false, port, service: "ChatGPT To Codex",
-        endpoint: "http://127.0.0.1:" + port + "/mcp",
-        details: "검사 실패: " + detail });
-    } finally {
-      if (current === requestCounter.current) setChecking(false);
-    }
-  }, [port]);
-
-  useEffect(() => { void runCheck(); return () => { requestCounter.current += 1; }; }, [runCheck]);
   useEffect(() => {
     if (!native) return;
     void inspectPreviewAutostart().then(setPreviewStartup).catch(() => {
@@ -165,11 +150,6 @@ function App() {
       setStartupBusy(false);
     }
   };
-  useEffect(() => {
-    if (!autoRefresh || !native) return;
-    const interval = setInterval(() => { void runCheck(); }, 10_000);
-    return () => clearInterval(interval);
-  }, [autoRefresh, native, runCheck]);
 
 
   const runOwnedAction = useCallback(async (action: ManagedAction, confirmedRotation = false) => {
@@ -187,10 +167,14 @@ function App() {
       setOwnedToken(null);
       setOwnedPublicHealth(null);
     }
-    setOwnedBusy(true);
+    // A delayed status result must never overwrite a newer start/stop/port
+    // mutation. It remains a view of the canonical CLI response only.
+    const generation = action === "status" ? statusGeneration.current : ++statusGeneration.current;
+    if (action !== "status") setOwnedBusy(true);
     setOwnedError("");
     try {
       const next = await manageOwnedCli(action);
+      if (action === "status" && generation !== statusGeneration.current) return;
       setOwnedPublicHealth(previous =>
         previous?.endpoint && previous.endpoint === next.publicConnector ? previous : null);
       if (next.oneTimeOwnerToken) {
@@ -211,37 +195,60 @@ function App() {
         notify(labels[action] + " 완료");
       }
     } catch (error) {
+      if (action === "status" && generation !== statusGeneration.current) return;
       const message = nativeFailureMessage(error, "전용 CLI 작업에 실패했습니다.");
       setOwnedError(message);
-      notify(message, "error");
+      if (action !== "status") notify(message, "error");
     } finally {
-      setOwnedBusy(false);
+      if (action !== "status") setOwnedBusy(false);
     }
   }, [notify]);
 
-  const refreshCatalog = useCallback(async () => {
+  const refreshOwnedStatus = useCallback(async () => {
+    if (statusRequest.current) return statusRequest.current;
+    const task = runOwnedAction("status");
+    statusRequest.current = task;
+    try { await task; } finally { statusRequest.current = null; }
+  }, [runOwnedAction]);
+
+  useEffect(() => {
+    if (!autoRefresh || !native) return;
+    // The previous monitor launched an independent Tauri Health probe every
+    // 10 seconds, even though no screen consumed its result. Share the same
+    // canonical CLI status request used by the visible screens instead.
+    const interval = window.setInterval(() => { void refreshOwnedStatus(); }, 10_000);
+    return () => window.clearInterval(interval);
+  }, [autoRefresh, native, refreshOwnedStatus]);
+
+  const refreshCatalog = useCallback(async (force = true) => {
+    if (!force && catalogLastRead.current && Date.now() - catalogLastRead.current < 3000) return;
+    if (catalogRequest.current) return catalogRequest.current;
+    const task = (async () => {
     setCatalogBusy(true);
     setCatalogError("");
     try {
       const updated = await inspectOwnedCatalog();
       setCatalog(updated);
+      if (updated.available) catalogLastRead.current = Date.now();
     } catch (error) {
       setCatalog(null);
       setCatalogError(error instanceof Error ? error.message : "프로젝트/프로필 조회에 실패했습니다.");
     } finally {
       setCatalogBusy(false);
     }
+    })();
+    catalogRequest.current = task;
+    try { await task; } finally { catalogRequest.current = null; }
   }, []);
 
   useEffect(() => {
-    if (screen === "settings") {
-      void runOwnedAction("status");
+    if (screen === "overview" || screen === "connections" || screen === "settings") {
+      void refreshOwnedStatus();
     }
-    if (screen === "connections" || screen === "overview" || screen === "projects" || screen === "profiles") {
-      void runOwnedAction("status");
-      void refreshCatalog();
+    if (screen === "overview" || screen === "projects" || screen === "profiles") {
+      void refreshCatalog(false);
     }
-  }, [screen, runOwnedAction, refreshCatalog]);
+  }, [screen, refreshOwnedStatus, refreshCatalog]);
 
   async function browseOwnedFolder() {
     if (owned?.running || ownedBusy || folderBusy || unregisterBusy || unregisterTarget !== null) return;
@@ -441,6 +448,49 @@ function App() {
     }
   }
 
+  /** Shared manual refresh coordinator: exactly the current screen's scope.
+   * It does not execute mutating CLI commands or reinterpret CLI status. */
+  async function refreshVisibleScreen() {
+    if (refreshing.current || ownedBusy || catalogBusy || exitBusy || portBusy ||
+        folderBusy || unregisterBusy) return;
+    refreshing.current = true;
+    setRefreshBusy(true);
+    try {
+      switch (screen) {
+        case "overview":
+          await Promise.all([
+            refreshOwnedStatus(), refreshCatalog(),
+            owned?.tunnelRunning ? checkOwnedPublicHealth() : Promise.resolve()
+          ]);
+          break;
+        case "projects":
+        case "profiles":
+          await refreshCatalog();
+          break;
+        case "connections":
+          await refreshOwnedStatus();
+          if (owned?.tunnelRunning) await checkOwnedPublicHealth();
+          break;
+        case "diagnostics":
+          setDiagnosticsRefreshKey(value => value + 1);
+          if (owned?.tunnelRunning) await checkOwnedPublicHealth();
+          break;
+        case "jobs":
+          setJobsRefreshKey(value => value + 1);
+          break;
+        case "cli":
+          setCliRefreshKey(value => value + 1);
+          break;
+        case "settings":
+          await Promise.all([refreshOwnedStatus(), refreshPreviewStartup()]);
+          break;
+      }
+    } finally {
+      refreshing.current = false;
+      setRefreshBusy(false);
+    }
+  }
+
   async function saveSettings(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!native || portBusy || ownedBusy) return;
@@ -457,6 +507,7 @@ function App() {
     if (owned?.running && !window.confirm(
       `서버 포트를 ${port}에서 ${next}(으)로 변경할까요?\n\n실행 중인 MCP와 터널을 중지한 뒤 새 포트로 재시작합니다. ChatGPT 연결이 일시적으로 끊길 수 있습니다.`
     )) return;
+    ++statusGeneration.current;
     setPortBusy(true);
     setOwnedBusy(true);
     setSettingError("");
@@ -521,15 +572,10 @@ function App() {
           <div className="breadcrumb"><span>ChatGPT To Codex</span><ChevronRight size={15}/><strong>{NAV.find(n => n.name === screen)?.label}</strong></div>
           <div className="header-actions">
             <span className="host-indicator"><span className={"host-dot " + (native ? "connected" : "")} />{native ? "이 컴퓨터" : "웹 미리보기"}</span>
-            <button className={"icon-btn " + (checking ? "spin-icon" : "")} type="button" onClick={() => {
-                if (screen === "jobs") {
-                  setJobsRefreshKey(value => value + 1);
-                } else if (screen === "diagnostics") {
-                  setDiagnosticsRefreshKey(value => value + 1);
-                } else if (screen === "overview" || screen === "projects" || screen === "connections") {
-                  void runOwnedAction("status"); void refreshCatalog();
-                } else { void runCheck(); }
-              }} aria-label="현재 화면 새로고침" title="현재 화면 새로고침" disabled={checking || ownedBusy || catalogBusy}><RefreshCcw size={17}/></button>
+            <button className={"icon-btn " + (refreshBusy ? "spin-icon" : "")} type="button"
+              onClick={() => { void refreshVisibleScreen(); }} aria-label="현재 화면 새로고침"
+              title="현재 화면 새로고침" disabled={refreshBusy || ownedBusy || catalogBusy ||
+                exitBusy || portBusy || folderBusy || unregisterBusy}><RefreshCcw size={17}/></button>
           </div>
         </header>
 
@@ -541,8 +587,6 @@ function App() {
           ownedPublicHealth={ownedPublicHealth} ownedPublicChecking={ownedPublicChecking}
           publicPreferred={publicPreferred}
           catalog={catalog} catalogBusy={catalogBusy} catalogError={catalogError}
-          onRefreshOwned={() => { void runOwnedAction("status"); }}
-          onRefreshCatalog={() => { void refreshCatalog(); }}
           onOwnedAction={action => { void runOwnedAction(action); }}
           onTogglePublic={togglePublicPreference}
           onCopyPublic={() => { void copyOwnedConnector(); }}
@@ -557,7 +601,6 @@ function App() {
           folderName={folderName} folderId={folderId} folderError={folderError}
           unregisterTarget={unregisterTarget} unregisterTyped={unregisterTyped}
           unregisterBusy={unregisterBusy} unregisterError={unregisterError}
-          onRefresh={() => { void refreshCatalog(); }}
           onBrowse={() => { void browseOwnedFolder(); }}
           onCancelBrowse={() => { void discardOwnedFolder(); }}
           onFolderName={setFolderName} onFolderId={setFolderId}
@@ -580,8 +623,8 @@ function App() {
 
         {screen === "cli" && <>
           <div className="page-heading"><div><h1>CLI 콘솔</h1><p>명령을 입력해 문법을 확인하고 실행 결과를 살펴보세요.</p></div></div>
-          <CliConsole onNotify={notify} onRuntimeChanged={() => {
-            void runOwnedAction("status");
+          <CliConsole onNotify={notify} refreshKey={cliRefreshKey} onRuntimeChanged={() => {
+            void refreshOwnedStatus();
             void refreshCatalog();
           }}/>
         </>}
@@ -591,7 +634,6 @@ function App() {
           ownerTokenPending={!!ownedToken}
           tokenCopyAvailable={owned?.tokenCopyAvailable === true} publicPreferred={publicPreferred}
           publicHealth={ownedPublicHealth} publicChecking={ownedPublicChecking}
-          onRefresh={() => { void runOwnedAction("status"); }}
           onManagedAction={action => { void runOwnedAction(action); }}
           onTogglePublic={togglePublicPreference}
           onCopyPublic={() => { void copyOwnedConnector(); }}
@@ -609,8 +651,6 @@ function App() {
           native={native} owned={owned} ownedBusy={ownedBusy} ownedError={ownedError}
           publicHealth={ownedPublicHealth} publicChecking={ownedPublicChecking}
           refreshKey={diagnosticsRefreshKey}
-          onRefreshOwned={() => { void runOwnedAction("status"); }}
-          onRefreshPublic={() => { void checkOwnedPublicHealth(); }}
           onConnections={() => setScreen("connections")}
           onNotify={notify}
         />}
@@ -620,7 +660,6 @@ function App() {
           onSavePort={saveSettings} autoRefresh={autoRefresh} onAutoRefresh={toggleAutoRefresh}
           settingError={settingError}
           previewStartup={previewStartup} startupBusy={startupBusy} startupError={startupError}
-          onRefreshStartup={() => { void refreshPreviewStartup(); }}
           onToggleStartup={enable => { void togglePreviewStartup(enable); }}
           portBusy={portBusy}
           exitBusy={exitBusy} ownedBusy={ownedBusy} exitError={exitError} trayError={trayError}

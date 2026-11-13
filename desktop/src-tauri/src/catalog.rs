@@ -81,12 +81,12 @@ fn profiles(json: serde_json::Value) -> Result<Vec<CatalogProfile>, String> {
 }
 
 fn inspect_catalog() -> Result<CatalogInspection, String> {
-    // This uses an exact manifest/hash-verified bundled Node+CLI and the
-    // isolated HOME/XDG_CONFIG_HOME. It NEVER reads the legacy CLI catalogs.
-    // If no owned catalog exists yet, the CLI returns empty lists; no init.
+    // One canonical CLI request owns catalog validation and directory checks;
+    // the native layer only adapts the response to presentation-safe fields.
     let catalog = (|| {
-        let projects = repositories(managed_cli::read_catalog_command("repository")?)?;
-        let profiles = profiles(managed_cli::read_catalog_command("profile")?)?;
+        let snapshot = managed_cli::read_combined_catalog()?;
+        let projects = repositories(snapshot.clone())?;
+        let profiles = profiles(snapshot)?;
         Ok::<_, String>((projects, profiles))
     })();
     let (available, projects, profiles, details) = match catalog {

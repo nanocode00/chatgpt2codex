@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity, AlertCircle, ArrowRight, Ban, CheckCircle2, ChevronRight, CirclePause,
   ClipboardCopy, Clock3, FileText, History, Layers, LoaderCircle,
-  Play, RefreshCcw, Search, ShieldCheck, X
+  Play, Search, ShieldCheck, X
 } from "lucide-react";
 import { isNativeApp, runOwnedCliParity } from "./runtime";
 import {
@@ -181,11 +181,6 @@ export function JobsScreen({ onNotify, onProjects, refreshKey }: JobsScreenProps
         <h1>작업 관리</h1>
         <p>저장된 작업의 진행 상태와 기록을 살펴보고, 다음 진행에 필요한 ID를 확인합니다.</p>
       </div>
-      <button type="button" className="jobs-button secondary" disabled={!native || listBusy || actionBusy}
-        onClick={() => { void reloadList(); }}>
-        <RefreshCcw size={16} className={listBusy ? "jobs-spin" : ""}/>
-        {listBusy ? "확인 중" : "목록 새로고침"}
-      </button>
     </header>
 
     <section className="jobs-stats" aria-label="작업 상태 필터">
