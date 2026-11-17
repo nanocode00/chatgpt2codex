@@ -12,6 +12,7 @@ import {
   filterAfterProfileAdd, filterProfileEntries, parseProfileDetails, parseProfileTest, validateDraft,
   type ProfileDetails, type ProfileTestResult, type ProfileEntry, type ProfileKind, type ProfileFilter
 } from "./profile-model";
+import { useScreenBusy } from "./use-screen-busy";
 import "./profiles.css";
 
 type Kind = ProfileKind;
@@ -29,6 +30,7 @@ const EMPTY_FORM: ProfileForm = {
 };
 
 interface ProfilesScreenProps {
+  onBusyChange?: (waiting: boolean) => void;
   catalog: CatalogInspection | null;
   catalogBusy: boolean;
   catalogError: string;
@@ -43,6 +45,7 @@ function failure(error: unknown): string {
 }
 
 export function ProfilesScreen({
+  onBusyChange,
   catalog, catalogBusy, catalogError, onRefresh, onNotify
 }: ProfilesScreenProps) {
   const native = isNativeApp();
@@ -73,6 +76,7 @@ export function ProfilesScreen({
   const listName = filter === "all" ? "전체" : filter === "python" ? "Python" : "Docker";
   const available = native && catalog?.available === true;
   const busy = saving || catalogBusy || detailsBusy || testBusy;
+  useScreenBusy(onBusyChange, busy);
 
   useEffect(() => {
     if (!native || !catalog?.available || !selected) {
@@ -251,11 +255,10 @@ export function ProfilesScreen({
   const kindName = selectedKind === "python" ? "Python" : "Docker";
 
   return <div className="profiles-root">
-    <header className="profiles-heading">
+    <header className="profiles-heading screen-heading">
       <div>
-        <p className="profiles-eyebrow">WORKSPACE / RUNTIMES</p>
         <h1>실행 환경</h1>
-        <p>Python과 Docker를 각각 독립된 프로필로 관리합니다.</p>
+        <p>Python·Docker 프로필을 개별적으로 관리합니다.</p>
       </div>
       <div className="profiles-header-actions">
         <button type="button" className="profiles-button primary"
@@ -472,7 +475,7 @@ export function ProfilesScreen({
       </div>
     </div>
     <div className="profiles-boundary"><ShieldCheck size={16}/>
-      Python·Docker 프로필은 독립적으로 관리합니다. 실제 Python 및 Docker 설치 환경을 제거하지 않습니다.
+      프로필 제거는 실제 Python·Docker 설치 파일을 삭제하지 않습니다.
     </div>
   </div>;
 }

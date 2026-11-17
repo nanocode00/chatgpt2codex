@@ -36,8 +36,8 @@ export function SettingsScreen({
   const canExit = native && !exitBusy && !ownedBusy;
 
   return <div className="settings-screen">
-    <header className="settings-heading">
-      <h1>설정</h1>
+    <header className="settings-heading screen-heading">
+      <div><h1>설정</h1><p>앱 시작, MCP 포트 및 종료 동작을 설정합니다.</p></div>
     </header>
 
     <div className="settings-grid">

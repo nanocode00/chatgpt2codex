@@ -2,7 +2,7 @@ import { useState } from "react";
 import {
   Activity, ArrowRight, CircleAlert, ClipboardCopy, Cloud,
   FolderCode, HardDrive, Layers, LockKeyhole, Play,
-  RotateCw, Settings2, ShieldCheck, Square, TerminalSquare
+  RotateCw, Settings2, Square, TerminalSquare
 } from "lucide-react";
 import type { CatalogInspection, ManagedAction, ManagedResult, PublicTunnelHealth } from "./runtime";
 import { publicView, runtimeView, startAction } from "./dashboard-state";
@@ -77,11 +77,10 @@ export function Dashboard({
   }
 
   return <div className="dashboard-root">
-    <header className="dash-top">
+    <header className="dash-top screen-heading">
       <div>
-        <p className="dash-eyebrow">C2C DESKTOP / OVERVIEW</p>
-        <h1>내 개발 환경</h1>
-        <p>로컬 MCP와 외부 공개를 독립적으로 관리하고 프로젝트 상태를 확인합니다.</p>
+        <h1>대시보드</h1>
+        <p>MCP 연결과 프로젝트 상태를 한눈에 확인합니다.</p>
       </div>
     </header>
 
@@ -116,7 +115,6 @@ export function Dashboard({
           상세 관리 <ArrowRight size={15}/>
         </button>
       </div>
-      <div className="dash-boundary"><ShieldCheck size={15}/> 서버 제어는 현재 앱이 소유한 MCP 인스턴스에만 적용됩니다.</div>
     </section>
 
     <div className="dash-status-grid">
@@ -154,8 +152,7 @@ export function Dashboard({
       <section className="dash-summary" aria-labelledby="dash-project-title">
         <div className="dash-summary-heading"><FolderCode size={17}/><h2 id="dash-project-title">등록된 프로젝트</h2></div>
         <strong className="dash-summary-value">{hasProjects ? catalog.projects.length + "개" : "—"}</strong>
-        <p>{catalogError || (catalogBusy ? "프로젝트 목록 확인 중..." :
-          hasProjects ? "실제 작업 대상은 도구 호출 시 projectId로 지정합니다." : "전용 프로젝트 목록을 확인하지 못했습니다.")}</p>
+        {(catalogError || catalogBusy || !hasProjects) && <p>{catalogError || (catalogBusy ? "프로젝트 목록 확인 중..." : "프로젝트 목록 확인 실패")}</p>}
         <button type="button" className="dash-card-button" onClick={() => onNavigate("projects")}>
           프로젝트 관리 <ArrowRight size={15}/>
         </button>
@@ -163,7 +160,7 @@ export function Dashboard({
       <section className="dash-summary" aria-labelledby="dash-profile-title">
         <div className="dash-summary-heading"><Layers size={17}/><h2 id="dash-profile-title">실행 환경</h2></div>
         <strong className="dash-summary-value">{hasProjects ? catalog.profiles.reduce((count, profile) => count + Number(profile.python) + Number(profile.docker), 0) + "개" : "—"}</strong>
-        <p>{hasProjects ? "등록된 Python·Docker 실행 환경을 종류별로 계산합니다." : "전용 CLI 프로필을 확인할 수 없습니다."}</p>
+        {!hasProjects && <p>프로필을 확인할 수 없습니다.</p>}
         <button type="button" className="dash-card-button" onClick={() => onNavigate("profiles")}>
           프로필 확인 <ArrowRight size={15}/>
         </button>
@@ -183,7 +180,6 @@ export function Dashboard({
       </section>
       <section className="dash-panel" aria-labelledby="dash-next-title">
         <div className="dash-panel-title"><Activity size={18}/><h2 id="dash-next-title">빠른 작업</h2></div>
-        <p>필요한 작업으로 바로 이동합니다. 고급 명령과 복구 기능은 별도 화면에 있습니다.</p>
         <div className="dash-shortcuts">
           <button type="button" onClick={() => onNavigate("diagnostics")}><Activity size={16}/> 진단·로그 <ArrowRight size={14}/></button>
           <button type="button" onClick={() => onNavigate("settings")}><Settings2 size={16}/> 앱 설정 <ArrowRight size={14}/></button>

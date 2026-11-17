@@ -8,9 +8,11 @@ import { runOwnedCliParity, type ManagedResult, type OwnedCliParityOperation, ty
 import { displayCliText, parseHealth, parseLocks, parseRuntimeStatus,
   type HealthDiagnostic, type LockDiagnostic, type RuntimeDiagnostic } from "./diagnostics-model";
 import type { ScreenRefreshHandle } from "./screen-refresh";
+import { useScreenBusy } from "./use-screen-busy";
 import "./diagnostics.css";
 
 interface DiagnosticsScreenProps {
+  onBusyChange?: (waiting: boolean) => void;
   native: boolean;
   owned: ManagedResult | null;
   ownedBusy: boolean;
@@ -31,7 +33,7 @@ const labelTime = () => new Intl.DateTimeFormat("ko-KR", {
 
 export const DiagnosticsScreen = forwardRef<ScreenRefreshHandle, DiagnosticsScreenProps>(function DiagnosticsScreen({
   native, owned, ownedBusy, ownedError, publicHealth, publicChecking,
-  onConnections, onNotify
+  onConnections, onNotify, onBusyChange
 }, ref) {
   const [runtime, setRuntime] = useState<RuntimeDiagnostic | null>(null);
   const [health, setHealth] = useState<HealthDiagnostic | null>(null);
@@ -139,6 +141,7 @@ export const DiagnosticsScreen = forwardRef<ScreenRefreshHandle, DiagnosticsScre
   }
 
   const isBusy = busy !== null || ownedBusy;
+  useScreenBusy(onBusyChange, isBusy || publicChecking);
   const active = runtime?.healthy === true && health?.healthy === true;
   const localLabel = busy === "overview" ? "점검 중" : !runtime || !health ? "미확인" :
     active ? "정상 응답" : runtime.alive ? "실행 중 · Health 실패" : "중지됨";
@@ -152,11 +155,10 @@ export const DiagnosticsScreen = forwardRef<ScreenRefreshHandle, DiagnosticsScre
   const visibleLocks = lockExpanded ? locks ?? [] : (locks ?? []).slice(0, 5);
 
   return <div className="diag-root">
-    <header className="diag-heading">
+    <header className="diag-heading screen-heading">
       <div>
-        <p className="diag-eyebrow">DIAGNOSTICS / RECOVERY</p>
         <h1>진단·복구</h1>
-        <p>Tauri 전용 MCP의 실행 상태, 진단 결과, 로그와 프로젝트 잠금을 확인합니다.</p>
+        <p>실행 상태와 로그, 작업 잠금을 점검합니다.</p>
       </div>
     </header>
 
@@ -300,8 +302,5 @@ export const DiagnosticsScreen = forwardRef<ScreenRefreshHandle, DiagnosticsScre
       </section>
     </div>}
 
-    <div className="diag-footer"><ShieldCheck size={16}/>
-      이 화면은 앱이 소유한 MCP만 진단합니다. 상태 조회는 인증정보를 변경하지 않습니다.
-    </div>
   </div>;
 });

@@ -1,9 +1,6 @@
 /* Screen 3: neutral execution environments; layout based on the actual content width. */
 .profiles-root{display:flex;flex-direction:column;gap:20px;min-width:0;width:100%;container-name:profiles;container-type:inline-size;color:#e8e8e8}
 .profiles-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}
-.profiles-eyebrow{font-size:10px;letter-spacing:.15em;font-weight:700;color:#999;margin:0 0 12px}
-.profiles-heading h1{margin:0 0 9px;font-size:28px;font-weight:700;letter-spacing:-.04em;color:#f1f1f1}
-.profiles-heading p:not(.profiles-eyebrow){font-size:12px;line-height:1.65;color:#a8a8a8}
 .profiles-header-actions{display:flex;gap:9px;flex:none;flex-wrap:wrap;justify-content:flex-end}
 .profiles-button{min-height:40px;padding:9px 13px;display:inline-flex;justify-content:center;align-items:center;gap:8px;border-radius:9px;border:1px solid #555;font-weight:620;font-size:12px;white-space:nowrap}
 .profiles-button.secondary{color:#ddd;background:#323232}
