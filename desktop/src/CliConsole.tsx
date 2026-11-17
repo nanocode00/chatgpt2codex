@@ -5,6 +5,7 @@ import {
   type CliConsoleCheck, type OwnedCliParityResponse
 } from "./runtime";
 import type { ScreenRefreshHandle } from "./screen-refresh";
+import { useScreenBusy } from "./use-screen-busy";
 import "./cli-console.css";
 
 const EXAMPLES = [
@@ -50,9 +51,10 @@ function outputText(entry: HistoryEntry): string {
 }
 
 export const CliConsole = forwardRef<ScreenRefreshHandle, {
+  onBusyChange?: (waiting: boolean) => void;
   onNotify?: (message: string, tone?: "info" | "error") => void;
   onRuntimeChanged?: () => void;
-}>(function CliConsole({ onNotify, onRuntimeChanged }, ref) {
+}>(function CliConsole({ onNotify, onRuntimeChanged, onBusyChange }, ref) {
   const native = isNativeApp();
   const [input, setInput] = useState(sessionDraft);
   const [validation, setValidation] = useState<CliConsoleCheck | null>(null);
@@ -61,6 +63,7 @@ export const CliConsole = forwardRef<ScreenRefreshHandle, {
   const [busy, setBusy] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [pending, setPending] = useState<PendingCommand | null>(null);
+  useScreenBusy(onBusyChange, busy || checking);
   const [history, setHistory] = useState<HistoryEntry[]>(() => sessionHistory);
   const [selectedId, setSelectedId] = useState<number | null>(() => sessionHistory[0]?.id ?? null);
   const inputRef = useRef<HTMLInputElement>(null);

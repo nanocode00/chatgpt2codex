@@ -1,9 +1,9 @@
 import {
   Activity, ChevronRight, Code2,
-  ExternalLink, FileText, FolderCode, HardDrive, Layers, LayoutDashboard, PlugZap,
-  RefreshCcw, Settings2, ShieldCheck, TerminalSquare
+  ExternalLink, FileText, FolderCode, Layers, LayoutDashboard, PlugZap,
+  RefreshCcw, Settings2, TerminalSquare
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { manageOwnedCli, setOwnedPort, copyOwnedOwnerToken, registerOwnedOwnerToken, inspectOwnedPublicTunnelHealth, inspectOwnedCatalog, unregisterOwnedRepository, pickOwnedRepositoryFolder, registerOwnedPickedRepository, cancelOwnedPickedRepository, closePreviewWithOwnedMcp, hidePreviewWindow, isNativeApp, inspectPreviewAutostart, setPreviewAutostart, type PreviewStartupInspection, type ManagedAction, type ManagedResult, type CatalogInspection, type PickedRepositoryFolder, type PublicTunnelHealth } from "./runtime";
 import { SettingsScreen } from "./SettingsScreen";
@@ -54,6 +54,7 @@ function App() {
   const native = isNativeApp();
   const [screen, setScreen] = useState<Screen>("overview");
   const [refreshBusy, setRefreshBusy] = useState(false);
+  const [screenWaiting, setScreenWaiting] = useState<Partial<Record<Screen, boolean>>>({});
   const [port, setPort] = useState(loadPort);
   const [draftPort, setDraftPort] = useState(String(loadPort()));
   const [autoRefresh, setAutoRefresh] = useState(loadAutoRefresh);
@@ -98,6 +99,21 @@ function App() {
   const jobsScreenRef = useRef<ScreenRefreshHandle | null>(null);
   const diagnosticsScreenRef = useRef<ScreenRefreshHandle | null>(null);
   const cliScreenRef = useRef<ScreenRefreshHandle | null>(null);
+  const reportScreenWaiting = useCallback((name: Screen, waiting: boolean) => {
+    setScreenWaiting(previous => previous[name] === waiting ? previous : { ...previous, [name]: waiting });
+  }, []);
+  const screenWaitingHandlers = useMemo(() => ({
+    projects: (waiting: boolean) => reportScreenWaiting("projects", waiting),
+    profiles: (waiting: boolean) => reportScreenWaiting("profiles", waiting),
+    connections: (waiting: boolean) => reportScreenWaiting("connections", waiting),
+    jobs: (waiting: boolean) => reportScreenWaiting("jobs", waiting),
+    cli: (waiting: boolean) => reportScreenWaiting("cli", waiting),
+    diagnostics: (waiting: boolean) => reportScreenWaiting("diagnostics", waiting)
+  }), [reportScreenWaiting]);
+  const uiWaiting = refreshBusy || ownedBusy || catalogBusy || exitBusy || portBusy ||
+    folderBusy || unregisterBusy || startupBusy || ownedPublicChecking || screenWaiting[screen] === true;
+  const serverStatus = !native ? "웹 미리보기" : ownedBusy ? "서버 확인 중" :
+    !owned?.available ? "서버 상태 미확인" : owned.running ? "서버 켜짐" : "서버 꺼짐";
   const notify = useCallback((message: string, tone: "info" | "error" = "info") => {
     setToast({ id: ++toastId.current, message, tone });
   }, []);
@@ -571,15 +587,7 @@ function App() {
             return <button key={item.name} type="button" className={"nav-item " + (screen === item.name ? "active" : "")} aria-current={screen === item.name ? "page" : undefined} onClick={() => setScreen(item.name)}><Icon size={18} strokeWidth={1.8} /><span>{item.label}</span>{screen === item.name && <ChevronRight size={14} className="nav-tail" />}</button>;
           })}
         </nav>
-        <div className="sidebar-divider" />
-        <div className="nav-section-title">RUNTIME</div>
-        <button type="button" className="mini-runtime" onClick={() => setScreen("connections")}>
-          <HardDrive size={17} />
-          <span><strong>MCP 서버</strong><small>127.0.0.1:{owned?.port ?? port}</small></span>
-          <span className={"tiny-led " + (owned?.running ? "glow" : "")} />
-        </button>
         <div className="sidebar-bottom">
-          <div className="mini-security"><ShieldCheck size={16} /><span>로컬 MCP · Tauri 관리</span></div>
           <div className="sidebar-version">Preview 0.1 · Tauri 2</div>
         </div>
       </aside>
@@ -588,11 +596,10 @@ function App() {
         <header className="topbar">
           <div className="breadcrumb"><span>ChatGPT To Codex</span><ChevronRight size={15}/><strong>{NAV.find(n => n.name === screen)?.label}</strong></div>
           <div className="header-actions">
-            <span className="host-indicator"><span className={"host-dot " + (native ? "connected" : "")} />{native ? "이 컴퓨터" : "웹 미리보기"}</span>
-            <button className={"icon-btn " + (refreshBusy ? "spin-icon" : "")} type="button"
+            <span className="host-indicator" role="status" aria-live="polite"><span className={"host-dot " + (owned?.running && !ownedBusy && native ? "connected" : "")} />{serverStatus}</span>
+            <button className={"icon-btn " + (uiWaiting ? "spin-icon" : "")} type="button"
               onClick={() => { void refreshVisibleScreen(); }} aria-label="현재 화면 새로고침"
-              title="현재 화면 새로고침" disabled={refreshBusy || ownedBusy || catalogBusy ||
-                exitBusy || portBusy || folderBusy || unregisterBusy}><RefreshCcw size={17}/></button>
+              title={uiWaiting ? "작업 처리 중" : "현재 화면 새로고침"} aria-busy={uiWaiting} disabled={uiWaiting}><RefreshCcw size={17}/></button>
           </div>
         </header>
 
@@ -611,7 +618,7 @@ function App() {
           onNavigate={to => setScreen(to === "manage" ? "connections" : to)}
         />}
 
-        {screen === "projects" && <ProjectsScreen
+        {screen === "projects" && <ProjectsScreen onBusyChange={screenWaitingHandlers.projects}
           catalog={catalog} catalogBusy={catalogBusy} catalogError={catalogError}
           ownedRunning={owned?.running === true} ownedBusy={ownedBusy}
           pickedFolder={pickedFolder} folderBusy={folderBusy}
@@ -629,24 +636,24 @@ function App() {
           onManageRuntime={() => setScreen("connections")}
         />}
 
-        {screen === "profiles" && <ProfilesScreen
+        {screen === "profiles" && <ProfilesScreen onBusyChange={screenWaitingHandlers.profiles}
           catalog={catalog} catalogBusy={catalogBusy} catalogError={catalogError}
           onRefresh={refreshCatalog} onNotify={notify}
         />}
 
-        {screen === "jobs" && <JobsScreen ref={jobsScreenRef} onNotify={notify}
+        {screen === "jobs" && <JobsScreen ref={jobsScreenRef} onNotify={notify} onBusyChange={screenWaitingHandlers.jobs}
           onProjects={() => setScreen("projects")}
         />}
 
         {screen === "cli" && <>
-          <div className="page-heading"><div><h1>CLI 콘솔</h1><p>명령을 입력해 문법을 확인하고 실행 결과를 살펴보세요.</p></div></div>
-          <CliConsole ref={cliScreenRef} onNotify={notify} onRuntimeChanged={() => {
+          <header className="screen-heading"><div><h1>CLI</h1><p>명령을 검사하고 실행 결과를 확인합니다.</p></div></header>
+          <CliConsole ref={cliScreenRef} onNotify={notify} onBusyChange={screenWaitingHandlers.cli} onRuntimeChanged={() => {
             void refreshOwnedStatus();
             void refreshCatalog();
           }}/>
         </>}
 
-        {screen === "connections" && <ConnectionsSecurityScreen
+        {screen === "connections" && <ConnectionsSecurityScreen onBusyChange={screenWaitingHandlers.connections}
           native={native} owned={owned} ownedBusy={ownedBusy} ownedError={ownedError}
           ownerTokenPending={!!ownedToken}
           tokenCopyAvailable={owned?.tokenCopyAvailable === true} publicPreferred={publicPreferred}
@@ -664,7 +671,7 @@ function App() {
           onDiagnostics={() => setScreen("diagnostics")}
         />}
 
-        {screen === "diagnostics" && <DiagnosticsScreen ref={diagnosticsScreenRef}
+        {screen === "diagnostics" && <DiagnosticsScreen ref={diagnosticsScreenRef} onBusyChange={screenWaitingHandlers.diagnostics}
           native={native} owned={owned} ownedBusy={ownedBusy} ownedError={ownedError}
           publicHealth={ownedPublicHealth} publicChecking={ownedPublicChecking}
           onConnections={() => setScreen("connections")}

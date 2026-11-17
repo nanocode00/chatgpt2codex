@@ -6,9 +6,11 @@ import {
 } from "lucide-react";
 import { publicView, runtimeView, startAction } from "./dashboard-state";
 import type { ManagedAction, ManagedResult, PublicTunnelHealth } from "./runtime";
+import { useScreenBusy } from "./use-screen-busy";
 import "./connections.css";
 
 interface ConnectionsSecurityProps {
+  onBusyChange?: (waiting: boolean) => void;
   native: boolean;
   owned: ManagedResult | null;
   ownedBusy: boolean;
@@ -30,6 +32,7 @@ interface ConnectionsSecurityProps {
 
 /** Inspect only the dedicated Tauri-managed instance, never the legacy/default probe. */
 export function ConnectionsSecurityScreen({
+  onBusyChange,
   native, owned, ownedBusy, ownedError, ownerTokenPending, tokenCopyAvailable,
   publicPreferred, publicHealth, publicChecking,
   onManagedAction, onTogglePublic, onCopyPublic, onCopyToken,
@@ -47,6 +50,7 @@ export function ConnectionsSecurityScreen({
   const [knownToken, setKnownToken] = useState("");
   const [tokenImportOpen, setTokenImportOpen] = useState(false);
   const [tokenBusy, setTokenBusy] = useState(false);
+  useScreenBusy(onBusyChange, tokenBusy || runtimeBusy || publicChecking);
   const [tokenError, setTokenError] = useState("");
   const [securityExpanded, setSecurityExpanded] = useState(false);
   const endpoint = "http://127.0.0.1:" + (owned?.port ?? 7979) + "/mcp";
@@ -93,11 +97,10 @@ export function ConnectionsSecurityScreen({
   }
 
   return <div className="connections-root">
-    <header className="connections-heading">
+    <header className="connections-heading screen-heading">
       <div>
-        <p className="connections-eyebrow">CONNECTIVITY / SECURITY</p>
-        <h1>연결·보안</h1>
-        <p>Tauri 전용 MCP를 준비하고, 로컬·외부 연결과 ChatGPT 인증을 확인합니다.</p>
+        <h1>연결</h1>
+        <p>로컬 MCP·외부 공개와 인증을 관리합니다.</p>
       </div>
     </header>
 
@@ -126,7 +129,6 @@ export function ConnectionsSecurityScreen({
           <div><TerminalSquare size={19}/><h2 id="connections-local-heading">로컬 MCP</h2></div>
           <span className="connections-pill">{localStatus}</span>
         </div>
-        <p>이 컴퓨터에서 실행되는 격리된 C2C 인스턴스입니다. 다른 인스턴스의 상태와 구분합니다.</p>
         <label className="connections-field-label" htmlFor="connections-local-url">로컬 MCP URL</label>
         <div className="connections-copy">
           <input id="connections-local-url" readOnly value={endpoint}/>
@@ -288,9 +290,6 @@ export function ConnectionsSecurityScreen({
         </div>
         <p className="connections-subnote">HTTPS Health 확인만으로 OAuth 또는 실제 ChatGPT 도구 호출 성공을 보증하지 않습니다. Named Tunnel은 아직 이 전용 화면에서 설정할 수 없습니다.</p>
       </section>
-    </div>
-    <div className="connections-boundary">
-      <ShieldCheck size={16}/> 이 화면은 현재 앱의 MCP·토큰·Quick Tunnel 연결만 관리합니다.
     </div>
   </div>;
 }

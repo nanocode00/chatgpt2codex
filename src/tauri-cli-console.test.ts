@@ -12,7 +12,7 @@ describe("Tauri CLI console: native syntax guard and interactive UI", () => {
     expect(app).toContain("<CliConsole ref={cliScreenRef} onNotify={notify} onRuntimeChanged=");
     expect(app).toContain("await cliScreenRef.current?.refresh()");
     expect(app).toContain("void refreshOwnedStatus()");
-    expect(app).toContain("<h1>CLI 콘솔</h1>");
+    expect(app).toContain("<h1>CLI</h1>");
     expect(app).not.toContain("<CliParityPanel");
     expect(screen).toContain("CLI 명령");
     expect(screen).toContain("문법 검사");

@@ -1,9 +1,6 @@
 /* Screen 1: neutral, task-oriented dashboard. A shared semantic palette will follow. */
 .dashboard-root{display:flex;flex-direction:column;gap:20px;padding-bottom:22px;color:#e8e8e8;min-width:0;width:100%;container-name:dashboard;container-type:inline-size}
 .dash-top{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}
-.dash-eyebrow{font-size:10px!important;letter-spacing:.14em;font-weight:700;color:#a1a1a1!important;margin:0 0 10px!important}
-.dash-top h1{margin:0;font-size:28px;font-weight:700;letter-spacing:-.045em;color:#f2f2f2}
-.dash-top p:not(.dash-eyebrow){font-size:13px;margin:10px 0 0;color:#a7a7a7;line-height:1.6}
 .dash-quiet-button,.dash-secondary,.dash-text-button,.dash-card-button{display:inline-flex;align-items:center;gap:8px;justify-content:center;font-size:12px;font-weight:600;min-height:38px}
 .dash-quiet-button{border:1px solid #494949;border-radius:9px;padding:10px 13px;background:#292929;color:#d5d5d5;white-space:nowrap}
 .dash-quiet-button:hover:not(:disabled),.dash-secondary:hover:not(:disabled){border-color:#737373;background:#383838}

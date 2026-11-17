@@ -2,9 +2,6 @@
 .diag-root{container-name:diag;container-type:inline-size;display:flex;flex-direction:column;gap:20px;min-width:0;width:100%;color:#eaeaea}
 .diag-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}
 .diag-heading>div{min-width:0}
-.diag-eyebrow{font-size:10px;letter-spacing:.14em;font-weight:700;color:#aaa;margin:0 0 12px}
-.diag-heading h1{font-size:28px;letter-spacing:-.04em;color:#f0f0f0;margin:0 0 9px}
-.diag-heading p:not(.diag-eyebrow){font-size:12px;color:#a9a9a9;line-height:1.65}
 .diag-button{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 14px;border-radius:9px;min-height:40px;min-width:132px;border:1px solid #585858;white-space:nowrap;font-size:12px;font-weight:650}
 .diag-button.primary{background:#e6e6e6;color:#222;border-color:#e6e6e6}
 .diag-button.primary:hover:not(:disabled){background:#fff}
@@ -59,8 +56,6 @@
 .diag-guard svg{flex:none;color:#bcbcbc}
 .diag-inline-error{font-size:11px;color:#e7bcbc;border:1px solid #7b5353;background:#392c2c;border-radius:9px;padding:11px;line-height:1.6}
 .diag-success{font-size:11px;color:#e0e0e0;border:1px solid #636363;background:#333;border-radius:9px;padding:11px;line-height:1.6}
-.diag-footer{display:flex;align-items:flex-start;gap:9px;border-top:1px solid #424242;padding:15px 0 0;color:#9d9d9d;font-size:11px;line-height:1.7}
-.diag-footer svg{flex:none}
 .diag-dialog-overlay{position:fixed;inset:0;z-index:1500;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(0,0,0,.72);backdrop-filter:blur(3px)}
 .diag-dialog{width:100%;max-width:510px;max-height:92vh;overflow:auto;background:#252525;border:1px solid #686868;border-radius:15px;padding:24px;box-shadow:0 24px 60px rgba(0,0,0,.6)}
 .diag-dialog-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}

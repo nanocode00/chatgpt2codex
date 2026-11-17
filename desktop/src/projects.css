@@ -1,9 +1,6 @@
 /* Dedicated project workspace; neutral palette matching the redesigned dashboard. */
 .projects-root{width:100%;min-width:0;display:flex;flex-direction:column;gap:20px;container-name:projects;container-type:inline-size}
 .projects-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;min-width:0}
-.projects-eyebrow{color:#979797;font-size:10px;font-weight:700;letter-spacing:.14em;margin:0 0 12px}
-.projects-heading h1{font-size:28px;font-weight:700;letter-spacing:-.045em;color:#f1f1f1;margin:0 0 9px}
-.projects-heading p:not(.projects-eyebrow){font-size:12px;line-height:1.65;color:#a5a5a5}
 .projects-header-actions{display:flex;align-items:center;gap:9px;flex:none}
 .projects-button{min-height:40px;padding:10px 14px;display:inline-flex;align-items:center;justify-content:center;gap:8px;border:1px solid #555;border-radius:9px;font-size:12px;font-weight:600;white-space:nowrap}
 .projects-button.primary{background:#e8e8e8;color:#242424;border-color:#e8e8e8}

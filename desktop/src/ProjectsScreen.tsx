@@ -9,9 +9,11 @@ import {
   type CatalogInspection, type PickedRepositoryFolder
 } from "./runtime";
 import { displayProjectPath, filterProjects, parseProjectDetails, type ProjectDetails } from "./project-details";
+import { useScreenBusy } from "./use-screen-busy";
 import "./projects.css";
 
 interface ProjectsScreenProps {
+  onBusyChange?: (waiting: boolean) => void;
   catalog: CatalogInspection | null;
   catalogBusy: boolean;
   catalogError: string;
@@ -40,6 +42,7 @@ interface ProjectsScreenProps {
 }
 
 export function ProjectsScreen({
+  onBusyChange,
   catalog, catalogBusy, catalogError, ownedRunning, ownedBusy,
   pickedFolder, folderBusy, folderName, folderId, folderError,
   unregisterTarget, unregisterTyped, unregisterBusy, unregisterError,
@@ -58,6 +61,7 @@ export function ProjectsScreen({
   const selected = filtered.find(project => project.id === selectedId) ?? filtered[0] ?? null;
   const ready = native && catalog?.available === true;
   const busy = ownedBusy || catalogBusy || folderBusy || unregisterBusy;
+  useScreenBusy(onBusyChange, busy || detailsBusy);
   const canEdit = ready && !ownedRunning && !busy && unregisterTarget === null && !pickedFolder;
   const healthy = entries.filter(project => project.available).length;
 
@@ -100,11 +104,10 @@ export function ProjectsScreen({
   }
 
   return <div className="projects-root">
-    <header className="projects-heading">
+    <header className="projects-heading screen-heading">
       <div>
-        <p className="projects-eyebrow">WORKSPACE / PROJECTS</p>
-        <h1>프로젝트 관리</h1>
-        <p>ChatGPT가 작업할 프로젝트를 등록하고, 경로와 실행 준비 상태를 확인합니다.</p>
+        <h1>프로젝트</h1>
+        <p>작업할 프로젝트의 등록과 경로를 관리합니다.</p>
       </div>
       <div className="projects-header-actions">
         <button type="button" className="projects-button primary" onClick={onBrowse} disabled={!canEdit}>
@@ -121,7 +124,7 @@ export function ProjectsScreen({
 
     {ownedRunning && <div className="projects-notice" role="status">
       <Info size={17}/>
-      <span>현재 Tauri MCP가 실행 중이어서 프로젝트 등록·해제가 잠겨 있습니다. 기존 안전 정책에 따라 MCP를 중지하면 변경할 수 있습니다. 실제 폴더는 삭제되지 않습니다.</span>
+      <span>MCP 실행 중에는 프로젝트를 등록·해제할 수 없습니다. 변경하려면 서버를 중지하세요.</span>
       <button type="button" onClick={onManageRuntime}>서버 관리 <ArrowRight size={14}/></button>
     </div>}
     {catalogError && <div className="projects-error" role="alert"><AlertCircle size={16}/>{catalogError}</div>}
@@ -261,7 +264,7 @@ export function ProjectsScreen({
       </section>
     </div>
     <footer className="projects-boundary"><ShieldCheck size={15}/>
-      등록 해제는 목록에서만 제거하며 로컬 프로젝트 폴더와 인증정보는 삭제하지 않습니다.
+      등록 해제는 프로젝트 폴더를 삭제하지 않습니다.
     </footer>
   </div>;
 }

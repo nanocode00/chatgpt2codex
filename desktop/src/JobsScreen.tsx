@@ -2,7 +2,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRe
 import {
   Activity, AlertCircle, ArrowRight, Ban, CheckCircle2, ChevronRight, CirclePause,
   ClipboardCopy, Clock3, FileText, History, Layers, LoaderCircle,
-  Play, Search, ShieldCheck, X
+  Play, Search, X
 } from "lucide-react";
 import { isNativeApp, runOwnedCliParity } from "./runtime";
 import {
@@ -11,9 +11,11 @@ import {
 } from "./job-model";
 import type { JobListItem } from "./job-list";
 import type { ScreenRefreshHandle } from "./screen-refresh";
+import { useScreenBusy } from "./use-screen-busy";
 import "./jobs.css";
 
 interface JobsScreenProps {
+  onBusyChange?: (waiting: boolean) => void;
   onNotify: (message: string, tone?: "info" | "error") => void;
   onProjects: () => void;
 }
@@ -31,7 +33,7 @@ const filterItems: { id: JobFilter; label: string; symbol: "layers" | "active" |
   { id: "attention", label: "대기·차단", symbol: "attention" },
   { id: "history", label: "완료·취소", symbol: "history" }
 ];
-export const JobsScreen = forwardRef<ScreenRefreshHandle, JobsScreenProps>(function JobsScreen({ onNotify, onProjects }, ref) {
+export const JobsScreen = forwardRef<ScreenRefreshHandle, JobsScreenProps>(function JobsScreen({ onNotify, onProjects, onBusyChange }, ref) {
   const native = isNativeApp();
   const [items, setItems] = useState<JobListItem[] | null>(null);
   const [listBusy, setListBusy] = useState(false);
@@ -57,6 +59,7 @@ export const JobsScreen = forwardRef<ScreenRefreshHandle, JobsScreenProps>(funct
   const historyCount = items?.filter(item => item.status === "completed" || item.status === "canceled").length ?? 0;
   const counts: Record<string, number> = { all: count, active: activeCount, attention: attentionCount, history: historyCount };
   const busy = listBusy || detailsBusy || logsBusy || actionBusy;
+  useScreenBusy(onBusyChange, busy);
 
   const reloadList = useCallback((quiet = false): Promise<void> => {
     if (!native) return Promise.resolve();
@@ -185,11 +188,10 @@ export const JobsScreen = forwardRef<ScreenRefreshHandle, JobsScreenProps>(funct
   }
 
   return <div className="jobs-root">
-    <header className="jobs-heading">
+    <header className="jobs-heading screen-heading">
       <div>
-        <p className="jobs-eyebrow">WORKSPACE / DURABLE JOBS</p>
-        <h1>작업 관리</h1>
-        <p>저장된 작업의 진행 상태와 기록을 살펴보고, 다음 진행에 필요한 ID를 확인합니다.</p>
+        <h1>작업</h1>
+        <p>저장된 작업의 상태와 진행 기록을 확인합니다.</p>
       </div>
     </header>
 
@@ -322,9 +324,6 @@ export const JobsScreen = forwardRef<ScreenRefreshHandle, JobsScreenProps>(funct
             ‘취소 상태로 기록’은 에이전트 프로세스를 강제 종료하지 않습니다.</p>
           <button type="button" onClick={onProjects}>프로젝트 목록 보기 <ArrowRight size={14}/></button>
         </div>
-      </div>
-      <div className="jobs-boundary"><ShieldCheck size={15}/>
-        작업 기록만 조회·수정하며 실제 로컬 프로젝트 파일은 변경하지 않습니다.
       </div>
     </div>
   </div>;

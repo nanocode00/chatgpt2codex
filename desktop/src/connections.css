@@ -1,9 +1,6 @@
 /* Connections and security: neutral, task-based Tauri-only screen. */
 .connections-root{display:flex;flex-direction:column;gap:20px;width:100%;min-width:0;color:#e8e8e8;container-name:connections;container-type:inline-size}
 .connections-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}
-.connections-eyebrow{font-size:10px;font-weight:700;letter-spacing:.14em;color:#999;margin:0 0 12px}
-.connections-heading h1{font-size:28px;letter-spacing:-.04em;font-weight:700;margin:0 0 9px;color:#f2f2f2}
-.connections-heading p:not(.connections-eyebrow){font-size:12px;line-height:1.65;color:#aaa}
 .connections-button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:40px;min-width:128px;padding:10px 13px;border:1px solid #585858;border-radius:9px;font-size:12px;font-weight:650;white-space:nowrap}
 .connections-button.primary{background:#e9e9e9;color:#202020;border-color:#e9e9e9}
 .connections-button.primary:hover:not(:disabled){background:#fff}
