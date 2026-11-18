@@ -213,7 +213,7 @@ export const JobsScreen = forwardRef<ScreenRefreshHandle, JobsScreenProps>(funct
     <div className="jobs-layout">
       <section className="jobs-list-panel" aria-labelledby="jobs-list-heading">
         <div className="jobs-panel-heading">
-          <div><p>DURABLE JOBS</p><h2 id="jobs-list-heading">저장된 작업</h2></div>
+          <div><h2 id="jobs-list-heading">저장된 작업</h2></div>
           <span className="jobs-count">{filtered.length} / {filter === "all" ? count : counts[filter]}</span>
         </div>
         <div className="jobs-search">
@@ -248,7 +248,7 @@ export const JobsScreen = forwardRef<ScreenRefreshHandle, JobsScreenProps>(funct
 
       <section className="jobs-detail-panel" aria-labelledby="jobs-detail-heading">
         <div className="jobs-panel-heading">
-          <div><p>JOB INSPECTOR</p><h2 id="jobs-detail-heading">작업 상세</h2></div>
+          <div><h2 id="jobs-detail-heading">작업 상세</h2></div>
           {selected && <button type="button" className="jobs-button secondary"
             disabled={busy || !native || !details} onClick={() => { void showLogs(); }}>
             <FileText size={15}/>{logsBusy ? "조회 중" : "기록 조회"}

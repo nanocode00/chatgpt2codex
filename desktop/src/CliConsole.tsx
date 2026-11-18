@@ -244,7 +244,7 @@ export const CliConsole = forwardRef<ScreenRefreshHandle, {
 
   return <div className="cli-console">
     <section className="panel cli-console-editor">
-      <div className="cli-console-title"><TerminalSquare size={18}/><h2>명령 실행</h2><span>C2C CLI</span></div>
+      <div className="cli-console-title"><TerminalSquare size={18}/><h2>명령 실행</h2></div>
       <label htmlFor="cli-command-input">CLI 명령</label>
       <div className="cli-console-input-row">
         <span aria-hidden="true">$</span>

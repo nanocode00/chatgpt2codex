@@ -23,7 +23,6 @@
 .projects-list-panel,.projects-detail-panel,.projects-register{background:#222;border:1px solid #3e3e3e;border-radius:14px;min-width:0}
 .projects-list-panel,.projects-detail-panel{display:flex;flex-direction:column;min-height:0}
 .projects-panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:21px 22px 14px}
-.projects-panel-head p{font-size:9px;letter-spacing:.15em;color:#888;font-weight:700;margin:0 0 7px}
 .projects-panel-head h2{font-size:15px;font-weight:680;letter-spacing:-.025em;color:#eee;margin:0}
 .projects-count{color:#b7b7b7;background:#303030;border:1px solid #494949;border-radius:24px;padding:5px 9px;font-size:10px}
 .projects-search{display:flex;gap:9px;align-items:center;height:41px;margin:3px 20px 13px;padding:0 11px;border-radius:9px;border:1px solid #4c4c4c;background:#191919;color:#999}
@@ -66,7 +65,6 @@
 .projects-detail-metadata .projects-hints{grid-column:1/-1;display:block}
 .projects-hints p{font-size:11px;margin-top:9px;color:#ddd;line-height:1.7}
 .projects-detail-bottom{border-top:1px solid #3e3e3e;margin:25px 22px 0;padding-top:18px;display:flex;flex-direction:column;align-items:flex-start;gap:13px}
-.projects-detail-bottom p{font-size:11px;color:#aaa;line-height:1.7;word-break:keep-all}
 .projects-detail-bottom .projects-button{width:100%}
 .projects-remove{border:1px solid #765252;background:#322929;border-radius:12px;margin:17px 20px 0;padding:17px;display:flex;flex-direction:column;gap:11px}
 .projects-remove h3{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:650;color:#f2cdcd}
@@ -86,8 +84,6 @@
 .projects-register-grid input:focus{outline:1px solid #979797}
 .projects-register-grid .projects-help{padding:0;margin:0}
 .projects-register-grid .projects-error{margin:0}
-.projects-boundary{display:flex;gap:8px;align-items:flex-start;border-top:1px solid #383838;padding:16px 0 2px;color:#999;font-size:11px;line-height:1.65}
-.projects-boundary svg{flex:none}
 .projects-spinning{animation:projects-spin 1s linear infinite}
 @keyframes projects-spin{to{transform:rotate(360deg)}}
 @container projects (max-width:870px){.projects-layout{grid-template-columns:1fr}.projects-list-panel,.projects-detail-panel{min-height:auto}}

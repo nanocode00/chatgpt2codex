@@ -1,6 +1,6 @@
 import {
   Activity, ChevronRight, Code2,
-  ExternalLink, FileText, FolderCode, Layers, LayoutDashboard, PlugZap,
+  FileText, FolderCode, Layers, LayoutDashboard, PlugZap,
   RefreshCcw, Settings2, TerminalSquare
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -580,16 +580,12 @@ function App() {
     <div className="shell">
       <aside className="sidebar">
         <div className="brand"><div className="brand-mark"><Code2 size={19} strokeWidth={2.2} /></div><div><strong>Codex</strong><span>to ChatGPT · Desktop</span></div></div>
-        <div className="nav-section-title">WORKSPACE</div>
         <nav aria-label="메뉴">
           {NAV.map(item => {
             const Icon = item.icon;
             return <button key={item.name} type="button" className={"nav-item " + (screen === item.name ? "active" : "")} aria-current={screen === item.name ? "page" : undefined} onClick={() => setScreen(item.name)}><Icon size={18} strokeWidth={1.8} /><span>{item.label}</span>{screen === item.name && <ChevronRight size={14} className="nav-tail" />}</button>;
           })}
         </nav>
-        <div className="sidebar-bottom">
-          <div className="sidebar-version">Preview 0.1 · Tauri 2</div>
-        </div>
       </aside>
 
       <main className="workspace">
@@ -690,7 +686,6 @@ function App() {
           onExitAll={() => { void exitPreview(); }}
         />}
 
-        <footer><span>ChatGPT To Codex · desktop preview</span><span><ExternalLink size={13}/> Local-first • Tauri + React</span></footer>
         </div>
         </div>
       </main>

@@ -17,7 +17,6 @@
 .jobs-layout{display:grid;grid-template-columns:minmax(290px,.9fr) minmax(370px,1.1fr);gap:14px;align-items:start;min-width:0}
 .jobs-list-panel,.jobs-detail-panel{border:1px solid #414141;background:#222;border-radius:14px;min-width:0;overflow:hidden}
 .jobs-panel-heading{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:20px 20px 13px}
-.jobs-panel-heading p{font-size:9px;letter-spacing:.14em;color:#929292;font-weight:700;margin:0 0 7px}
 .jobs-panel-heading h2{font-size:15px;color:#eee;font-weight:650;margin:0}
 .jobs-panel-heading .jobs-button{min-height:36px;padding:8px 10px}
 .jobs-count{color:#bbb;background:#2c2c2c;border:1px solid #525252;padding:5px 9px;border-radius:16px;font-size:10px}

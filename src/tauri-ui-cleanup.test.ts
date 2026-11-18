@@ -76,4 +76,27 @@ describe("Tauri compact window and consistent navigation polish", () => {
     expect(diagnostics).not.toContain('className="diag-footer"');
     expect(diagnostics).toContain("강제 잠금 해제");
   });
+
+  it("removes decorative English labels and duplicate page footers without losing action confirmation", () => {
+    const projects = read("desktop/src/ProjectsScreen.tsx");
+    const profiles = read("desktop/src/ProfilesScreen.tsx");
+    const jobs = read("desktop/src/JobsScreen.tsx");
+    const cli = read("desktop/src/CliConsole.tsx");
+    expect(app).not.toContain('className="nav-section-title"');
+    expect(app).not.toContain('className="sidebar-bottom"');
+    expect(app).not.toContain('<footer>');
+    for (const label of ["NEW PROJECT", "WORKSPACE CATALOG", "PROJECT INSPECTOR"])
+      expect(projects).not.toContain(label);
+    for (const label of ["CONFIGURED PROFILES", "PROFILE INSPECTOR"])
+      expect(profiles).not.toContain(label);
+    for (const label of ["DURABLE JOBS", "JOB INSPECTOR"])
+      expect(jobs).not.toContain(label);
+    expect(cli).not.toContain('<span>C2C CLI</span>');
+    expect(projects).not.toContain('className="projects-boundary"');
+    expect(profiles).not.toContain('className="profiles-boundary"');
+    expect(projects).not.toContain('<p>등록 해제는 C2C 목록에서만 제거합니다.');
+    expect(profiles).not.toContain('className="profiles-remove-area"');
+    expect(projects).toContain('실제 프로젝트 파일은 삭제하지 않습니다.');
+    expect(profiles).toContain('실제 파일은 유지됩니다.');
+  });
 });

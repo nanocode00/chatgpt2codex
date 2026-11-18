@@ -132,7 +132,7 @@ export function ProjectsScreen({
 
     {pickedFolder && <section className="projects-register" aria-label="새 프로젝트 등록">
       <header className="projects-panel-head">
-        <div><p>NEW PROJECT</p><h2>프로젝트 등록</h2></div>
+        <div><h2>프로젝트 등록</h2></div>
         <button type="button" className="projects-icon-button" onClick={onCancelBrowse}
           disabled={folderBusy} aria-label="등록 취소"><X size={17}/></button>
       </header>
@@ -163,7 +163,7 @@ export function ProjectsScreen({
     <div className="projects-layout">
       <section className="projects-list-panel" aria-labelledby="projects-list-heading">
         <div className="projects-panel-head">
-          <div><p>WORKSPACE CATALOG</p><h2 id="projects-list-heading">프로젝트 목록</h2></div>
+          <div><h2 id="projects-list-heading">프로젝트 목록</h2></div>
           <span className="projects-count">{filtered.length} / {entries.length}</span>
         </div>
         <div className="projects-search">
@@ -199,7 +199,7 @@ export function ProjectsScreen({
 
       <section className="projects-detail-panel" aria-labelledby="projects-detail-heading">
         <div className="projects-panel-head">
-          <div><p>PROJECT INSPECTOR</p><h2 id="projects-detail-heading">프로젝트 상세</h2></div>
+          <div><h2 id="projects-detail-heading">프로젝트 상세</h2></div>
         </div>
         {!selected ? <div className="projects-empty detail-empty">
           <FolderSearch2 size={27}/>
@@ -238,7 +238,6 @@ export function ProjectsScreen({
             {details.packageHints.length > 0 && <div className="projects-hints"><span>인식된 실행 환경</span><p>{details.packageHints.join(" · ")}</p></div>}
           </div>}
           <div className="projects-detail-bottom">
-            <p>등록 해제는 C2C 목록에서만 제거합니다. 로컬 폴더, Git 저장소 및 소스 파일은 삭제하지 않습니다.</p>
             <button type="button" className="projects-button danger" disabled={!canEdit}
               onClick={() => onRequestUnregister(selected.id)}>
               <Trash2 size={15}/> 등록 해제
@@ -263,8 +262,5 @@ export function ProjectsScreen({
         </div>}
       </section>
     </div>
-    <footer className="projects-boundary"><ShieldCheck size={15}/>
-      등록 해제는 프로젝트 폴더를 삭제하지 않습니다.
-    </footer>
   </div>;
 }

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Activity, AlertCircle, Box, CheckCircle2, ChevronRight, CircleHelp, Code2,
-  Layers, LoaderCircle, Plus, Search, ShieldCheck,
+  Layers, LoaderCircle, Plus, Search,
   Terminal, Trash2, X
 } from "lucide-react";
 import {
@@ -356,7 +356,7 @@ export function ProfilesScreen({
       <div className="profiles-layout">
         <section className="profiles-list-panel" aria-labelledby="profiles-list-heading">
           <div className="profiles-panel-heading">
-            <div><p>CONFIGURED PROFILES</p><h2 id="profiles-list-heading">{listName} 프로필 목록</h2></div>
+            <div><h2 id="profiles-list-heading">{listName} 프로필 목록</h2></div>
             <span className="profiles-count">{filtered.length} / {visibleCount}</span>
           </div>
           <div className="profiles-search">
@@ -390,7 +390,7 @@ export function ProfilesScreen({
 
         <section className="profiles-detail-panel" aria-labelledby="profiles-detail-title">
           <div className="profiles-panel-heading">
-            <div><p>PROFILE INSPECTOR</p><h2 id="profiles-detail-title">{kindName} 상세</h2></div>
+            <div><h2 id="profiles-detail-title">{kindName} 상세</h2></div>
             {selected && <button type="button" className="profiles-button secondary"
               disabled={!available || busy} onClick={() => { void inspect(); }}>
               <Activity size={15}/>{testBusy ? "검사 중..." :
@@ -467,15 +467,9 @@ export function ProfilesScreen({
             {operationError && editorKind === null && <div className="profiles-error" role="alert">
               <AlertCircle size={15}/>{operationError}
             </div>}
-            <div className="profiles-remove-area">
-              <p>{kindName} 등록만 제거합니다. 다른 종류의 동일 별칭 프로필과 실제 설치·파일은 유지됩니다.</p>
-            </div>
           </>}
         </section>
       </div>
-    </div>
-    <div className="profiles-boundary"><ShieldCheck size={16}/>
-      프로필 제거는 실제 Python·Docker 설치 파일을 삭제하지 않습니다.
     </div>
   </div>;
 }

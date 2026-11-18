@@ -25,7 +25,6 @@
 .profiles-layout{display:grid;grid-template-columns:minmax(275px,.85fr) minmax(380px,1.15fr);gap:14px;align-items:start;min-width:0}
 .profiles-list-panel,.profiles-detail-panel,.profiles-editor{background:#222;border:1px solid #3e3e3e;border-radius:14px;min-width:0}
 .profiles-panel-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:20px 21px 14px}
-.profiles-panel-heading p{font-size:9px;font-weight:700;color:#969696;letter-spacing:.13em;margin:0 0 7px}
 .profiles-panel-heading h2{font-size:15px;font-weight:650;margin:0;color:#eee}
 .profiles-count{display:inline-flex;align-items:center;padding:6px 10px;border-radius:20px;background:#303030;border:1px solid #4a4a4a;font-size:10px;color:#c7c7c7}
 .profiles-search{height:41px;display:flex;align-items:center;gap:9px;background:#181818;border:1px solid #494949;border-radius:9px;margin:3px 19px 13px;padding:0 10px;color:#999}
@@ -70,8 +69,6 @@
 .profiles-test-result>div{display:flex;align-items:center;gap:8px}
 .profiles-test-result strong{font-size:12px;font-weight:650}
 .profiles-test-result p{color:#bbb;font-size:11px;line-height:1.65;overflow-wrap:anywhere}
-.profiles-remove-area{display:flex;flex-direction:column;align-items:stretch;gap:12px;border-top:1px solid #444;padding:17px 0 0;margin:20px 21px 0}
-.profiles-remove-area>p{font-size:11px;color:#aaa;line-height:1.65;word-break:keep-all}
 .profiles-remove-confirm{display:flex;flex-direction:column;gap:11px;background:#312727;border:1px solid #725252;border-radius:10px;padding:13px}
 .profiles-remove-confirm strong{font-size:12px;color:#f0cbcb}
 .profiles-remove-confirm p{font-size:11px;line-height:1.6;color:#dfcaca}
@@ -91,8 +88,6 @@
 .profiles-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .profiles-loading{display:flex;gap:9px;align-items:center;padding:9px 20px}
 .profiles-detail-panel>.profiles-error{margin:12px 20px 0}
-.profiles-boundary{display:flex;gap:9px;align-items:flex-start;color:#999;border-top:1px solid #383838;padding:16px 0 2px;font-size:11px;line-height:1.65;word-break:keep-all}
-.profiles-boundary svg{flex:none}
 .profiles-spinning{animation:profiles-spin 1s linear infinite}
 @keyframes profiles-spin{to{transform:rotate(360deg)}}
 

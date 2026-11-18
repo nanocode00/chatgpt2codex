@@ -902,7 +902,7 @@ fn configure_owned_port(next: u16) -> Result<ManagedResult, String> {
             };
             if residual {
                 return Err(format!(
-                    "새 포트 {next}의 시작 확인에 실패했고 실행 기록이나 포트 점유가 남아 있습니다: {error}. +                     안전을 위해 설정을 유지했으니 서버 상태를 점검하세요."
+                    "새 포트 {next}의 시작 확인에 실패했습니다: {error}. 실행 기록이나 포트 점유가 남아 있어 자동 복구하지 않습니다. 서버 상태를 확인하세요."
                 ));
             }
             let rollback_config = persist_port(&root, previous_setting);
